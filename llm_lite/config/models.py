@@ -1,7 +1,7 @@
 from enum import Enum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class DatasetType(str, Enum):
@@ -22,10 +22,6 @@ class TrainingObjective(str, Enum):
 
 class PostTrainingType(str, Enum):
     NONE = "none"
-
-
-class EvaluatorType(str, Enum):
-    EXACT_REPRODUCTION = "exact_reproduction"
 
 
 class InferenceEngine(str, Enum):
@@ -111,12 +107,23 @@ class PostTrainingConfiguration(BaseModel):
     type: PostTrainingType
 
 
-class EvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class ExactReproductionEvaluationConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
-    evaluators: tuple[EvaluatorType, ...]
     prompt: str
     expected_completion: str
+
+
+class EvaluationConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    exact_reproduction: ExactReproductionEvaluationConfiguration | None = None
+
+    @model_validator(mode="after")
+    def require_at_least_one_evaluator(self) -> "EvaluationConfiguration":
+        if self.exact_reproduction is None:
+            raise ValueError("At least one evaluation block must be configured.")
+        return self
 
 
 class InferenceConfiguration(BaseModel):

@@ -31,7 +31,7 @@ model:
 
 training:
   objective: causal_language_modeling
-  maximum_steps: 300
+  maximum_steps: 60
   batch_size_sequences: 1
   optimizer:
     learning_rate: 0.05
@@ -39,16 +39,15 @@ training:
   precision: fp32
   gradient_clip_norm: 1.0
   checkpoint_interval_steps: 100
-  log_interval_steps: 25
+  log_interval_steps: 5
 
 post_training:
   type: none
 
 evaluation:
-  evaluators:
-    - exact_reproduction
-  prompt: ""
-  expected_completion: "hello world\n"
+  exact_reproduction:
+    prompt: ""
+    expected_completion: "hello world\n"
 
 inference:
   engine: naive
@@ -58,4 +57,3 @@ inference:
 
 distributed:
   enabled: false
-

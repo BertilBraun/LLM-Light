@@ -48,3 +48,18 @@ def load_checkpoint(
     if optimizer is not None:
         optimizer.load_state_dict(checkpoint_data["optimizer"])
     return int(checkpoint_data["step"])
+
+
+def load_latest_checkpoint(
+    checkpoint_directory: Path,
+    model: nn.Module,
+    optimizer: Optimizer | None,
+) -> int | None:
+    checkpoint_state = latest_checkpoint(checkpoint_directory=checkpoint_directory)
+    if checkpoint_state is None:
+        return None
+    return load_checkpoint(
+        checkpoint_path=checkpoint_state.checkpoint_path,
+        model=model,
+        optimizer=optimizer,
+    )

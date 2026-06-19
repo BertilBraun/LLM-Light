@@ -1,4 +1,10 @@
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
+from typing import Protocol
+
+from llm_lite.config.models import ExperimentFile
+from llm_lite.pipeline.registry import ArtifactRegistry
 
 
 class StageName(str, Enum):
@@ -10,11 +16,23 @@ class StageName(str, Enum):
     EVALUATION = "evaluation"
 
 
-ORDERED_STAGE_NAMES: tuple[StageName, ...] = (
-    StageName.RAW_DATASET,
-    StageName.TOKENIZER,
-    StageName.TOKENIZED_DATASET,
-    StageName.PACKED_DATASET,
-    StageName.PRETRAINING,
-    StageName.EVALUATION,
-)
+@dataclass(frozen=True)
+class StageOutput:
+    files: dict[str, str]
+    metrics: dict[str, int | float | str | bool]
+
+
+class PipelineStage(Protocol):
+    name: StageName
+    parents: tuple[StageName, ...]
+
+    def configuration_hash(self, experiment_configuration: ExperimentFile) -> str: ...
+
+    def run(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+        artifact_directory: Path,
+    ) -> StageOutput: ...
+
+    def compatible_action(self, registry: ArtifactRegistry) -> str: ...

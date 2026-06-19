@@ -1,0 +1,61 @@
+experiment:
+  name: verify_one_sentence
+  seed: 1337
+  output_dir: runs/verify_one_sentence
+
+dataset:
+  type: inline_text
+  documents:
+    - "hello world\n"
+
+tokenizer:
+  type: character
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+
+packing:
+  context_length: 13
+  add_bos: true
+  add_eos: true
+  pack_documents: false
+
+model:
+  type: dense_gpt
+  dimension: 32
+  layers: 2
+  attention_heads: 2
+  feed_forward_dimension: 32
+  dropout: 0.0
+  tie_embeddings: true
+
+training:
+  objective: causal_language_modeling
+  maximum_steps: 300
+  batch_size_sequences: 1
+  optimizer:
+    learning_rate: 0.05
+    weight_decay: 0.0
+  precision: fp32
+  gradient_clip_norm: 1.0
+  checkpoint_interval_steps: 100
+  log_interval_steps: 25
+
+post_training:
+  type: none
+
+evaluation:
+  evaluators:
+    - exact_reproduction
+  prompt: ""
+  expected_completion: "hello world\n"
+
+inference:
+  engine: naive
+  precision: fp32
+  quantization: none
+  maximum_new_tokens: 20
+
+distributed:
+  enabled: false
+

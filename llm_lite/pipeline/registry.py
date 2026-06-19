@@ -1,0 +1,104 @@
+import os
+from datetime import datetime, timezone
+from pathlib import Path
+
+from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
+from llm_lite.pipeline.hashing import hash_file
+
+
+class ArtifactRegistry:
+    def __init__(self, run_directory: Path) -> None:
+        self.run_directory = run_directory
+        self.artifacts_directory = run_directory / "artifacts"
+        self.artifacts_directory.mkdir(parents=True, exist_ok=True)
+
+    def artifact_directory(self, artifact_type: str) -> Path:
+        artifact_directory = self.artifacts_directory / artifact_type
+        artifact_directory.mkdir(parents=True, exist_ok=True)
+        return artifact_directory
+
+    def manifest_path(self, artifact_type: str) -> Path:
+        return self.artifacts_directory / artifact_type / "manifest.json"
+
+    def read_manifest(self, artifact_type: str) -> ArtifactManifest | None:
+        manifest_path = self.manifest_path(artifact_type=artifact_type)
+        if not manifest_path.exists():
+            return None
+        return ArtifactManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+
+    def write_running_manifest(
+        self,
+        artifact_type: str,
+        configuration_hash: str,
+        parent_hashes: dict[str, str],
+    ) -> None:
+        manifest = ArtifactManifest(
+            artifact_type=artifact_type,
+            artifact_version=1,
+            status=ArtifactStatus.RUNNING,
+            created_at=_utc_now(),
+            configuration_hash=configuration_hash,
+            implementation_version="local",
+            parents=parent_hashes,
+            files={},
+            metrics={},
+        )
+        self._write_manifest_atomically(artifact_type=artifact_type, manifest=manifest)
+
+    def write_complete_manifest(
+        self,
+        artifact_type: str,
+        configuration_hash: str,
+        parent_hashes: dict[str, str],
+        files: dict[str, str],
+        metrics: dict[str, int | float | str | bool],
+    ) -> ArtifactManifest:
+        manifest = ArtifactManifest(
+            artifact_type=artifact_type,
+            artifact_version=1,
+            status=ArtifactStatus.COMPLETE,
+            created_at=_utc_now(),
+            configuration_hash=configuration_hash,
+            implementation_version="local",
+            parents=parent_hashes,
+            files=files,
+            metrics=metrics,
+        )
+        self._write_manifest_atomically(artifact_type=artifact_type, manifest=manifest)
+        return manifest
+
+    def is_compatible(
+        self,
+        artifact_type: str,
+        configuration_hash: str,
+        parent_hashes: dict[str, str],
+    ) -> bool:
+        manifest = self.read_manifest(artifact_type=artifact_type)
+        if manifest is None:
+            return False
+        if manifest.status != ArtifactStatus.COMPLETE:
+            return False
+        if manifest.configuration_hash != configuration_hash:
+            return False
+        if manifest.parents != parent_hashes:
+            return False
+        artifact_directory = self.artifact_directory(artifact_type=artifact_type)
+        return all(
+            (artifact_directory / relative_path).exists()
+            for relative_path in manifest.files.values()
+        )
+
+    def artifact_identifier(self, artifact_type: str) -> str:
+        manifest_path = self.manifest_path(artifact_type=artifact_type)
+        return hash_file(file_path=manifest_path)
+
+    def _write_manifest_atomically(self, artifact_type: str, manifest: ArtifactManifest) -> None:
+        artifact_directory = self.artifact_directory(artifact_type=artifact_type)
+        temporary_path = artifact_directory / "manifest.json.pending"
+        final_path = artifact_directory / "manifest.json"
+        temporary_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+        os.replace(temporary_path, final_path)
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

@@ -1,17 +1,23 @@
 import json
-import shutil
 from pathlib import Path
 
 from llm_lite.pipeline.runner import run_pipeline
 
 
-def test_verify_pipeline_reproduces_sentence() -> None:
-    run_directory = Path("runs/verify_one_sentence")
-    if run_directory.exists():
-        shutil.rmtree(run_directory)
+def test_verify_pipeline_reproduces_sentence(tmp_path: Path) -> None:
+    run_directory = tmp_path / "verify_one_sentence"
+    configuration_path = tmp_path / "verify_one_sentence.yaml"
+    configuration_text = Path("configs/verify_one_sentence.yaml").read_text(encoding="utf-8")
+    configuration_path.write_text(
+        configuration_text.replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
 
     exit_code = run_pipeline(
-        configuration_path=Path("configs/verify_one_sentence.yaml"),
+        configuration_path=configuration_path,
         dry_run=False,
         force_stages=(),
     )

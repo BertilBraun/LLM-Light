@@ -3,13 +3,11 @@ from llm_lite.pipeline.stages.evaluation import EvaluationStage
 from llm_lite.pipeline.stages.packed_dataset import PackedDatasetStage
 from llm_lite.pipeline.stages.pretraining import PretrainingStage
 from llm_lite.pipeline.stages.raw_dataset import RawDatasetStage
-from llm_lite.pipeline.stages.tokenized_dataset import TokenizedDatasetStage
 from llm_lite.pipeline.stages.tokenizer import TokenizerStage
 
 ORDERED_PIPELINE_STAGES: tuple[PipelineStage, ...] = (
     RawDatasetStage(),
     TokenizerStage(),
-    TokenizedDatasetStage(),
     PackedDatasetStage(),
     PretrainingStage(),
     EvaluationStage(),

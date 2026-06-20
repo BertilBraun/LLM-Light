@@ -1,10 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-
 from llm_lite.config.models import ExperimentFile
-from llm_lite.data.datasets import PackedSequence, PackedSequenceDataset
+from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
@@ -37,12 +35,8 @@ class PretrainingStage:
         tokenizer = CharacterTokenizer.load(
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
         )
-        sequences = torch.load(
-            registry.artifact_directory(StageName.PACKED_DATASET.value) / "sequences.pt",
-            weights_only=False,
-        )
-        dataset = PackedSequenceDataset(
-            sequences=[PackedSequence(token_ids=tuple(token_ids)) for token_ids in sequences],
+        dataset = load_packed_sequence_dataset(
+            artifact_directory=registry.artifact_directory(StageName.PACKED_DATASET.value),
         )
         model = DenseGpt(
             model_configuration=experiment_configuration.model,

@@ -67,6 +67,7 @@ class PackingConfiguration(BaseModel):
     add_bos: bool
     add_eos: bool
     pack_documents: bool
+    maximum_shard_tokens: int = Field(gt=0)
 
 
 class DenseGptConfiguration(BaseModel):

@@ -5,7 +5,11 @@ from torch import nn
 from torch.optim import AdamW
 
 from llm_lite.config.loading import load_experiment_configuration
-from llm_lite.data.datasets import PackedSequence, PackedSequenceDataset
+from llm_lite.data.datasets import (
+    PackedSequence,
+    load_packed_sequence_dataset,
+    write_packed_sequence_stream,
+)
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.tokenizer.character import train_character_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
@@ -23,7 +27,15 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         add_pad_token=True,
     )
     token_ids = tokenizer.encode(text="hello world\n", add_bos=True, add_eos=True)
-    dataset = PackedSequenceDataset(sequences=[PackedSequence(token_ids=tuple(token_ids))])
+    packed_artifact_directory = tmp_path / "packed"
+    packed_artifact_directory.mkdir()
+    write_packed_sequence_stream(
+        sequences=[PackedSequence(token_ids=tuple(token_ids))],
+        artifact_directory=packed_artifact_directory,
+        row_length=len(token_ids),
+        maximum_shard_tokens=1024,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=packed_artifact_directory)
     model = DenseGpt(
         model_configuration=experiment_configuration.model,
         vocabulary_size=tokenizer.vocabulary_size,

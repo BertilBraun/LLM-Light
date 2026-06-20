@@ -1,22 +1,21 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-import torch
-
 from llm_lite.config.models import ExperimentFile
+from llm_lite.data.datasets import write_packed_sequence_stream
 from llm_lite.data.packing import pack_token_sequences
 from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
-from llm_lite.pipeline.stages.io import read_tokenized_documents
+from llm_lite.pipeline.stages.io import iter_document_texts
 from llm_lite.tokenizer.character import CharacterTokenizer
 
 
 @dataclass(frozen=True)
 class PackedDatasetStage:
     name: StageName = StageName.PACKED_DATASET
-    parents: tuple[StageName, ...] = (StageName.TOKENIZED_DATASET,)
+    parents: tuple[StageName, ...] = (StageName.RAW_DATASET, StageName.TOKENIZER)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
         return hash_model(model=experiment_configuration.packing)
@@ -31,19 +30,33 @@ class PackedDatasetStage:
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
         )
         if tokenizer.pad_token_id is None:
-            raise ValueError("Packing requires a configured pad token.")
-        tokenized_documents = read_tokenized_documents(registry=registry)
+            raise ValueError('Packing requires a configured pad token.')
+        tokenized_document_stream = (
+            tokenizer.encode(
+                text=document_text,
+                add_bos=experiment_configuration.packing.add_bos,
+                add_eos=experiment_configuration.packing.add_eos,
+            )
+            for document_text in iter_document_texts(registry=registry)
+        )
         sequences = pack_token_sequences(
-            tokenized_documents=tokenized_documents,
+            tokenized_document_stream=tokenized_document_stream,
             context_length=experiment_configuration.packing.context_length,
             pad_token_id=tokenizer.pad_token_id,
         )
-        torch.save(
-            [sequence.token_ids for sequence in sequences], artifact_directory / "sequences.pt"
+        index = write_packed_sequence_stream(
+            sequences=sequences,
+            artifact_directory=artifact_directory,
+            row_length=experiment_configuration.packing.context_length + 1,
+            maximum_shard_tokens=experiment_configuration.packing.maximum_shard_tokens,
         )
         return StageOutput(
-            files={"sequences": "sequences.pt"},
-            metrics={"sequences": len(sequences)},
+            files={'index': 'index.json', 'shards': 'shards'},
+            metrics={
+                'sequences': index.total_sequences,
+                'row_length': index.row_length,
+                'shards': len(index.shards),
+            },
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:

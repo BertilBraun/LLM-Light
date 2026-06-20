@@ -10,7 +10,6 @@ from llm_lite.pipeline.registry import ArtifactRegistry
 class StageName(str, Enum):
     RAW_DATASET = "raw_dataset"
     TOKENIZER = "tokenizer"
-    TOKENIZED_DATASET = "tokenized_dataset"
     PACKED_DATASET = "packed_dataset"
     PRETRAINING = "pretraining"
     EVALUATION = "evaluation"

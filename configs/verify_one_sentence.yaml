@@ -19,6 +19,7 @@ packing:
   add_bos: true
   add_eos: true
   pack_documents: false
+  maximum_shard_tokens: 1024
 
 model:
   type: dense_gpt
@@ -38,7 +39,7 @@ training:
     weight_decay: 0.0
   precision: fp32
   gradient_clip_norm: 1.0
-  checkpoint_interval_steps: 100
+  checkpoint_interval_steps: 10
   log_interval_steps: 5
 
 post_training:

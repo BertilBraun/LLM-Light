@@ -1,5 +1,5 @@
 import json
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 
@@ -81,7 +81,7 @@ class CharacterTokenizer:
 
 
 def train_character_tokenizer(
-    texts: list[str],
+    texts: Iterable[str],
     add_bos_token: bool,
     add_eos_token: bool,
     add_pad_token: bool,
@@ -93,7 +93,10 @@ def train_character_tokenizer(
     for special_token in (bos_token, eos_token, pad_token):
         if special_token is not None:
             token_to_id[special_token] = len(token_to_id)
-    for character in sorted(set("".join(texts))):
+    characters: set[str] = set()
+    for text in texts:
+        characters.update(text)
+    for character in sorted(characters):
         token_to_id[character] = len(token_to_id)
     return CharacterTokenizer(
         token_to_id=token_to_id,

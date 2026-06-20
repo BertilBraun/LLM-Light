@@ -35,7 +35,10 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         row_length=len(token_ids),
         maximum_shard_tokens=1024,
     )
-    dataset = load_packed_sequence_dataset(artifact_directory=packed_artifact_directory)
+    dataset = load_packed_sequence_dataset(
+        artifact_directory=packed_artifact_directory,
+        seed=experiment_configuration.experiment.seed,
+    )
     model = DenseGpt(
         model_configuration=experiment_configuration.model,
         vocabulary_size=tokenizer.vocabulary_size,

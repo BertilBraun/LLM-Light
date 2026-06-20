@@ -14,6 +14,10 @@ tokenizer:
   add_eos_token: true
   add_pad_token: true
 
+preprocessing:
+  transforms:
+    - type: normalize_line_endings
+
 packing:
   context_length: 13
   add_bos: true

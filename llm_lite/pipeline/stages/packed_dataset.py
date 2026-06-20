@@ -8,14 +8,14 @@ from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
-from llm_lite.pipeline.stages.io import iter_document_texts
+from llm_lite.pipeline.stages.io import iter_processed_document_texts
 from llm_lite.tokenizer.character import CharacterTokenizer
 
 
 @dataclass(frozen=True)
 class PackedDatasetStage:
     name: StageName = StageName.PACKED_DATASET
-    parents: tuple[StageName, ...] = (StageName.RAW_DATASET, StageName.TOKENIZER)
+    parents: tuple[StageName, ...] = (StageName.PROCESSED_DATASET, StageName.TOKENIZER)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
         return hash_model(model=experiment_configuration.packing)
@@ -30,14 +30,14 @@ class PackedDatasetStage:
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
         )
         if tokenizer.pad_token_id is None:
-            raise ValueError('Packing requires a configured pad token.')
+            raise ValueError("Packing requires a configured pad token.")
         tokenized_document_stream = (
             tokenizer.encode(
                 text=document_text,
                 add_bos=experiment_configuration.packing.add_bos,
                 add_eos=experiment_configuration.packing.add_eos,
             )
-            for document_text in iter_document_texts(registry=registry)
+            for document_text in iter_processed_document_texts(registry=registry)
         )
         sequences = pack_token_sequences(
             tokenized_document_stream=tokenized_document_stream,
@@ -51,11 +51,11 @@ class PackedDatasetStage:
             maximum_shard_tokens=experiment_configuration.packing.maximum_shard_tokens,
         )
         return StageOutput(
-            files={'index': 'index.json', 'shards': 'shards'},
+            files={"index": "index.json", "shards": "shards"},
             metrics={
-                'sequences': index.total_sequences,
-                'row_length': index.row_length,
-                'shards': len(index.shards),
+                "sequences": index.total_sequences,
+                "row_length": index.row_length,
+                "shards": len(index.shards),
             },
         )
 

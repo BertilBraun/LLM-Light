@@ -33,27 +33,31 @@ def test_write_and_load_file_backed_packed_sequences(tmp_path: Path) -> None:
         maximum_shard_tokens=3,
     )
 
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
 
     assert len(dataset) == 2
-    assert dataset[0].tolist() == [1, 2, 3]
-    assert dataset[1].tolist() == [4, 5, 6]
+    assert sorted(row.tolist() for row in dataset) == [[1, 2, 3], [4, 5, 6]]
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "shards" / "shard_000000.bin").exists()
     assert (tmp_path / "shards" / "shard_000001.bin").exists()
 
 
-def test_file_backed_packed_sequences_reject_out_of_range_index(tmp_path: Path) -> None:
+def test_file_backed_packed_sequences_stream_all_rows(tmp_path: Path) -> None:
     write_packed_sequence_stream(
-        sequences=[PackedSequence(token_ids=(1, 2, 3))],
+        sequences=[
+            PackedSequence(token_ids=(1, 2, 3)),
+            PackedSequence(token_ids=(4, 5, 6)),
+            PackedSequence(token_ids=(7, 8, 9)),
+        ],
         artifact_directory=tmp_path,
         row_length=3,
-        maximum_shard_tokens=10,
+        maximum_shard_tokens=9,
     )
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
 
-    with pytest.raises(IndexError):
-        dataset[1]
+    rows = [row.tolist() for row in dataset]
+
+    assert sorted(rows) == [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
 
 
 def test_file_backed_packed_sequences_reject_uint16_overflow(tmp_path: Path) -> None:
@@ -74,3 +78,50 @@ def test_file_backed_packed_sequences_reject_empty_stream(tmp_path: Path) -> Non
             row_length=3,
             maximum_shard_tokens=10,
         )
+
+
+def test_iterable_dataset_partitions_shards_by_worker(tmp_path: Path) -> None:
+    write_packed_sequence_stream(
+        sequences=[
+            PackedSequence(token_ids=(0, 0, 0)),
+            PackedSequence(token_ids=(1, 1, 1)),
+            PackedSequence(token_ids=(2, 2, 2)),
+            PackedSequence(token_ids=(3, 3, 3)),
+            PackedSequence(token_ids=(4, 4, 4)),
+            PackedSequence(token_ids=(5, 5, 5)),
+        ],
+        artifact_directory=tmp_path,
+        row_length=3,
+        maximum_shard_tokens=6,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+
+    worker_0_shards = dataset.shard_positions_for_worker(worker_id=0, worker_count=2)
+    worker_1_shards = dataset.shard_positions_for_worker(worker_id=1, worker_count=2)
+
+    assert worker_0_shards == (0, 2)
+    assert worker_1_shards == (1,)
+    assert set(worker_0_shards).isdisjoint(worker_1_shards)
+
+
+def test_iterable_dataset_reshuffles_between_epochs(tmp_path: Path) -> None:
+    write_packed_sequence_stream(
+        sequences=[
+            PackedSequence(token_ids=(0, 0, 0)),
+            PackedSequence(token_ids=(1, 1, 1)),
+            PackedSequence(token_ids=(2, 2, 2)),
+            PackedSequence(token_ids=(3, 3, 3)),
+            PackedSequence(token_ids=(4, 4, 4)),
+            PackedSequence(token_ids=(5, 5, 5)),
+        ],
+        artifact_directory=tmp_path,
+        row_length=3,
+        maximum_shard_tokens=6,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+
+    first_epoch_rows = [row.tolist() for row in dataset]
+    second_epoch_rows = [row.tolist() for row in dataset]
+
+    assert sorted(first_epoch_rows) == sorted(second_epoch_rows)
+    assert first_epoch_rows != second_epoch_rows

@@ -1,12 +1,11 @@
-from bisect import bisect_right
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field
-from torch.utils.data import Dataset
+from torch.utils.data import IterableDataset, get_worker_info
 
 
 @dataclass(frozen=True)
@@ -35,42 +34,57 @@ class PackedDatasetIndex(BaseModel):
     shards: tuple[PackedShardIndex, ...]
 
 
-class PackedSequenceDataset(Dataset[torch.Tensor]):
-    def __init__(self, artifact_directory: Path, index: PackedDatasetIndex) -> None:
+class ShardedPackedSequenceDataset(IterableDataset[torch.Tensor]):
+    def __init__(self, artifact_directory: Path, index: PackedDatasetIndex, seed: int) -> None:
         self.artifact_directory = artifact_directory
         self.index = index
-        self.shard_start_indices = tuple(shard.first_sequence_index for shard in self.index.shards)
-        self.mapped_shards: dict[int, torch.Tensor] = {}
+        self.seed = seed
+        self.epoch = 0
 
     def __len__(self) -> int:
         return self.index.total_sequences
 
-    def __getitem__(self, sequence_index: int) -> torch.Tensor:
-        if sequence_index < 0 or sequence_index >= self.index.total_sequences:
-            raise IndexError("Packed sequence index is out of range.")
-        shard = self._shard_for_sequence(sequence_index=sequence_index)
-        shard_tensor = self._mapped_shard(shard=shard)
-        local_sequence_index = sequence_index - shard.first_sequence_index
-        start_index = local_sequence_index * self.index.row_length
-        end_index = start_index + self.index.row_length
-        return shard_tensor[start_index:end_index].to(dtype=torch.long)
+    def set_epoch(self, epoch: int) -> None:
+        if epoch < 0:
+            raise ValueError("Epoch must be non-negative.")
+        self.epoch = epoch
 
-    def _shard_for_sequence(self, sequence_index: int) -> PackedShardIndex:
-        shard_position = bisect_right(self.shard_start_indices, sequence_index) - 1
-        return self.index.shards[shard_position]
+    def __iter__(self) -> Iterator[torch.Tensor]:
+        worker_info = get_worker_info()
+        worker_id = 0 if worker_info is None else worker_info.id
+        worker_count = 1 if worker_info is None else worker_info.num_workers
+        epoch = self.epoch
+        self.epoch += 1
+        generator = torch.Generator().manual_seed(self.seed + epoch)
+        shard_positions = self.shard_positions_for_worker(
+            worker_id=worker_id,
+            worker_count=worker_count,
+        )
+        if not shard_positions:
+            return
+        shard_order = torch.randperm(len(shard_positions), generator=generator).tolist()
+        for shuffled_position in shard_order:
+            shard = self.index.shards[shard_positions[shuffled_position]]
+            shard_tensor = self._load_shard(shard=shard)
+            row_order = torch.randperm(shard.sequence_count, generator=generator).tolist()
+            for row_index in row_order:
+                yield shard_tensor[row_index]
 
-    def _mapped_shard(self, shard: PackedShardIndex) -> torch.Tensor:
-        mapped_shard = self.mapped_shards.get(shard.shard_index)
-        if mapped_shard is not None:
-            return mapped_shard
+    def shard_positions_for_worker(self, worker_id: int, worker_count: int) -> tuple[int, ...]:
+        if worker_id < 0 or worker_count < 1 or worker_id >= worker_count:
+            raise ValueError("Worker id must be inside the worker count.")
+        return tuple(range(worker_id, len(self.index.shards), worker_count))
+
+    def _load_shard(self, shard: PackedShardIndex) -> torch.Tensor:
         mapped_shard = torch.from_file(
             str(self.artifact_directory / shard.path),
             shared=False,
             size=shard.token_count,
             dtype=torch.uint16,
         )
-        self.mapped_shards[shard.shard_index] = mapped_shard
-        return mapped_shard
+        return mapped_shard.reshape(shard.sequence_count, self.index.row_length).to(
+            dtype=torch.long,
+        )
 
 
 class PackedShardWriter:
@@ -173,10 +187,17 @@ def write_packed_sequence_stream(
     return writer.close()
 
 
-def load_packed_sequence_dataset(artifact_directory: Path) -> PackedSequenceDataset:
+def load_packed_sequence_dataset(
+    artifact_directory: Path,
+    seed: int,
+) -> ShardedPackedSequenceDataset:
     index = PackedDatasetIndex.model_validate_json(
         (artifact_directory / "index.json").read_text(encoding="utf-8"),
     )
     if index.dtype != "uint16":
         raise ValueError("Only uint16 packed datasets are supported.")
-    return PackedSequenceDataset(artifact_directory=artifact_directory, index=index)
+    return ShardedPackedSequenceDataset(
+        artifact_directory=artifact_directory,
+        index=index,
+        seed=seed,
+    )

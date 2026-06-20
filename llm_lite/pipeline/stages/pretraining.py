@@ -37,6 +37,7 @@ class PretrainingStage:
         )
         dataset = load_packed_sequence_dataset(
             artifact_directory=registry.artifact_directory(StageName.PACKED_DATASET.value),
+            seed=experiment_configuration.experiment.seed,
         )
         model = DenseGpt(
             model_configuration=experiment_configuration.model,

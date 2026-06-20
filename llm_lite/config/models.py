@@ -1,5 +1,6 @@
 from enum import Enum
 from pathlib import Path
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -10,6 +11,12 @@ class DatasetType(str, Enum):
 
 class TokenizerType(str, Enum):
     CHARACTER = "character"
+
+
+class PreprocessingTransformType(str, Enum):
+    NORMALIZE_LINE_ENDINGS = "normalize_line_endings"
+    MIN_LENGTH = "min_length"
+    MAX_LENGTH = "max_length"
 
 
 class ModelType(str, Enum):
@@ -58,6 +65,40 @@ class TokenizerConfiguration(BaseModel):
     add_bos_token: bool
     add_eos_token: bool
     add_pad_token: bool
+
+
+class NormalizeLineEndingsTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.NORMALIZE_LINE_ENDINGS]
+
+
+class MinLengthTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.MIN_LENGTH]
+    min_characters: int = Field(ge=0)
+
+
+class MaxLengthTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.MAX_LENGTH]
+    max_characters: int = Field(gt=0)
+
+
+PreprocessingTransformConfiguration = Annotated[
+    NormalizeLineEndingsTransformConfiguration
+    | MinLengthTransformConfiguration
+    | MaxLengthTransformConfiguration,
+    Field(discriminator="type"),
+]
+
+
+class PreprocessingConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    transforms: tuple[PreprocessingTransformConfiguration, ...]
 
 
 class PackingConfiguration(BaseModel):
@@ -147,6 +188,7 @@ class ExperimentFile(BaseModel):
 
     experiment: ExperimentConfiguration
     dataset: InlineTextDatasetConfiguration
+    preprocessing: PreprocessingConfiguration
     tokenizer: TokenizerConfiguration
     packing: PackingConfiguration
     model: DenseGptConfiguration

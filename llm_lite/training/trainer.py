@@ -8,7 +8,7 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader
 
 from llm_lite.config.models import TrainingConfiguration
-from llm_lite.data.datasets import PackedSequenceDataset
+from llm_lite.data.datasets import ShardedPackedSequenceDataset
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
 from llm_lite.training.objectives import causal_language_modeling_loss
@@ -24,7 +24,7 @@ class TrainingResult:
 
 def train_model(
     model: nn.Module,
-    dataset: PackedSequenceDataset,
+    dataset: ShardedPackedSequenceDataset,
     training_configuration: TrainingConfiguration,
     artifact_directory: Path,
 ) -> TrainingResult:
@@ -43,9 +43,9 @@ def train_model(
     data_loader = DataLoader(
         dataset,
         batch_size=training_configuration.batch_size_sequences,
-        shuffle=True,
-        generator=torch.Generator().manual_seed(0),
     )
+    data_epoch = 0
+    dataset.set_epoch(data_epoch)
     data_iterator = iter(data_loader)
     metrics_logger = TrainingMetricLogger(artifact_directory=artifact_directory)
     final_loss = float("inf")
@@ -58,6 +58,8 @@ def train_model(
             try:
                 token_batch = next(data_iterator)
             except StopIteration:
+                data_epoch += 1
+                dataset.set_epoch(data_epoch)
                 data_iterator = iter(data_loader)
                 token_batch = next(data_iterator)
             optimizer.zero_grad(set_to_none=True)

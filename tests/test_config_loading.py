@@ -14,6 +14,7 @@ def test_load_verify_configuration() -> None:
 
     assert experiment_configuration.experiment.name == "verify_one_sentence"
     assert experiment_configuration.dataset.documents == ("hello world\n",)
+    assert len(experiment_configuration.preprocessing.transforms) == 1
     exact_reproduction_configuration = experiment_configuration.evaluation.exact_reproduction
 
     assert exact_reproduction_configuration is not None

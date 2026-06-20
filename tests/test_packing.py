@@ -4,6 +4,7 @@ import pytest
 
 from llm_lite.data.datasets import (
     PackedSequence,
+    load_iterable_packed_sequence_dataset,
     load_packed_sequence_dataset,
     write_packed_sequence_stream,
 )
@@ -33,10 +34,11 @@ def test_write_and_load_file_backed_packed_sequences(tmp_path: Path) -> None:
         maximum_shard_tokens=3,
     )
 
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
 
     assert len(dataset) == 2
-    assert sorted(row.tolist() for row in dataset) == [[1, 2, 3], [4, 5, 6]]
+    assert dataset[0].tolist() == [1, 2, 3]
+    assert dataset[1].tolist() == [4, 5, 6]
     assert (tmp_path / "index.json").exists()
     assert (tmp_path / "shards" / "shard_000000.bin").exists()
     assert (tmp_path / "shards" / "shard_000001.bin").exists()
@@ -53,11 +55,42 @@ def test_file_backed_packed_sequences_stream_all_rows(tmp_path: Path) -> None:
         row_length=3,
         maximum_shard_tokens=9,
     )
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
 
-    rows = [row.tolist() for row in dataset]
+    rows = [dataset[index].tolist() for index in range(len(dataset))]
 
     assert sorted(rows) == [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
+
+
+def test_map_packed_sequences_reject_out_of_range_index(tmp_path: Path) -> None:
+    write_packed_sequence_stream(
+        sequences=[PackedSequence(token_ids=(1, 2, 3))],
+        artifact_directory=tmp_path,
+        row_length=3,
+        maximum_shard_tokens=10,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
+
+    with pytest.raises(IndexError):
+        dataset[1]
+
+
+def test_map_packed_sequences_read_shuffled_single_shard_batch(tmp_path: Path) -> None:
+    write_packed_sequence_stream(
+        sequences=[
+            PackedSequence(token_ids=(1, 2, 3)),
+            PackedSequence(token_ids=(4, 5, 6)),
+            PackedSequence(token_ids=(7, 8, 9)),
+        ],
+        artifact_directory=tmp_path,
+        row_length=3,
+        maximum_shard_tokens=9,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path)
+
+    batch = dataset.__getitems__([2, 0, 1])
+
+    assert [row.tolist() for row in batch] == [[7, 8, 9], [1, 2, 3], [4, 5, 6]]
 
 
 def test_file_backed_packed_sequences_reject_uint16_overflow(tmp_path: Path) -> None:
@@ -94,7 +127,7 @@ def test_iterable_dataset_partitions_shards_by_worker(tmp_path: Path) -> None:
         row_length=3,
         maximum_shard_tokens=6,
     )
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+    dataset = load_iterable_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
 
     worker_0_shards = dataset.shard_positions_for_worker(worker_id=0, worker_count=2)
     worker_1_shards = dataset.shard_positions_for_worker(worker_id=1, worker_count=2)
@@ -118,7 +151,7 @@ def test_iterable_dataset_reshuffles_between_epochs(tmp_path: Path) -> None:
         row_length=3,
         maximum_shard_tokens=6,
     )
-    dataset = load_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
+    dataset = load_iterable_packed_sequence_dataset(artifact_directory=tmp_path, seed=0)
 
     first_epoch_rows = [row.tolist() for row in dataset]
     second_epoch_rows = [row.tolist() for row in dataset]

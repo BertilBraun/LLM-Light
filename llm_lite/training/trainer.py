@@ -5,10 +5,9 @@ from time import perf_counter
 import torch
 from torch import nn
 from torch.optim import AdamW
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from llm_lite.config.models import TrainingConfiguration
-from llm_lite.data.datasets import ShardedPackedSequenceDataset
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
 from llm_lite.training.objectives import causal_language_modeling_loss
@@ -24,7 +23,7 @@ class TrainingResult:
 
 def train_model(
     model: nn.Module,
-    dataset: ShardedPackedSequenceDataset,
+    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
     training_configuration: TrainingConfiguration,
     artifact_directory: Path,
 ) -> TrainingResult:
@@ -40,12 +39,15 @@ def train_model(
         optimizer=optimizer,
     )
     start_step = 0 if loaded_checkpoint_step is None else loaded_checkpoint_step
+    is_iterable_dataset = isinstance(dataset, IterableDataset)
     data_loader = DataLoader(
         dataset,
         batch_size=training_configuration.batch_size_sequences,
+        shuffle=not is_iterable_dataset,
+        generator=None if is_iterable_dataset else torch.Generator().manual_seed(0),
     )
     data_epoch = 0
-    dataset.set_epoch(data_epoch)
+    _set_dataset_epoch(dataset=dataset, epoch=data_epoch)
     data_iterator = iter(data_loader)
     metrics_logger = TrainingMetricLogger(artifact_directory=artifact_directory)
     final_loss = float("inf")
@@ -59,7 +61,7 @@ def train_model(
                 token_batch = next(data_iterator)
             except StopIteration:
                 data_epoch += 1
-                dataset.set_epoch(data_epoch)
+                _set_dataset_epoch(dataset=dataset, epoch=data_epoch)
                 data_iterator = iter(data_loader)
                 token_batch = next(data_iterator)
             optimizer.zero_grad(set_to_none=True)
@@ -106,3 +108,9 @@ def train_model(
         checkpoint_path=checkpoint_path,
         resumed_from_step=start_step,
     )
+
+
+def _set_dataset_epoch(dataset: object, epoch: int) -> None:
+    set_epoch = getattr(dataset, "set_epoch", None)
+    if callable(set_epoch):
+        set_epoch(epoch)

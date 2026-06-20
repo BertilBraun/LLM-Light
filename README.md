@@ -57,10 +57,19 @@ and mirrored to TensorBoard scalars.
 ## Packed Data Access
 
 Packed training data is stored as uint16 shard files plus a small JSON index. The
-training dataset is a finite `IterableDataset`: each epoch shuffles shard order,
-loads one shard at a time, shuffles rows within that shard, and yields token rows
-as `torch.long`. Multiworker loading partitions shards by worker id, so workers do
-not duplicate shard reads.
+default training dataset is a map-style `PackedSequenceDataset`, so PyTorch's
+standard `DataLoader` can provide fully random shuffling and worker
+parallelization. An explicit `IterablePackedSequenceDataset` is also available as
+a lower-memory fallback: each epoch shuffles shard order, loads one shard at a
+time, shuffles rows within that shard, and yields token rows as `torch.long`.
+Multiworker iterable loading partitions shards by worker id, so workers do not
+duplicate shard reads.
+
+Compare access modes with:
+
+```bash
+python -m llm_lite.scripts.benchmark_packed_datasets
+```
 
 Temporary local benchmark on 2026-06-20:
 
@@ -70,9 +79,21 @@ passes: 3
 row_length: 128
 batch_size: 64
 shard_sequences: 512
-iterable_sharded_seconds: 1.1236
-in_memory_shuffle_seconds: 0.6466
-iterable_vs_memory_ratio: 1.74x
+num_workers: 0
+map_random_seconds: 0.8451
+map_random_vs_memory_ratio: 3.74x
+iterable_sharded_seconds: 0.2694
+iterable_sharded_vs_memory_ratio: 1.19x
+in_memory_random_seconds: 0.2262
+map_vs_iterable_ratio: 3.14x
+
+num_workers: 2
+map_random_seconds: 9.6713
+map_random_vs_memory_ratio: 1.26x
+iterable_sharded_seconds: 8.0780
+iterable_sharded_vs_memory_ratio: 1.05x
+in_memory_random_seconds: 7.6949
+map_vs_iterable_ratio: 1.20x
 ```
 
 ## Achieved Results
@@ -90,7 +111,7 @@ python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yam
 Results:
 
 ```text
-22 passed
+24 passed
 All checks passed!
 pretraining final_step: 60
 pretraining final_loss: 0.00016388329095207155

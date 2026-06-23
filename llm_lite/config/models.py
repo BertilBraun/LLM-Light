@@ -130,12 +130,30 @@ class OptimizerConfiguration(BaseModel):
     weight_decay: float = Field(ge=0.0)
 
 
+class DataLoaderConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    num_workers: int = Field(ge=0)
+    pin_memory: bool
+    persistent_workers: bool
+    prefetch_factor: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def require_workers_for_worker_options(self) -> "DataLoaderConfiguration":
+        if self.num_workers == 0 and self.persistent_workers:
+            raise ValueError("persistent_workers requires num_workers greater than 0.")
+        if self.num_workers == 0 and self.prefetch_factor is not None:
+            raise ValueError("prefetch_factor requires num_workers greater than 0.")
+        return self
+
+
 class TrainingConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     objective: TrainingObjective
     maximum_steps: int = Field(gt=0)
     batch_size_sequences: int = Field(gt=0)
+    dataloader: DataLoaderConfiguration
     optimizer: OptimizerConfiguration
     precision: Precision
     gradient_clip_norm: float = Field(gt=0.0)

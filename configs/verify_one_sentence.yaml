@@ -38,6 +38,11 @@ training:
   objective: causal_language_modeling
   maximum_steps: 60
   batch_size_sequences: 1
+  dataloader:
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+    prefetch_factor: null
   optimizer:
     learning_rate: 0.05
     weight_decay: 0.0

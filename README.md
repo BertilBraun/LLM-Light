@@ -54,6 +54,19 @@ Pipeline events are written to `runs/verify_one_sentence/pipeline.jsonl`. Traini
 metrics are written to `runs/verify_one_sentence/artifacts/pretraining/metrics.jsonl`
 and mirrored to TensorBoard scalars.
 
+Training dataloader behavior is configured under `training.dataloader`:
+
+```yaml
+dataloader:
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  prefetch_factor: null
+```
+
+`persistent_workers` and `prefetch_factor` require `num_workers` greater than
+zero.
+
 ## Packed Data Access
 
 Packed training data is stored as uint16 shard files plus a small JSON index. The
@@ -111,7 +124,7 @@ python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yam
 Results:
 
 ```text
-24 passed
+26 passed
 All checks passed!
 pretraining final_step: 60
 pretraining final_loss: 0.00016388329095207155

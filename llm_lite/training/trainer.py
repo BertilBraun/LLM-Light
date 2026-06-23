@@ -5,10 +5,11 @@ from time import perf_counter
 import torch
 from torch import nn
 from torch.optim import AdamW
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import Dataset, IterableDataset
 
 from llm_lite.config.models import TrainingConfiguration
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
+from llm_lite.training.data import create_training_data_iterator
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
 from llm_lite.training.objectives import causal_language_modeling_loss
 
@@ -26,6 +27,7 @@ def train_model(
     dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
     training_configuration: TrainingConfiguration,
     artifact_directory: Path,
+    seed: int,
 ) -> TrainingResult:
     optimizer = AdamW(
         model.parameters(),
@@ -39,16 +41,12 @@ def train_model(
         optimizer=optimizer,
     )
     start_step = 0 if loaded_checkpoint_step is None else loaded_checkpoint_step
-    is_iterable_dataset = isinstance(dataset, IterableDataset)
-    data_loader = DataLoader(
-        dataset,
-        batch_size=training_configuration.batch_size_sequences,
-        shuffle=not is_iterable_dataset,
-        generator=None if is_iterable_dataset else torch.Generator().manual_seed(0),
+    data_iterator = create_training_data_iterator(
+        dataset=dataset,
+        batch_size_sequences=training_configuration.batch_size_sequences,
+        dataloader_configuration=training_configuration.dataloader,
+        seed=seed,
     )
-    data_epoch = 0
-    _set_dataset_epoch(dataset=dataset, epoch=data_epoch)
-    data_iterator = iter(data_loader)
     metrics_logger = TrainingMetricLogger(artifact_directory=artifact_directory)
     final_loss = float("inf")
     checkpoint_path = checkpoint_directory / "latest.pt"
@@ -57,13 +55,7 @@ def train_model(
     model.train()
     try:
         for step in range(start_step + 1, training_configuration.maximum_steps + 1):
-            try:
-                token_batch = next(data_iterator)
-            except StopIteration:
-                data_epoch += 1
-                _set_dataset_epoch(dataset=dataset, epoch=data_epoch)
-                data_iterator = iter(data_loader)
-                token_batch = next(data_iterator)
+            token_batch = data_iterator.next_batch()
             optimizer.zero_grad(set_to_none=True)
             model_output = model(token_batch)
             loss = causal_language_modeling_loss(logits=model_output.logits, token_ids=token_batch)
@@ -108,9 +100,3 @@ def train_model(
         checkpoint_path=checkpoint_path,
         resumed_from_step=start_step,
     )
-
-
-def _set_dataset_epoch(dataset: object, epoch: int) -> None:
-    set_epoch = getattr(dataset, "set_epoch", None)
-    if callable(set_epoch):
-        set_epoch(epoch)

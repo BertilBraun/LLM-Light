@@ -47,6 +47,7 @@ class PretrainingStage:
             dataset=dataset,
             training_configuration=experiment_configuration.training,
             artifact_directory=artifact_directory,
+            seed=experiment_configuration.experiment.seed,
         )
         return StageOutput(
             files={

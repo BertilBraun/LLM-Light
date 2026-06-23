@@ -286,10 +286,19 @@ class FixedPromptGenerationEvaluationConfiguration(Configuration):
     maximum_new_tokens: int = Field(default=80, gt=0)
 
 
+class PythonCompletionEvaluationConfiguration(Configuration):
+    tasks_path: Path
+    maximum_tasks: int | None = Field(default=None, gt=0)
+    maximum_new_tokens: int = Field(default=80, gt=0)
+    execution_timeout_seconds: float = Field(default=2.0, gt=0.0)
+    stop_sequences: tuple[str, ...] = ("\n\ndef ", "\nclass ", "\nif __name__")
+
+
 class EvaluationConfiguration(Configuration):
     exact_reproduction: ExactReproductionEvaluationConfiguration | None = None
     perplexity: PerplexityEvaluationConfiguration | None = None
     fixed_prompt_generation: FixedPromptGenerationEvaluationConfiguration | None = None
+    python_completion: PythonCompletionEvaluationConfiguration | None = None
 
 
 class InferenceConfiguration(Configuration):

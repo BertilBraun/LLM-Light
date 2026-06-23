@@ -54,6 +54,7 @@ def test_evaluation_configuration_allows_no_configured_evaluator() -> None:
     assert evaluation_configuration.exact_reproduction is None
     assert evaluation_configuration.perplexity is None
     assert evaluation_configuration.fixed_prompt_generation is None
+    assert evaluation_configuration.python_completion is None
 
 
 def test_evaluation_configuration_rejects_unknown_evaluator() -> None:

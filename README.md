@@ -209,6 +209,30 @@ evaluation:
     maximum_new_tokens: 120
 ```
 
+Python completion evaluation measures raw Python continuation, not
+instruction-to-code prompting. Each JSONL task supplies only Python source as
+the model prompt plus expression checks that are counted after the generated
+continuation parses:
+
+```json
+{"task_id":"reverse_string","prompt":"def reverse_string(text: str) -> str:\n","checks":["reverse_string('abc') == 'cba'","reverse_string('') == ''"]}
+```
+
+Configure shared stop sequences at the evaluator level:
+
+```yaml
+evaluation:
+  python_completion:
+    tasks_path: tests/fixtures/python_completion/tasks.jsonl
+    maximum_tasks: 10
+    maximum_new_tokens: 80
+    execution_timeout_seconds: 2.0
+    stop_sequences:
+      - "\n\ndef "
+      - "\nclass "
+      - "\nif __name__"
+```
+
 Inspect training curves in TensorBoard:
 
 ```bash

@@ -13,6 +13,7 @@ from llm_lite.evaluation.fixed_prompt_generation import (
     evaluate_fixed_prompt_generation,
 )
 from llm_lite.evaluation.perplexity import evaluate_perplexity
+from llm_lite.evaluation.python_completion import evaluate_python_completion
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stages.io import iter_processed_document_texts
 from llm_lite.tokenizer.loading import TextTokenizer
@@ -94,6 +95,31 @@ def run_configured_evaluators(
         )
         _print_fixed_prompt_generation_samples(
             samples=fixed_prompt_generation_result.samples,
+        )
+    python_completion_configuration = evaluation_configuration.python_completion
+    if python_completion_configuration is not None:
+        python_completion_result = evaluate_python_completion(
+            model=model,
+            tokenizer=tokenizer,
+            evaluation_configuration=python_completion_configuration,
+            inference_configuration=inference_configuration,
+        )
+        report["python_completion"] = python_completion_result.model_dump()
+        metrics["python_completion_tasks"] = len(python_completion_result.tasks)
+        metrics["python_completion_parsed_tasks"] = python_completion_result.parsed_tasks
+        metrics["python_completion_executed_tasks"] = python_completion_result.executed_tasks
+        metrics["python_completion_passed_checks"] = python_completion_result.passed_checks
+        metrics["python_completion_total_checks"] = python_completion_result.total_checks
+        metrics["python_completion_pass_rate"] = python_completion_result.pass_rate
+        print(
+            "[eval] python_completion "
+            f"tasks={len(python_completion_result.tasks)} "
+            f"parsed={python_completion_result.parsed_tasks} "
+            f"executed={python_completion_result.executed_tasks} "
+            f"passed_checks={python_completion_result.passed_checks} "
+            f"total_checks={python_completion_result.total_checks} "
+            f"pass_rate={python_completion_result.pass_rate:.4f}",
+            flush=True,
         )
     return EvaluationRunResult(report=report, metrics=metrics)
 

@@ -8,7 +8,10 @@ from llm_lite.config.models import (
     PackingConfiguration,
 )
 from llm_lite.evaluation.exact_reproduction import evaluate_exact_reproduction
-from llm_lite.evaluation.fixed_prompt_generation import evaluate_fixed_prompt_generation
+from llm_lite.evaluation.fixed_prompt_generation import (
+    FixedPromptGenerationSample,
+    evaluate_fixed_prompt_generation,
+)
 from llm_lite.evaluation.perplexity import evaluate_perplexity
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stages.io import iter_processed_document_texts
@@ -88,4 +91,23 @@ def run_configured_evaluators(
             f"[eval] fixed_prompt_generation samples={len(fixed_prompt_generation_result.samples)}",
             flush=True,
         )
+        _print_fixed_prompt_generation_samples(
+            samples=fixed_prompt_generation_result.samples,
+        )
     return EvaluationRunResult(report=report, metrics=metrics)
+
+
+def _print_fixed_prompt_generation_samples(
+    samples: tuple[FixedPromptGenerationSample, ...],
+) -> None:
+    for sample_index, sample in enumerate(samples):
+        print(
+            f"[eval-sample {sample_index}] prompt:",
+            flush=True,
+        )
+        print(sample.prompt, flush=True)
+        print(
+            f"[eval-sample {sample_index}] generated:",
+            flush=True,
+        )
+        print(sample.generated_text, flush=True)

@@ -60,6 +60,15 @@ Run the byte-level BPE verification pipeline:
 python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
 ```
 
+Generate from a completed run:
+
+```bash
+python -m llm_lite.scripts.generate \
+  --config configs/tinystories_hf_smoke.yaml \
+  --prompt "Once upon a time" \
+  --maximum-new-tokens 80
+```
+
 ## Local Text Data
 
 Use `dataset.type: local_text` to ingest UTF-8 text files from explicit paths,
@@ -192,6 +201,10 @@ python -m tensorboard.main --logdir runs/verify_one_sentence/artifacts/pretraini
 Pipeline events are written to `runs/verify_one_sentence/pipeline.jsonl`. Training
 metrics are written to `runs/verify_one_sentence/artifacts/pretraining/metrics.jsonl`
 and mirrored to TensorBoard scalars.
+
+Increasing `training.maximum_steps` on a compatible pretraining run resumes from the
+latest checkpoint instead of restarting. Architecture, tokenizer, packed data, optimizer,
+batch, precision, and gradient-clipping changes still invalidate pretraining.
 
 Training dataloader behavior is configured under `training.dataloader`:
 

@@ -317,13 +317,15 @@ post_training:
   type: none
 
 evaluation:
-  evaluators:
-    - type: perplexity
-    - type: fixed_prompt_generation
-  prompts:
-    - "Once upon a time"
-    - "The little dog was afraid because"
-    - "Lily wanted to help her friend"
+  perplexity:
+    split: validation
+    maximum_documents: 1000
+  fixed_prompt_generation:
+    prompts:
+      - "Once upon a time"
+      - "The little dog was afraid because"
+      - "Lily wanted to help her friend"
+    maximum_new_tokens: 128
 
 inference:
   engine: kv_cache
@@ -595,28 +597,12 @@ The fundamental preprocessing object is a document:
 class Document:
     document_id: str
     text: str
-    metadata: dict[str, object]
+    split: str | None
 ```
 
-Metadata can include:
-
-* source
-* path
-* repository
-* language
-* license
-* original byte size
-* document hash
-* dataset-specific attributes
-
-Documents should preserve enough provenance to support:
-
-* debugging
-* deduplication
-* split construction
-* leakage checks
-* dataset statistics
-* later filtering experiments
+Processed corpora are split-sharded text artifacts rather than per-document JSON records.
+Each split is a directory containing compressed tar shards of plain `.txt` files. Corpus-level
+manifests record aggregate provenance and statistics.
 
 ---
 
@@ -796,6 +782,10 @@ class Tokenizer(Protocol):
 The tokenizer is trained independently for each experiment using the configured tokenizer-training dataset.
 
 A TinyStories tokenizer and a Python tokenizer use the same implementation but learn different vocabularies and merge rules.
+
+Byte-level BPE training uses a bounded deterministic prefix sample configured by maximum
+training documents and/or maximum training bytes. This keeps tokenizer training independent
+of full-corpus size while preserving deterministic merge construction.
 
 The central correctness invariant is:
 

@@ -23,11 +23,16 @@ class PretrainingStage:
     parents: tuple[StageName, ...] = (StageName.PACKED_DATASET, StageName.TOKENIZER)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
+        training_contract = experiment_configuration.training.model_dump(mode="json")
+        training_contract.pop("maximum_steps")
+        training_contract.pop("checkpoint_interval_steps")
+        training_contract.pop("log_interval_steps")
+        training_contract.pop("evaluation")
         return hash_json_value(
             value={
                 "logging_schema_version": 1,
                 "model": experiment_configuration.model.model_dump(mode="json"),
-                "training": experiment_configuration.training.model_dump(mode="json"),
+                "training_contract": training_contract,
             },
         )
 
@@ -48,6 +53,8 @@ class PretrainingStage:
             model_configuration=experiment_configuration.model,
             vocabulary_size=tokenizer.vocabulary_size,
         )
+        parameter_count = _parameter_count(model=model)
+        trainable_parameter_count = _trainable_parameter_count(model=model)
         result = train_model(
             model=model,
             dataset=dataset,
@@ -76,6 +83,9 @@ class PretrainingStage:
                 "final_step": result.final_step,
                 "final_loss": result.final_loss,
                 "resumed_from_step": result.resumed_from_step,
+                "model_parameters": parameter_count,
+                "trainable_model_parameters": trainable_parameter_count,
+                "requested_maximum_steps": experiment_configuration.training.maximum_steps,
             },
         )
 
@@ -125,6 +135,14 @@ def _training_evaluation_callback(
         return evaluation_path
 
     return run_training_evaluation
+
+
+def _parameter_count(model: nn.Module) -> int:
+    return sum(parameter.numel() for parameter in model.parameters())
+
+
+def _trainable_parameter_count(model: nn.Module) -> int:
+    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
 
 
 def _print_training_evaluation(

@@ -52,7 +52,7 @@ def _raw_metrics(corpus_manifest: TextShardCorpusManifest) -> dict[str, int]:
     total_characters = sum(split.characters for split in corpus_manifest.splits)
     total_bytes = sum(split.bytes for split in corpus_manifest.splits)
     shard_count = sum(split.shards for split in corpus_manifest.splits)
-    return {
+    metrics = {
         "raw_documents": document_count,
         "processed_documents": document_count,
         "rejected_documents": 0,
@@ -60,3 +60,7 @@ def _raw_metrics(corpus_manifest: TextShardCorpusManifest) -> dict[str, int]:
         "total_bytes": total_bytes,
         "shards": shard_count,
     }
+    for split_manifest in corpus_manifest.splits:
+        metrics[f"split_{split_manifest.split}_documents"] = split_manifest.documents
+        metrics[f"split_{split_manifest.split}_bytes"] = split_manifest.bytes
+    return metrics

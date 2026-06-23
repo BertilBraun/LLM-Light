@@ -56,8 +56,10 @@ class PackedDatasetStage:
             files={"index": "index.json", "shards": "shards"},
             metrics={
                 "sequences": index.total_sequences,
+                "total_tokens": index.total_tokens,
                 "row_length": index.row_length,
                 "shards": len(index.shards),
+                "training_split": "all" if split is None else split,
             },
         )
 

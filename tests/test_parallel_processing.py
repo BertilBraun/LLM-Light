@@ -270,6 +270,7 @@ def test_performance_metrics_artifact_is_written(tmp_path: Path) -> None:
     assert records[0]["duration_seconds"] >= 0.0
     assert records[0]["worker_count"] == 2
     assert records[0]["metrics"]["pair_count_seconds"] == 0.1
+    assert list((tmp_path / "tensorboard").glob("events.out.tfevents.*"))
 
 
 def _documents(artifact_directory: Path) -> list[Document]:

@@ -1,3 +1,4 @@
+from array import array
 from bisect import bisect_right
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
@@ -183,8 +184,7 @@ class PackedShardWriter:
         if self._should_open_next_shard():
             self._open_next_shard()
         assert self.current_shard_file is not None
-        token_tensor = torch.tensor(sequence.token_ids, dtype=torch.uint16)
-        token_tensor.numpy().tofile(self.current_shard_file)
+        array("H", sequence.token_ids).tofile(self.current_shard_file)
         self.current_shard_sequences += 1
         self.total_sequences += 1
 

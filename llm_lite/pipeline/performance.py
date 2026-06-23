@@ -5,6 +5,9 @@ from pathlib import Path
 from types import TracebackType
 
 from pydantic import BaseModel, ConfigDict, Field
+from torch.utils.tensorboard import SummaryWriter
+
+PIPELINE_TENSORBOARD_DIRECTORY_NAME = "tensorboard"
 
 
 class StagePerformanceRecord(BaseModel):
@@ -64,7 +67,11 @@ class StagePerformanceTimer:
 class PipelinePerformanceLogger:
     def __init__(self, run_directory: Path) -> None:
         self.performance_path = run_directory / "performance.jsonl"
+        self.tensorboard_directory = run_directory / PIPELINE_TENSORBOARD_DIRECTORY_NAME
+        self.stage_index = 0
         run_directory.mkdir(parents=True, exist_ok=True)
+        self.tensorboard_directory.mkdir(parents=True, exist_ok=True)
+        self.summary_writer = SummaryWriter(log_dir=str(self.tensorboard_directory))
 
     def measure_stage(self, stage_name: str) -> StagePerformanceTimer:
         return StagePerformanceTimer(stage_name=stage_name)
@@ -74,21 +81,62 @@ class PipelinePerformanceLogger:
         timing: StagePerformanceTiming,
         metrics: dict[str, int | float | str | bool],
     ) -> None:
+        worker_count = _worker_count(metrics=metrics)
         self.write(
             performance_record=StagePerformanceRecord(
                 stage_name=timing.stage_name,
                 started_at=timing.started_at,
                 ended_at=timing.ended_at,
                 duration_seconds=timing.duration_seconds,
-                worker_count=_worker_count(metrics=metrics),
+                worker_count=worker_count,
                 metrics=metrics,
             ),
         )
+        self._write_tensorboard_scalars(
+            timing=timing,
+            worker_count=worker_count,
+            metrics=metrics,
+        )
+        self.stage_index += 1
 
     def write(self, performance_record: StagePerformanceRecord) -> None:
         with self.performance_path.open("a", encoding="utf-8") as performance_file:
             performance_file.write(performance_record.model_dump_json())
             performance_file.write("\n")
+
+    def close(self) -> None:
+        self.summary_writer.close()
+
+    def _write_tensorboard_scalars(
+        self,
+        timing: StagePerformanceTiming,
+        worker_count: int,
+        metrics: dict[str, int | float | str | bool],
+    ) -> None:
+        self.summary_writer.add_scalar(
+            f"pipeline/{timing.stage_name}/duration_seconds",
+            timing.duration_seconds,
+            self.stage_index,
+        )
+        self.summary_writer.add_scalar(
+            f"pipeline/{timing.stage_name}/workers",
+            worker_count,
+            self.stage_index,
+        )
+        for metric_name, metric_value in sorted(metrics.items()):
+            match metric_value:
+                case bool():
+                    scalar_value = float(metric_value)
+                case int() | float():
+                    scalar_value = metric_value
+                case _:
+                    continue
+            self.summary_writer.add_scalar(
+                f"pipeline/{timing.stage_name}/{metric_name}",
+                scalar_value,
+                self.stage_index,
+            )
+        self.summary_writer.flush()
 
 
 def _worker_count(metrics: dict[str, int | float | str | bool]) -> int:

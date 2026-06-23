@@ -57,14 +57,17 @@ def run_pipeline(
         experiment_configuration.model_dump_json(indent=2),
         encoding="utf-8",
     )
-    _execute_pipeline(
-        experiment_configuration=experiment_configuration,
-        registry=registry,
-        event_logger=event_logger,
-        performance_logger=performance_logger,
-        stages=ORDERED_PIPELINE_STAGES,
-        force_stage_names=force_stage_names,
-    )
+    try:
+        _execute_pipeline(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
+            event_logger=event_logger,
+            performance_logger=performance_logger,
+            stages=ORDERED_PIPELINE_STAGES,
+            force_stage_names=force_stage_names,
+        )
+    finally:
+        performance_logger.close()
     return 0
 
 

@@ -3,6 +3,7 @@ from typing import Protocol, runtime_checkable
 
 import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data.distributed import DistributedSampler
 
 from llm_lite.config.models import DataLoaderConfiguration
 
@@ -12,14 +13,26 @@ class EpochAwareDataset(Protocol):
     def set_epoch(self, epoch: int) -> None: ...
 
 
+@runtime_checkable
+class EpochAwareSampler(Protocol):
+    def set_epoch(self, epoch: int) -> None: ...
+
+
+@dataclass(frozen=True)
+class DistributedDataAssignment:
+    rank: int
+    world_size: int
+
+
 @dataclass
 class InfiniteDataIterator:
     data_loader: DataLoader[torch.Tensor]
     dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor]
+    sampler: EpochAwareSampler | None
     epoch: int
 
     def __post_init__(self) -> None:
-        self._set_dataset_epoch()
+        self._set_epoch()
         self._iterator = iter(self.data_loader)
 
     def next_batch(self) -> torch.Tensor:
@@ -27,16 +40,18 @@ class InfiniteDataIterator:
             return next(self._iterator)
         except StopIteration:
             self.epoch += 1
-            self._set_dataset_epoch()
+            self._set_epoch()
             self._iterator = iter(self.data_loader)
             return next(self._iterator)
 
-    def _set_dataset_epoch(self) -> None:
+    def _set_epoch(self) -> None:
         match self.dataset:
             case EpochAwareDataset():
                 self.dataset.set_epoch(self.epoch)
             case _:
-                return
+                pass
+        if self.sampler is not None:
+            self.sampler.set_epoch(self.epoch)
 
 
 def create_training_data_iterator(
@@ -44,14 +59,21 @@ def create_training_data_iterator(
     batch_size_sequences: int,
     dataloader_configuration: DataLoaderConfiguration,
     seed: int,
+    distributed_data_assignment: DistributedDataAssignment | None = None,
 ) -> InfiniteDataIterator:
     is_iterable_dataset = isinstance(dataset, IterableDataset)
+    sampler = _distributed_sampler(
+        dataset=dataset,
+        seed=seed,
+        distributed_data_assignment=distributed_data_assignment,
+    )
     if dataloader_configuration.num_workers > 0:
         if dataloader_configuration.prefetch_factor is None:
             data_loader = DataLoader(
                 dataset,
                 batch_size=batch_size_sequences,
-                shuffle=not is_iterable_dataset,
+                shuffle=not is_iterable_dataset and sampler is None,
+                sampler=sampler,
                 generator=None if is_iterable_dataset else torch.Generator().manual_seed(seed),
                 num_workers=dataloader_configuration.num_workers,
                 pin_memory=dataloader_configuration.pin_memory,
@@ -61,7 +83,8 @@ def create_training_data_iterator(
             data_loader = DataLoader(
                 dataset,
                 batch_size=batch_size_sequences,
-                shuffle=not is_iterable_dataset,
+                shuffle=not is_iterable_dataset and sampler is None,
+                sampler=sampler,
                 generator=None if is_iterable_dataset else torch.Generator().manual_seed(seed),
                 num_workers=dataloader_configuration.num_workers,
                 pin_memory=dataloader_configuration.pin_memory,
@@ -72,9 +95,29 @@ def create_training_data_iterator(
         data_loader = DataLoader(
             dataset,
             batch_size=batch_size_sequences,
-            shuffle=not is_iterable_dataset,
+            shuffle=not is_iterable_dataset and sampler is None,
+            sampler=sampler,
             generator=None if is_iterable_dataset else torch.Generator().manual_seed(seed),
             num_workers=dataloader_configuration.num_workers,
             pin_memory=dataloader_configuration.pin_memory,
         )
-    return InfiniteDataIterator(data_loader=data_loader, dataset=dataset, epoch=0)
+    return InfiniteDataIterator(data_loader=data_loader, dataset=dataset, sampler=sampler, epoch=0)
+
+
+def _distributed_sampler(
+    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    seed: int,
+    distributed_data_assignment: DistributedDataAssignment | None,
+) -> DistributedSampler[torch.Tensor] | None:
+    if distributed_data_assignment is None:
+        return None
+    if isinstance(dataset, IterableDataset):
+        return None
+    return DistributedSampler(
+        dataset=dataset,
+        num_replicas=distributed_data_assignment.world_size,
+        rank=distributed_data_assignment.rank,
+        shuffle=True,
+        seed=seed,
+        drop_last=False,
+    )

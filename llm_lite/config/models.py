@@ -63,6 +63,22 @@ class QuantizationType(str, Enum):
     INT4_WEIGHT_ONLY = "int4_weight_only"
 
 
+class DistributedBackend(str, Enum):
+    GLOO = "gloo"
+    NCCL = "nccl"
+
+
+class DistributedStrategy(str, Enum):
+    SINGLE_PROCESS = "single_process"
+    DATA_PARALLEL = "data_parallel"
+    FULLY_SHARDED_DATA_PARALLEL = "fully_sharded_data_parallel"
+
+
+class DistributedCheckpointType(str, Enum):
+    FULL = "full"
+    SHARDED = "sharded"
+
+
 class Configuration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -314,8 +330,61 @@ class InferenceConfiguration(Configuration):
     maximum_new_tokens: int = Field(default=80, gt=0)
 
 
+class SimulatedNodesConfiguration(Configuration):
+    count: int = Field(default=1, gt=0)
+    processes_per_node: int = Field(default=1, gt=0)
+
+
+class ParallelismConfiguration(Configuration):
+    data: int = Field(default=1, gt=0)
+    tensor: int = Field(default=1, gt=0)
+    pipeline: int = Field(default=1, gt=0)
+    context: int = Field(default=1, gt=0)
+    expert: int = Field(default=1, gt=0)
+
+
+class DistributedCheckpointConfiguration(Configuration):
+    type: DistributedCheckpointType = DistributedCheckpointType.FULL
+    save_rank_local_state: bool = True
+
+
 class DistributedConfiguration(Configuration):
     enabled: bool = False
+    backend: DistributedBackend = DistributedBackend.GLOO
+    strategy: DistributedStrategy = DistributedStrategy.SINGLE_PROCESS
+    world_size: int = Field(default=1, gt=0)
+    simulated_nodes: SimulatedNodesConfiguration = SimulatedNodesConfiguration()
+    parallelism: ParallelismConfiguration = ParallelismConfiguration()
+    checkpoint: DistributedCheckpointConfiguration = DistributedCheckpointConfiguration()
+
+    @model_validator(mode="after")
+    def require_consistent_distributed_configuration(self) -> DistributedConfiguration:
+        if not self.enabled and self.strategy is not DistributedStrategy.SINGLE_PROCESS:
+            raise ValueError("Disabled distributed configuration must use single_process strategy.")
+        if self.enabled and self.strategy is DistributedStrategy.SINGLE_PROCESS:
+            raise ValueError("Enabled distributed configuration requires a distributed strategy.")
+        if self.simulated_nodes.count * self.simulated_nodes.processes_per_node != self.world_size:
+            raise ValueError(
+                "simulated_nodes count multiplied by processes_per_node must match world_size."
+            )
+        parallelism_product = (
+            self.parallelism.data
+            * self.parallelism.tensor
+            * self.parallelism.pipeline
+            * self.parallelism.context
+            * self.parallelism.expert
+        )
+        if parallelism_product != self.world_size:
+            raise ValueError("Parallelism dimensions must multiply to world_size.")
+        if self.parallelism.tensor != 1:
+            raise ValueError("Tensor parallelism greater than 1 is not implemented.")
+        if self.parallelism.pipeline != 1:
+            raise ValueError("Pipeline parallelism greater than 1 is not implemented.")
+        if self.parallelism.context != 1:
+            raise ValueError("Context parallelism greater than 1 is not implemented.")
+        if self.parallelism.expert != 1:
+            raise ValueError("Expert parallelism greater than 1 is not implemented.")
+        return self
 
 
 class ExperimentFile(Configuration):

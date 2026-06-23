@@ -11,6 +11,10 @@ class TrainingScalar(str, Enum):
     LEARNING_RATE = "train/learning_rate"
     GRADIENT_NORM = "train/gradient_norm"
     TOKENS_PER_SECOND = "train/tokens_per_second"
+    DISTRIBUTED_WORLD_SIZE = "distributed/world_size"
+    DISTRIBUTED_GLOBAL_TOKENS_PER_SECOND = "distributed/global_tokens_per_second"
+    DISTRIBUTED_RANK_TOKENS_PER_SECOND = "distributed/rank_tokens_per_second"
+    DISTRIBUTED_CHECKPOINT_TIME = "distributed/checkpoint_time"
 
 
 class TrainingMetricRecord(BaseModel):
@@ -22,6 +26,11 @@ class TrainingMetricRecord(BaseModel):
     gradient_norm: float
     elapsed_seconds: float
     tokens_per_second: float
+    distributed_world_size: int | None = None
+    distributed_global_tokens_per_second: float | None = None
+    distributed_rank_tokens_per_second: float | None = None
+    distributed_checkpoint_time: float | None = None
+    distributed_strategy: str | None = None
 
 
 class TrainingMetricLogger:
@@ -64,6 +73,30 @@ class TrainingMetricLogger:
             metric_record.tokens_per_second,
             metric_record.step,
         )
+        if metric_record.distributed_world_size is not None:
+            self.summary_writer.add_scalar(
+                TrainingScalar.DISTRIBUTED_WORLD_SIZE.value,
+                metric_record.distributed_world_size,
+                metric_record.step,
+            )
+        if metric_record.distributed_global_tokens_per_second is not None:
+            self.summary_writer.add_scalar(
+                TrainingScalar.DISTRIBUTED_GLOBAL_TOKENS_PER_SECOND.value,
+                metric_record.distributed_global_tokens_per_second,
+                metric_record.step,
+            )
+        if metric_record.distributed_rank_tokens_per_second is not None:
+            self.summary_writer.add_scalar(
+                TrainingScalar.DISTRIBUTED_RANK_TOKENS_PER_SECOND.value,
+                metric_record.distributed_rank_tokens_per_second,
+                metric_record.step,
+            )
+        if metric_record.distributed_checkpoint_time is not None:
+            self.summary_writer.add_scalar(
+                TrainingScalar.DISTRIBUTED_CHECKPOINT_TIME.value,
+                metric_record.distributed_checkpoint_time,
+                metric_record.step,
+            )
         self.summary_writer.flush()
 
     def close(self) -> None:
@@ -77,6 +110,11 @@ def create_training_metric_record(
     gradient_norm: float,
     started_at_seconds: float,
     tokens_processed: int,
+    distributed_world_size: int | None = None,
+    distributed_global_tokens_per_second: float | None = None,
+    distributed_rank_tokens_per_second: float | None = None,
+    distributed_checkpoint_time: float | None = None,
+    distributed_strategy: str | None = None,
 ) -> TrainingMetricRecord:
     elapsed_seconds = time.perf_counter() - started_at_seconds
     tokens_per_second = tokens_processed / max(elapsed_seconds, 1e-9)
@@ -87,4 +125,9 @@ def create_training_metric_record(
         gradient_norm=gradient_norm,
         elapsed_seconds=elapsed_seconds,
         tokens_per_second=tokens_per_second,
+        distributed_world_size=distributed_world_size,
+        distributed_global_tokens_per_second=distributed_global_tokens_per_second,
+        distributed_rank_tokens_per_second=distributed_rank_tokens_per_second,
+        distributed_checkpoint_time=distributed_checkpoint_time,
+        distributed_strategy=distributed_strategy,
     )

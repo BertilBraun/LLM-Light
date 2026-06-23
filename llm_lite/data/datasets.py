@@ -105,10 +105,25 @@ class PackedSequenceDataset(Dataset[torch.Tensor]):
 
 
 class IterablePackedSequenceDataset(IterableDataset[torch.Tensor]):
-    def __init__(self, artifact_directory: Path, index: PackedDatasetIndex, seed: int) -> None:
+    def __init__(
+        self,
+        artifact_directory: Path,
+        index: PackedDatasetIndex,
+        seed: int,
+        distributed_rank: int = 0,
+        distributed_world_size: int = 1,
+    ) -> None:
+        if (
+            distributed_rank < 0
+            or distributed_world_size < 1
+            or distributed_rank >= distributed_world_size
+        ):
+            raise ValueError("Distributed rank must be inside distributed world size.")
         self.artifact_directory = artifact_directory
         self.index = index
         self.seed = seed
+        self.distributed_rank = distributed_rank
+        self.distributed_world_size = distributed_world_size
         self.epoch = 0
 
     def __len__(self) -> int:
@@ -143,7 +158,9 @@ class IterablePackedSequenceDataset(IterableDataset[torch.Tensor]):
     def shard_positions_for_worker(self, worker_id: int, worker_count: int) -> tuple[int, ...]:
         if worker_id < 0 or worker_count < 1 or worker_id >= worker_count:
             raise ValueError("Worker id must be inside the worker count.")
-        return tuple(range(worker_id, len(self.index.shards), worker_count))
+        global_worker_id = self.distributed_rank * worker_count + worker_id
+        global_worker_count = self.distributed_world_size * worker_count
+        return tuple(range(global_worker_id, len(self.index.shards), global_worker_count))
 
     def _load_shard(self, shard: PackedShardIndex) -> torch.Tensor:
         mapped_shard = torch.from_file(
@@ -274,11 +291,15 @@ def load_packed_sequence_dataset(
 def load_iterable_packed_sequence_dataset(
     artifact_directory: Path,
     seed: int,
+    distributed_rank: int = 0,
+    distributed_world_size: int = 1,
 ) -> IterablePackedSequenceDataset:
     return IterablePackedSequenceDataset(
         artifact_directory=artifact_directory,
         index=_load_packed_dataset_index(artifact_directory=artifact_directory),
         seed=seed,
+        distributed_rank=distributed_rank,
+        distributed_world_size=distributed_world_size,
     )
 
 

@@ -8,9 +8,22 @@ from torch import nn
 from torch.optim import AdamW, Optimizer
 from torch.utils.data import Dataset, IterableDataset
 
-from llm_lite.config.models import TrainingConfiguration
-from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
-from llm_lite.training.data import create_training_data_iterator
+from llm_lite.config.models import DistributedConfiguration, TrainingConfiguration
+from llm_lite.training.checkpoint import (
+    finalize_sharded_checkpoint,
+    load_latest_checkpoint,
+    load_latest_sharded_checkpoint,
+    save_checkpoint,
+    save_rank_zero_full_checkpoint_bridge,
+    save_sharded_rank_checkpoint,
+)
+from llm_lite.training.data import DistributedDataAssignment, create_training_data_iterator
+from llm_lite.training.distributed import (
+    DistributedRuntime,
+    initialize_distributed_runtime,
+    prepare_model_for_distributed_training,
+    unwrap_distributed_model,
+)
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
 from llm_lite.training.objectives import causal_language_modeling_loss
 
@@ -122,6 +135,218 @@ def train_model(
         resumed_from_step=start_step,
         evaluation_path=evaluation_path,
     )
+
+
+def train_model_distributed(
+    model: nn.Module,
+    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    training_configuration: TrainingConfiguration,
+    distributed_configuration: DistributedConfiguration,
+    artifact_directory: Path,
+    seed: int,
+    evaluation_callback: TrainingEvaluationCallback | None,
+    model_configuration_hash: str,
+) -> TrainingResult:
+    distributed_runtime = initialize_distributed_runtime(
+        distributed_configuration=distributed_configuration,
+        artifact_directory=artifact_directory,
+    )
+    try:
+        return _train_model_distributed_initialized(
+            model=model,
+            dataset=dataset,
+            training_configuration=training_configuration,
+            distributed_configuration=distributed_configuration,
+            distributed_runtime=distributed_runtime,
+            artifact_directory=artifact_directory,
+            seed=seed,
+            evaluation_callback=evaluation_callback,
+            model_configuration_hash=model_configuration_hash,
+        )
+    finally:
+        distributed_runtime.close()
+
+
+def _train_model_distributed_initialized(
+    model: nn.Module,
+    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    training_configuration: TrainingConfiguration,
+    distributed_configuration: DistributedConfiguration,
+    distributed_runtime: DistributedRuntime,
+    artifact_directory: Path,
+    seed: int,
+    evaluation_callback: TrainingEvaluationCallback | None,
+    model_configuration_hash: str,
+) -> TrainingResult:
+    model = prepare_model_for_distributed_training(
+        model=model,
+        distributed_runtime=distributed_runtime,
+    )
+    optimizer = AdamW(
+        model.parameters(),
+        lr=training_configuration.optimizer.learning_rate,
+        weight_decay=training_configuration.optimizer.weight_decay,
+    )
+    checkpoint_directory = artifact_directory / "checkpoints"
+    loaded_checkpoint_step = load_latest_sharded_checkpoint(
+        checkpoint_directory=checkpoint_directory,
+        model=model,
+        optimizer=optimizer,
+        rank=distributed_runtime.rank,
+    )
+    _apply_current_optimizer_configuration(
+        optimizer=optimizer,
+        training_configuration=training_configuration,
+    )
+    start_step = 0 if loaded_checkpoint_step is None else loaded_checkpoint_step
+    data_iterator = create_training_data_iterator(
+        dataset=dataset,
+        batch_size_sequences=training_configuration.batch_size_sequences,
+        dataloader_configuration=training_configuration.dataloader,
+        seed=seed,
+        distributed_data_assignment=DistributedDataAssignment(
+            rank=distributed_runtime.rank,
+            world_size=distributed_runtime.world_size,
+        ),
+    )
+    metrics_logger = (
+        TrainingMetricLogger(artifact_directory=artifact_directory)
+        if distributed_runtime.is_coordinator
+        else None
+    )
+    final_loss = float("inf")
+    checkpoint_path = checkpoint_directory / "latest.json"
+    evaluation_path: Path | None = None
+    started_at_seconds = perf_counter()
+    tokens_processed = 0
+    latest_checkpoint_seconds = 0.0
+    model.train()
+    try:
+        for step in range(start_step + 1, training_configuration.maximum_steps + 1):
+            token_batch = data_iterator.next_batch().to(distributed_runtime.device)
+            optimizer.zero_grad(set_to_none=True)
+            model_output = model(token_batch)
+            loss = causal_language_modeling_loss(logits=model_output.logits, token_ids=token_batch)
+            loss.backward()
+            gradient_norm = torch.nn.utils.clip_grad_norm_(
+                model.parameters(),
+                max_norm=training_configuration.gradient_clip_norm,
+            )
+            optimizer.step()
+            tokens_processed += int(token_batch.numel())
+            final_loss = distributed_runtime.reduce_mean(float(loss.detach().cpu().item()))
+            global_tokens_processed = distributed_runtime.reduce_sum(float(tokens_processed))
+            global_gradient_norm = distributed_runtime.reduce_mean(
+                float(gradient_norm.detach().cpu().item()),
+            )
+            if step % training_configuration.checkpoint_interval_steps == 0:
+                checkpoint_started_seconds = perf_counter()
+                checkpoint_path = _save_distributed_checkpoint(
+                    checkpoint_directory=checkpoint_directory,
+                    model=model,
+                    optimizer=optimizer,
+                    step=step,
+                    distributed_configuration=distributed_configuration,
+                    distributed_runtime=distributed_runtime,
+                    model_configuration_hash=model_configuration_hash,
+                )
+                latest_checkpoint_seconds = perf_counter() - checkpoint_started_seconds
+            if step % training_configuration.log_interval_steps == 0 and metrics_logger is not None:
+                elapsed_seconds = perf_counter() - started_at_seconds
+                metrics_logger.write(
+                    metric_record=create_training_metric_record(
+                        step=step,
+                        loss=final_loss,
+                        learning_rate=training_configuration.optimizer.learning_rate,
+                        gradient_norm=global_gradient_norm,
+                        started_at_seconds=started_at_seconds,
+                        tokens_processed=tokens_processed,
+                        distributed_world_size=distributed_runtime.world_size,
+                        distributed_global_tokens_per_second=global_tokens_processed
+                        / max(elapsed_seconds, 1e-9),
+                        distributed_rank_tokens_per_second=tokens_processed
+                        / max(elapsed_seconds, 1e-9),
+                        distributed_checkpoint_time=latest_checkpoint_seconds,
+                        distributed_strategy=distributed_configuration.strategy.value,
+                    ),
+                )
+            training_evaluation_configuration = training_configuration.evaluation
+            should_run_training_evaluation = (
+                training_evaluation_configuration is not None
+                and step % training_evaluation_configuration.interval_steps == 0
+            )
+            if should_run_training_evaluation:
+                if distributed_runtime.is_coordinator:
+                    if evaluation_callback is None:
+                        raise ValueError("Training evaluation requires an evaluation callback.")
+                    evaluation_path = evaluation_callback(
+                        step=step,
+                        model=unwrap_distributed_model(model=model),
+                    )
+                    model.train()
+                distributed_runtime.barrier()
+        if training_configuration.maximum_steps != start_step:
+            checkpoint_started_seconds = perf_counter()
+            checkpoint_path = _save_distributed_checkpoint(
+                checkpoint_directory=checkpoint_directory,
+                model=model,
+                optimizer=optimizer,
+                step=training_configuration.maximum_steps,
+                distributed_configuration=distributed_configuration,
+                distributed_runtime=distributed_runtime,
+                model_configuration_hash=model_configuration_hash,
+            )
+            latest_checkpoint_seconds = perf_counter() - checkpoint_started_seconds
+        distributed_runtime.barrier()
+    finally:
+        if metrics_logger is not None:
+            metrics_logger.close()
+    return TrainingResult(
+        final_step=training_configuration.maximum_steps,
+        final_loss=final_loss,
+        checkpoint_path=checkpoint_path,
+        resumed_from_step=start_step,
+        evaluation_path=evaluation_path,
+    )
+
+
+def _save_distributed_checkpoint(
+    checkpoint_directory: Path,
+    model: nn.Module,
+    optimizer: Optimizer,
+    step: int,
+    distributed_configuration: DistributedConfiguration,
+    distributed_runtime: DistributedRuntime,
+    model_configuration_hash: str,
+) -> Path:
+    save_sharded_rank_checkpoint(
+        checkpoint_directory=checkpoint_directory,
+        model=model,
+        optimizer=optimizer,
+        step=step,
+        rank=distributed_runtime.rank,
+        world_size=distributed_runtime.world_size,
+    )
+    distributed_runtime.barrier()
+    checkpoint_path = checkpoint_directory / f"step_{step:08d}"
+    if distributed_runtime.is_coordinator:
+        checkpoint_path = finalize_sharded_checkpoint(
+            checkpoint_directory=checkpoint_directory,
+            step=step,
+            world_size=distributed_runtime.world_size,
+            backend=distributed_configuration.backend,
+            strategy=distributed_configuration.strategy,
+            topology=distributed_runtime.topology,
+            model_configuration_hash=model_configuration_hash,
+        )
+        save_rank_zero_full_checkpoint_bridge(
+            checkpoint_directory=checkpoint_directory,
+            model=unwrap_distributed_model(model=model),
+            optimizer=optimizer,
+            step=step,
+        )
+    distributed_runtime.barrier()
+    return checkpoint_path
 
 
 def _apply_current_optimizer_configuration(

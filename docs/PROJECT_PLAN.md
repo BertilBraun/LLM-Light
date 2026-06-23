@@ -1539,6 +1539,25 @@ torchrun \
   --config configs/tinystories_distributed.yaml
 ```
 
+Distributed pipeline runs must be launched through `torchrun` so each process has
+`RANK`, `LOCAL_RANK`, `WORLD_SIZE`, `MASTER_ADDR`, and `MASTER_PORT` populated before
+the training stage initializes `torch.distributed`. A small local smoke configuration
+lives at `tests/configs/distributed_data_parallel_smoke.yaml` and is intended to run
+with two CPU/gloo processes:
+
+```bash
+torchrun \
+  --nproc_per_node=2 \
+  -m llm_lite.scripts.run_pipeline \
+  --config tests/configs/distributed_data_parallel_smoke.yaml \
+  --force
+```
+
+Some local Windows CPU-only PyTorch builds may fail in the launcher before project code
+starts with a `use_libuv`/`TCPStore` error. That is a launcher/build issue rather than
+an LLM-Light distributed-runtime requirement; real compute nodes and Linux GPU/NCCL
+environments should use the standard `torchrun` path.
+
 The distributed runtime manages:
 
 * global rank
@@ -1964,7 +1983,17 @@ Deliverables:
 * coordinated artifact finalization
 * logical multi-node checkpoint manifests
 
-### M9 — Post-training
+### M9 — Optimized inference
+
+Deliverables:
+
+* KV-cache benchmarks
+* weight quantization
+* batched generation
+* local inference service
+* memory/latency/quality comparison
+
+### M10 — Post-training
 
 Deliverables:
 
@@ -1975,7 +2004,18 @@ Deliverables:
 * direct preference optimization
 * base-versus-post-trained reports
 
-### M10 — Mixture-of-experts model
+### M11 — Active reinforcement learning
+
+Deliverables:
+
+* online candidate generation
+* reward evaluators
+* execution reward for Python
+* preference or quality reward for stories
+* policy-update loop
+* comparison against SFT and DPO approaches
+
+### M12 — Mixture-of-experts model
 
 Deliverables:
 
@@ -1987,26 +2027,16 @@ Deliverables:
 * active-versus-total parameter reporting
 * optional expert-parallel experiment
 
-### M11 — Optimized inference
+### TODO plan out actual training run
 
-Deliverables:
-
-* KV-cache benchmarks
-* weight quantization
-* batched generation
-* local inference service
-* memory/latency/quality comparison
-
-### M12 — Active reinforcement learning
-
-Deliverables:
-
-* online candidate generation
-* reward evaluators
-* execution reward for Python
-* preference or quality reward for stories
-* policy-update loop
-* comparison against SFT and DPO approaches
+* What task? Python completion probably
+* MoE model (~2M active parameters, ~14M total parameters)
+* Model size (~14M)
+* Hardware rental (4x gpu?)
+* Training parameters
+* Posttraining? Active RL? Is that sensible?? The model will probably not be good enough to do that yet.
+* What evaluation afterwards? Only the python eval?
+* Where and what to document? Final trained checkpoint commited to repo. Including logs, config, metrics, eval results, tensorboard plots, training time / performance metrics etc.
 
 ---
 

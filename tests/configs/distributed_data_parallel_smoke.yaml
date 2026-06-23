@@ -1,0 +1,86 @@
+experiment:
+  name: distributed_data_parallel_smoke
+  seed: 1337
+  output_dir: runs/distributed_data_parallel_smoke
+
+dataset:
+  type: inline_text
+  documents:
+    - |
+      alpha beta gamma delta
+    - |
+      epsilon zeta eta theta
+    - |
+      iota kappa lambda mu
+    - |
+      nu xi omicron pi
+
+tokenizer:
+  type: character
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+
+preprocessing:
+  output_shard_documents: 1
+  workers: 1
+  transforms:
+    - type: normalize_line_endings
+    - type: assign_split
+      train_probability: 1.0
+      validation_probability: 0.0
+      test_probability: 0.0
+
+packing:
+  context_length: 4
+  add_bos: true
+  add_eos: true
+  pack_documents: false
+  maximum_shard_tokens: 5
+  workers: 1
+
+model:
+  type: dense_gpt
+  dimension: 8
+  layers: 1
+  attention_heads: 2
+  feed_forward_dimension: 16
+  dropout: 0.0
+  tie_embeddings: true
+
+training:
+  objective: causal_language_modeling
+  maximum_steps: 3
+  batch_size_sequences: 1
+  dataloader:
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+    prefetch_factor: null
+  optimizer:
+    learning_rate: 0.01
+    weight_decay: 0.0
+  precision: fp32
+  gradient_clip_norm: 1.0
+  checkpoint_interval_steps: 1
+  log_interval_steps: 1
+  evaluation: null
+
+evaluation: {}
+
+inference:
+  maximum_new_tokens: 8
+
+distributed:
+  enabled: true
+  backend: gloo
+  strategy: data_parallel
+  world_size: 4
+  simulated_nodes:
+    count: 2
+    processes_per_node: 2
+  parallelism:
+    data: 4
+  checkpoint:
+    type: sharded
+    save_rank_local_state: true

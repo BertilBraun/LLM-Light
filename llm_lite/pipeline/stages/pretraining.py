@@ -5,7 +5,12 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
-from llm_lite.config.models import DenseGptConfiguration, ExperimentFile, TrainingObjective
+from llm_lite.config.models import (
+    DenseGptConfiguration,
+    DistributedConfiguration,
+    ExperimentFile,
+    TrainingObjective,
+)
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.gpt import DenseGpt
@@ -15,7 +20,7 @@ from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
-from llm_lite.training.trainer import train_model
+from llm_lite.training.trainer import train_model, train_model_distributed
 
 PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION = 2
 
@@ -26,6 +31,7 @@ class PretrainingReconstructionContract(BaseModel):
     contract_version: int
     model: DenseGptConfiguration
     objective: TrainingObjective
+    distributed: DistributedConfiguration
 
 
 class PretrainingStage(BasePipelineStage):
@@ -58,19 +64,34 @@ class PretrainingStage(BasePipelineStage):
         )
         parameter_count = _parameter_count(model=model)
         trainable_parameter_count = _trainable_parameter_count(model=model)
-        result = train_model(
-            model=model,
-            dataset=dataset,
-            training_configuration=experiment_configuration.training,
+        evaluation_callback = _training_evaluation_callback(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
+            tokenizer=tokenizer,
             artifact_directory=artifact_directory,
-            seed=experiment_configuration.experiment.seed,
-            evaluation_callback=_training_evaluation_callback(
-                experiment_configuration=experiment_configuration,
-                registry=registry,
-                tokenizer=tokenizer,
-                artifact_directory=artifact_directory,
-            ),
         )
+        if experiment_configuration.distributed.enabled:
+            result = train_model_distributed(
+                model=model,
+                dataset=dataset,
+                training_configuration=experiment_configuration.training,
+                distributed_configuration=experiment_configuration.distributed,
+                artifact_directory=artifact_directory,
+                seed=experiment_configuration.experiment.seed,
+                evaluation_callback=evaluation_callback,
+                model_configuration_hash=hash_json_value(
+                    value=experiment_configuration.model.model_dump(mode="json"),
+                ),
+            )
+        else:
+            result = train_model(
+                model=model,
+                dataset=dataset,
+                training_configuration=experiment_configuration.training,
+                artifact_directory=artifact_directory,
+                seed=experiment_configuration.experiment.seed,
+                evaluation_callback=evaluation_callback,
+            )
         files = {
             "checkpoint": str(result.checkpoint_path.relative_to(artifact_directory)),
             "metrics": "metrics.jsonl",
@@ -89,6 +110,8 @@ class PretrainingStage(BasePipelineStage):
                 "model_parameters": parameter_count,
                 "trainable_model_parameters": trainable_parameter_count,
                 "requested_maximum_steps": experiment_configuration.training.maximum_steps,
+                "distributed_world_size": experiment_configuration.distributed.world_size,
+                "distributed_strategy": experiment_configuration.distributed.strategy.value,
             },
         )
 
@@ -125,6 +148,7 @@ def _pretraining_reconstruction_contract(
         contract_version=PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION,
         model=experiment_configuration.model,
         objective=experiment_configuration.training.objective,
+        distributed=experiment_configuration.distributed,
     )
 
 

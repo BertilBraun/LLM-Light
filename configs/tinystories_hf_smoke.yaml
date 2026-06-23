@@ -18,7 +18,9 @@ dataset:
 
 tokenizer:
   type: byte_bpe
-  vocabulary_size: 1024
+  vocabulary_size: 512
+  max_training_documents: 100
+  max_training_bytes: 100000
   add_bos_token: true
   add_eos_token: true
   add_pad_token: true

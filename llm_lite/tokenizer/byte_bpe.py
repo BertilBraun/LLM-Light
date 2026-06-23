@@ -8,12 +8,20 @@ ByteToken = tuple[int, ...]
 BytePair = tuple[ByteToken, ByteToken]
 
 
+@dataclass
+class ByteBpeTrainingCorpus:
+    documents: list[list[ByteToken]]
+    bytes: int
+
+
 @dataclass(frozen=True)
 class ByteBpeTrainingResult:
     tokenizer: "ByteBpeTokenizer"
     training_document_count: int
     training_bytes: int
     training_tokens: int
+    max_training_documents: int | None
+    max_training_bytes: int | None
 
     @property
     def bytes_per_token(self) -> float:
@@ -91,7 +99,7 @@ class ByteBpeTokenizer:
             if token_id in special_token_ids:
                 continue
             output_bytes.extend(self.id_to_byte_token[token_id])
-        return bytes(output_bytes).decode("utf-8")
+        return bytes(output_bytes).decode("utf-8", errors="replace")
 
     def save(self, directory: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
@@ -145,6 +153,8 @@ class ByteBpeTokenizer:
 def train_byte_bpe_tokenizer(
     texts: Iterable[str],
     vocabulary_size: int,
+    max_training_documents: int | None,
+    max_training_bytes: int | None,
     add_bos_token: bool,
     add_eos_token: bool,
     add_pad_token: bool,
@@ -157,12 +167,22 @@ def train_byte_bpe_tokenizer(
     minimum_vocabulary_size = len(token_to_id) + 256
     if vocabulary_size < minimum_vocabulary_size:
         raise ValueError("Byte BPE vocabulary size must include special tokens and 256 bytes.")
-    corpus = [_byte_tokens(text=text) for text in texts]
-    training_bytes = sum(sum(len(byte_token) for byte_token in document) for document in corpus)
+    corpus_sample = _bounded_training_corpus(
+        texts=texts,
+        max_training_documents=max_training_documents,
+        max_training_bytes=max_training_bytes,
+    )
+    print(
+        "[tokenizer] byte_bpe sample "
+        f"documents={len(corpus_sample.documents)} "
+        f"bytes={corpus_sample.bytes} "
+        f"target_vocabulary_size={vocabulary_size}",
+        flush=True,
+    )
     merge_rules: list[BytePair] = []
     byte_token_to_id = _initial_byte_token_to_id(starting_index=len(token_to_id))
     while len(token_to_id) + len(byte_token_to_id) < vocabulary_size:
-        pair_counts = _pair_counts(corpus=corpus)
+        pair_counts = _pair_counts(corpus=corpus_sample.documents)
         if not pair_counts:
             break
         best_pair = _best_pair(pair_counts=pair_counts)
@@ -171,8 +191,25 @@ def train_byte_bpe_tokenizer(
             break
         byte_token_to_id[merged_token] = len(token_to_id) + len(byte_token_to_id)
         merge_rules.append(best_pair)
-        corpus = [_merge_pair(byte_tokens=document, merge_rule=best_pair) for document in corpus]
-    training_tokens = sum(len(document) for document in corpus)
+        corpus_sample.documents = [
+            _merge_pair(byte_tokens=document, merge_rule=best_pair)
+            for document in corpus_sample.documents
+        ]
+        if len(merge_rules) % 100 == 0:
+            print(
+                "[tokenizer] byte_bpe "
+                f"merges={len(merge_rules)} "
+                f"vocabulary_size={len(token_to_id) + len(byte_token_to_id)}",
+                flush=True,
+            )
+    training_tokens = sum(len(document) for document in corpus_sample.documents)
+    print(
+        "[tokenizer] byte_bpe complete "
+        f"merges={len(merge_rules)} "
+        f"training_tokens={training_tokens} "
+        f"bytes_per_token={corpus_sample.bytes / max(training_tokens, 1):.4f}",
+        flush=True,
+    )
     tokenizer = ByteBpeTokenizer(
         token_to_id=token_to_id,
         byte_token_to_id=byte_token_to_id,
@@ -183,9 +220,11 @@ def train_byte_bpe_tokenizer(
     )
     return ByteBpeTrainingResult(
         tokenizer=tokenizer,
-        training_document_count=len(corpus),
-        training_bytes=training_bytes,
+        training_document_count=len(corpus_sample.documents),
+        training_bytes=corpus_sample.bytes,
         training_tokens=training_tokens,
+        max_training_documents=max_training_documents,
+        max_training_bytes=max_training_bytes,
     )
 
 
@@ -211,6 +250,33 @@ def _initial_byte_token_to_id(starting_index: int) -> dict[ByteToken, int]:
 
 def _byte_tokens(text: str) -> list[ByteToken]:
     return [(byte_value,) for byte_value in text.encode("utf-8")]
+
+
+def _bounded_training_corpus(
+    texts: Iterable[str],
+    max_training_documents: int | None,
+    max_training_bytes: int | None,
+) -> ByteBpeTrainingCorpus:
+    if max_training_documents is None and max_training_bytes is None:
+        raise ValueError("Byte BPE training sample must be bounded.")
+    documents: list[list[ByteToken]] = []
+    sampled_bytes = 0
+    text_iterator = iter(texts)
+    while max_training_documents is None or len(documents) < max_training_documents:
+        try:
+            text = next(text_iterator)
+        except StopIteration:
+            break
+        text_bytes = text.encode("utf-8")
+        if max_training_bytes is not None and sampled_bytes + len(text_bytes) > max_training_bytes:
+            if documents:
+                break
+            raise ValueError("First Byte BPE training document exceeds max_training_bytes.")
+        documents.append([(byte_value,) for byte_value in text_bytes])
+        sampled_bytes += len(text_bytes)
+    if not documents:
+        raise ValueError("Byte BPE training sample is empty.")
+    return ByteBpeTrainingCorpus(documents=documents, bytes=sampled_bytes)
 
 
 def _pair_counts(corpus: list[list[ByteToken]]) -> Counter[BytePair]:

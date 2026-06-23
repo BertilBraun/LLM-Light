@@ -55,6 +55,8 @@ def train_tokenizer(
             training_result = train_byte_bpe_tokenizer(
                 texts=texts,
                 vocabulary_size=tokenizer_configuration.vocabulary_size,
+                max_training_documents=tokenizer_configuration.max_training_documents,
+                max_training_bytes=tokenizer_configuration.max_training_bytes,
                 add_bos_token=tokenizer_configuration.add_bos_token,
                 add_eos_token=tokenizer_configuration.add_eos_token,
                 add_pad_token=tokenizer_configuration.add_pad_token,
@@ -67,6 +69,12 @@ def train_tokenizer(
                     "training_documents": training_result.training_document_count,
                     "training_bytes": training_result.training_bytes,
                     "training_tokens": training_result.training_tokens,
+                    "max_training_documents": _optional_int_metric(
+                        value=training_result.max_training_documents,
+                    ),
+                    "max_training_bytes": _optional_int_metric(
+                        value=training_result.max_training_bytes,
+                    ),
                     "bytes_per_token": training_result.bytes_per_token,
                 },
             )
@@ -81,3 +89,9 @@ def load_tokenizer(
             return CharacterTokenizer.load(directory=directory)
         case ByteBpeTokenizerConfiguration():
             return ByteBpeTokenizer.load(directory=directory)
+
+
+def _optional_int_metric(value: int | None) -> int:
+    if value is None:
+        return 0
+    return value

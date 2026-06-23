@@ -107,9 +107,19 @@ class ByteBpeTokenizerConfiguration(BaseModel):
 
     type: Literal[TokenizerType.BYTE_BPE]
     vocabulary_size: int = Field(ge=256)
+    max_training_documents: int | None = Field(gt=0)
+    max_training_bytes: int | None = Field(gt=0)
     add_bos_token: bool
     add_eos_token: bool
     add_pad_token: bool
+
+    @model_validator(mode="after")
+    def require_training_sample_bound(self) -> ByteBpeTokenizerConfiguration:
+        if self.max_training_documents is None and self.max_training_bytes is None:
+            raise ValueError(
+                "Byte BPE training requires max_training_documents or max_training_bytes.",
+            )
+        return self
 
 
 TokenizerConfiguration = Annotated[

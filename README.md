@@ -144,13 +144,17 @@ preprocessor rejects split reassignment.
 
 Byte-level BPE starts from all 256 byte values plus configured special tokens,
 then learns deterministic pair merges up to `tokenizer.vocabulary_size`.
-Encoding and decoding preserve Unicode, whitespace, tabs, and newlines through
-UTF-8 bytes. For TinyStories-style runs, start with:
+Training uses a bounded deterministic prefix sample instead of materializing the
+whole corpus; configure at least one of `max_training_documents` or
+`max_training_bytes`. Encoding and decoding preserve Unicode, whitespace, tabs,
+and newlines through UTF-8 bytes. For TinyStories-style smoke runs, start with:
 
 ```yaml
 tokenizer:
   type: byte_bpe
-  vocabulary_size: 1024
+  vocabulary_size: 512
+  max_training_documents: 100
+  max_training_bytes: 100000
   add_bos_token: true
   add_eos_token: true
   add_pad_token: true

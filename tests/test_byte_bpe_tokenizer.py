@@ -10,6 +10,8 @@ def test_byte_bpe_tokenizer_roundtrips_unicode_and_whitespace() -> None:
     training_result = train_byte_bpe_tokenizer(
         texts=[text],
         vocabulary_size=270,
+        max_training_documents=1,
+        max_training_bytes=None,
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
@@ -29,6 +31,8 @@ def test_byte_bpe_training_is_deterministic() -> None:
     first_result = train_byte_bpe_tokenizer(
         texts=texts,
         vocabulary_size=263,
+        max_training_documents=2,
+        max_training_bytes=None,
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
@@ -36,6 +40,8 @@ def test_byte_bpe_training_is_deterministic() -> None:
     second_result = train_byte_bpe_tokenizer(
         texts=texts,
         vocabulary_size=263,
+        max_training_documents=2,
+        max_training_bytes=None,
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
@@ -50,6 +56,8 @@ def test_byte_bpe_tokenizer_save_load_roundtrip(tmp_path: Path) -> None:
     training_result = train_byte_bpe_tokenizer(
         texts=[text],
         vocabulary_size=265,
+        max_training_documents=1,
+        max_training_bytes=None,
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
@@ -69,12 +77,69 @@ def test_byte_bpe_tokenizer_save_load_roundtrip(tmp_path: Path) -> None:
     )
 
 
+def test_byte_bpe_decode_tolerates_invalid_generated_bytes() -> None:
+    training_result = train_byte_bpe_tokenizer(
+        texts=["valid text"],
+        vocabulary_size=260,
+        max_training_documents=1,
+        max_training_bytes=None,
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    invalid_byte_token_id = training_result.tokenizer.byte_token_to_id[(250,)]
+
+    decoded_text = training_result.tokenizer.decode([invalid_byte_token_id])
+
+    assert decoded_text == "\ufffd"
+
+
 def test_byte_bpe_requires_byte_vocabulary_capacity() -> None:
     with pytest.raises(ValueError, match="256 bytes"):
         train_byte_bpe_tokenizer(
             texts=["text"],
             vocabulary_size=258,
+            max_training_documents=1,
+            max_training_bytes=None,
             add_bos_token=True,
             add_eos_token=True,
             add_pad_token=True,
         )
+
+
+def test_byte_bpe_training_reads_only_bounded_sample() -> None:
+    reads = 0
+
+    def iter_texts():
+        nonlocal reads
+        for text in ("abababab", "bcbcbcbc", "should-not-read"):
+            reads += 1
+            yield text
+
+    training_result = train_byte_bpe_tokenizer(
+        texts=iter_texts(),
+        vocabulary_size=263,
+        max_training_documents=2,
+        max_training_bytes=None,
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+
+    assert reads == 2
+    assert training_result.training_document_count == 2
+
+
+def test_byte_bpe_training_respects_byte_bound() -> None:
+    training_result = train_byte_bpe_tokenizer(
+        texts=["abcd", "efgh", "ijkl"],
+        vocabulary_size=263,
+        max_training_documents=None,
+        max_training_bytes=8,
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+
+    assert training_result.training_document_count == 2
+    assert training_result.training_bytes == 8

@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
@@ -10,7 +9,6 @@ from llm_lite.pipeline.stages.io import iter_processed_document_texts, tokenizer
 from llm_lite.tokenizer.loading import train_tokenizer
 
 
-@dataclass(frozen=True)
 class TokenizerStage(BasePipelineStage):
     name: StageName = StageName.TOKENIZER
     parents: tuple[StageName, ...] = (StageName.PROCESSED_DATASET,)

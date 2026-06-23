@@ -1,6 +1,5 @@
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -29,7 +28,6 @@ class PretrainingReconstructionContract(BaseModel):
     objective: TrainingObjective
 
 
-@dataclass(frozen=True)
 class PretrainingStage(BasePipelineStage):
     name: StageName = StageName.PRETRAINING
     parents: tuple[StageName, ...] = (StageName.PACKED_DATASET, StageName.TOKENIZER)

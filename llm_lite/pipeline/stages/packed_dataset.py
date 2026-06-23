@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
@@ -12,7 +11,6 @@ from llm_lite.pipeline.stages.io import iter_processed_document_texts, packing_s
 from llm_lite.tokenizer.loading import load_tokenizer
 
 
-@dataclass(frozen=True)
 class PackedDatasetStage(BasePipelineStage):
     name: StageName = StageName.PACKED_DATASET
     parents: tuple[StageName, ...] = (StageName.PROCESSED_DATASET, StageName.TOKENIZER)

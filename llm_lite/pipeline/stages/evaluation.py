@@ -1,5 +1,4 @@
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
@@ -13,7 +12,6 @@ from llm_lite.tokenizer.loading import load_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint
 
 
-@dataclass(frozen=True)
 class EvaluationStage(BasePipelineStage):
     name: StageName = StageName.EVALUATION
     parents: tuple[StageName, ...] = (StageName.PRETRAINING, StageName.TOKENIZER)

@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
@@ -11,7 +10,6 @@ from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.pipeline.stages.io import iter_raw_documents
 
 
-@dataclass(frozen=True)
 class ProcessedDatasetStage(BasePipelineStage):
     name: StageName = StageName.PROCESSED_DATASET
     parents: tuple[StageName, ...] = (StageName.RAW_DATASET,)

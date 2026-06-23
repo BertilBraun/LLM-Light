@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
@@ -12,7 +11,6 @@ from llm_lite.pipeline.stages.base import BasePipelineStage
 RAW_SHARD_DOCUMENT_LIMIT = 10000
 
 
-@dataclass(frozen=True)
 class RawDatasetStage(BasePipelineStage):
     name: StageName = StageName.RAW_DATASET
     parents: tuple[StageName, ...] = ()

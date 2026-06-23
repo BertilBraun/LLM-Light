@@ -162,10 +162,12 @@ class PackedShardWriter:
         artifact_directory: Path,
         row_length: int,
         maximum_shard_tokens: int,
+        shard_name_prefix: str,
     ) -> None:
         self.artifact_directory = artifact_directory
         self.row_length = row_length
         self.maximum_shard_tokens = maximum_shard_tokens
+        self.shard_name_prefix = shard_name_prefix
         if self.maximum_shard_tokens < self.row_length:
             raise ValueError("Maximum shard tokens must fit at least one packed row.")
         self.shard_directory = artifact_directory / "shards"
@@ -216,14 +218,17 @@ class PackedShardWriter:
 
     def _open_next_shard(self) -> None:
         self._close_current_shard()
-        shard_path = self.shard_directory / f"shard_{self.current_shard_index:06d}.bin"
+        shard_path = (
+            self.shard_directory
+            / f"{self.shard_name_prefix}shard_{self.current_shard_index:06d}.bin"
+        )
         self.current_shard_file = shard_path.open("wb")
 
     def _close_current_shard(self) -> None:
         if self.current_shard_file is None:
             return
         self.current_shard_file.close()
-        shard_path = f"shards/shard_{self.current_shard_index:06d}.bin"
+        shard_path = f"shards/{self.shard_name_prefix}shard_{self.current_shard_index:06d}.bin"
         self.shards.append(
             PackedShardIndex(
                 shard_index=self.current_shard_index,
@@ -248,6 +253,7 @@ def write_packed_sequence_stream(
         artifact_directory=artifact_directory,
         row_length=row_length,
         maximum_shard_tokens=maximum_shard_tokens,
+        shard_name_prefix="",
     )
     for sequence in sequences:
         writer.append(sequence=sequence)

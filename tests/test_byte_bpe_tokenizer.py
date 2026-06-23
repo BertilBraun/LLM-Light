@@ -15,6 +15,7 @@ def test_byte_bpe_tokenizer_roundtrips_unicode_and_whitespace() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
 
     token_ids = training_result.tokenizer.encode(text=text, add_bos=True, add_eos=True)
@@ -36,6 +37,7 @@ def test_byte_bpe_training_is_deterministic() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
     second_result = train_byte_bpe_tokenizer(
         texts=texts,
@@ -45,6 +47,7 @@ def test_byte_bpe_training_is_deterministic() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
 
     assert first_result.tokenizer.merge_rules == second_result.tokenizer.merge_rules
@@ -61,6 +64,7 @@ def test_byte_bpe_tokenizer_save_load_roundtrip(tmp_path: Path) -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
     training_result.tokenizer.save(directory=tmp_path)
 
@@ -86,6 +90,7 @@ def test_byte_bpe_decode_tolerates_invalid_generated_bytes() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
     invalid_byte_token_id = training_result.tokenizer.byte_token_to_id[(250,)]
 
@@ -104,6 +109,7 @@ def test_byte_bpe_requires_byte_vocabulary_capacity() -> None:
             add_bos_token=True,
             add_eos_token=True,
             add_pad_token=True,
+            workers=1,
         )
 
 
@@ -124,6 +130,7 @@ def test_byte_bpe_training_reads_only_bounded_sample() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
 
     assert reads == 2
@@ -139,6 +146,7 @@ def test_byte_bpe_training_respects_byte_bound() -> None:
         add_bos_token=True,
         add_eos_token=True,
         add_pad_token=True,
+        workers=1,
     )
 
     assert training_result.training_document_count == 2

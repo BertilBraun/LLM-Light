@@ -60,6 +60,7 @@ def train_tokenizer(
                 add_bos_token=tokenizer_configuration.add_bos_token,
                 add_eos_token=tokenizer_configuration.add_eos_token,
                 add_pad_token=tokenizer_configuration.add_pad_token,
+                workers=tokenizer_configuration.training_workers,
             )
             return TrainedTokenizer(
                 tokenizer=training_result.tokenizer,
@@ -76,6 +77,9 @@ def train_tokenizer(
                         value=training_result.max_training_bytes,
                     ),
                     "bytes_per_token": training_result.bytes_per_token,
+                    "workers": training_result.worker_count,
+                    "pair_count_seconds": training_result.pair_count_seconds,
+                    "merge_application_seconds": training_result.merge_application_seconds,
                 },
             )
 

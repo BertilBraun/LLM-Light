@@ -10,6 +10,9 @@ from llm_lite.pipeline.logging import (
     PipelineEventRecord,
     PipelineEventType,
 )
+from llm_lite.pipeline.performance import (
+    PipelinePerformanceLogger,
+)
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
@@ -29,6 +32,9 @@ def run_pipeline(
     seed_everything(seed=experiment_configuration.experiment.seed)
     registry = ArtifactRegistry(run_directory=experiment_configuration.experiment.output_dir)
     event_logger = PipelineEventLogger(run_directory=experiment_configuration.experiment.output_dir)
+    performance_logger = PipelinePerformanceLogger(
+        run_directory=experiment_configuration.experiment.output_dir,
+    )
     force_stage_names = _expanded_force_stages(
         stages=ORDERED_PIPELINE_STAGES,
         force_stages=force_stages,
@@ -55,6 +61,7 @@ def run_pipeline(
         experiment_configuration=experiment_configuration,
         registry=registry,
         event_logger=event_logger,
+        performance_logger=performance_logger,
         stages=ORDERED_PIPELINE_STAGES,
         force_stage_names=force_stage_names,
     )
@@ -133,6 +140,7 @@ def _execute_pipeline(
     experiment_configuration: ExperimentFile,
     registry: ArtifactRegistry,
     event_logger: PipelineEventLogger,
+    performance_logger: PipelinePerformanceLogger,
     stages: tuple[PipelineStage, ...],
     force_stage_names: set[StageName],
 ) -> None:
@@ -180,11 +188,12 @@ def _execute_pipeline(
             message="stage execution started",
         )
         print(f"[start] {stage.name.value}", flush=True)
-        stage_output = stage.run(
-            experiment_configuration=experiment_configuration,
-            registry=registry,
-            artifact_directory=artifact_directory,
-        )
+        with performance_logger.measure_stage(stage_name=stage.name.value) as performance_timer:
+            stage_output = stage.run(
+                experiment_configuration=experiment_configuration,
+                registry=registry,
+                artifact_directory=artifact_directory,
+            )
         registry.write_complete_manifest(
             artifact_type=stage.name.value,
             configuration_hash=configuration_hash,
@@ -193,6 +202,10 @@ def _execute_pipeline(
             metrics=stage_output.metrics,
         )
         _print_stage_output(stage_name=stage.name, stage_output=stage_output)
+        performance_logger.write_stage_timing(
+            timing=performance_timer.timing(),
+            metrics=stage_output.metrics,
+        )
         _log_stage_event(
             event_logger=event_logger,
             event_type=PipelineEventType.STAGE_COMPLETE,

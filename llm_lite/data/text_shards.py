@@ -38,10 +38,22 @@ class TextShardSplitCounters:
     shards: int = 0
 
 
+@dataclass(frozen=True)
+class TextShardReference:
+    split: str | None
+    path: Path
+
+
 class TextShardWriter:
-    def __init__(self, artifact_directory: Path, shard_document_limit: int) -> None:
+    def __init__(
+        self,
+        artifact_directory: Path,
+        shard_document_limit: int,
+        shard_name_prefix: str,
+    ) -> None:
         self.artifact_directory = artifact_directory
         self.shard_document_limit = shard_document_limit
+        self.shard_name_prefix = shard_name_prefix
         self.open_shards: dict[str, tarfile.TarFile] = {}
         self.current_shard_documents: dict[str, int] = {}
         self.current_shard_indices: dict[str, int] = {}
@@ -106,7 +118,7 @@ class TextShardWriter:
         split_directory = self.artifact_directory / split_name
         split_directory.mkdir(parents=True, exist_ok=True)
         shard_index = self.current_shard_indices.get(split_name, 0)
-        shard_path = split_directory / f"shard_{shard_index:06d}.tar.gz"
+        shard_path = split_directory / f"{self.shard_name_prefix}shard_{shard_index:06d}.tar.gz"
         self.open_shards[split_name] = tarfile.open(shard_path, mode="w:gz")
         self.current_shard_documents[split_name] = 0
         self.current_shard_indices[split_name] = shard_index + 1
@@ -129,6 +141,7 @@ def write_text_shards(
     writer = TextShardWriter(
         artifact_directory=artifact_directory,
         shard_document_limit=shard_document_limit,
+        shard_name_prefix="",
     )
     for document in documents:
         writer.append(document=document)
@@ -144,24 +157,50 @@ def iter_text_shard_documents(
         document_split = (
             None if split_directory.name == UNSPLIT_DIRECTORY_NAME else split_directory.name
         )
-        for shard_path in sorted(split_directory.glob("shard_*.tar.gz")):
-            with tarfile.open(shard_path, mode="r:gz") as shard_file:
-                for member in shard_file:
-                    if not member.isfile():
-                        continue
-                    extracted_file = shard_file.extractfile(member)
-                    if extracted_file is None:
-                        continue
-                    yield Document(
-                        document_id=Path(member.name).stem,
-                        text=extracted_file.read().decode("utf-8"),
-                        split=document_split,
-                    )
+        for shard_path in sorted(split_directory.glob("*shard_*.tar.gz")):
+            yield from iter_text_shard_reference_documents(
+                shard_reference=TextShardReference(
+                    split=document_split,
+                    path=shard_path,
+                ),
+            )
 
 
 def iter_text_shard_texts(artifact_directory: Path, split: str | None) -> Iterator[str]:
     for document in iter_text_shard_documents(artifact_directory=artifact_directory, split=split):
         yield document.text
+
+
+def text_shard_references(
+    artifact_directory: Path,
+    split: str | None,
+) -> tuple[TextShardReference, ...]:
+    references: list[TextShardReference] = []
+    split_directories = _split_directories(artifact_directory=artifact_directory, split=split)
+    for split_directory in split_directories:
+        document_split = (
+            None if split_directory.name == UNSPLIT_DIRECTORY_NAME else split_directory.name
+        )
+        for shard_path in sorted(split_directory.glob("*shard_*.tar.gz")):
+            references.append(TextShardReference(split=document_split, path=shard_path))
+    return tuple(references)
+
+
+def iter_text_shard_reference_documents(
+    shard_reference: TextShardReference,
+) -> Iterator[Document]:
+    with tarfile.open(shard_reference.path, mode="r:gz") as shard_file:
+        for member in shard_file:
+            if not member.isfile():
+                continue
+            extracted_file = shard_file.extractfile(member)
+            if extracted_file is None:
+                continue
+            yield Document(
+                document_id=Path(member.name).stem,
+                text=extracted_file.read().decode("utf-8"),
+                split=shard_reference.split,
+            )
 
 
 def load_text_shard_corpus_manifest(artifact_directory: Path) -> TextShardCorpusManifest:

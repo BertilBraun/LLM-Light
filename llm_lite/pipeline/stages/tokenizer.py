@@ -1,11 +1,12 @@
 from pathlib import Path
 
-from llm_lite.config.models import ExperimentFile
+from llm_lite.config.models import ByteBpeTokenizerConfiguration, ExperimentFile
 from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.pipeline.stages.io import iter_processed_document_texts, tokenizer_training_split
+from llm_lite.tokenizer.byte_bpe import train_byte_bpe_tokenizer_from_text_shards
 from llm_lite.tokenizer.loading import train_tokenizer
 
 
@@ -22,15 +23,50 @@ class TokenizerStage(BasePipelineStage):
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        trained_tokenizer = train_tokenizer(
-            texts=iter_processed_document_texts(
-                registry=registry,
-                split=tokenizer_training_split(registry=registry),
-            ),
-            tokenizer_configuration=experiment_configuration.tokenizer,
-        )
-        trained_tokenizer.tokenizer.save(directory=artifact_directory)
+        split = tokenizer_training_split(registry=registry)
+        tokenizer_configuration = experiment_configuration.tokenizer
+        match tokenizer_configuration:
+            case ByteBpeTokenizerConfiguration():
+                training_result = train_byte_bpe_tokenizer_from_text_shards(
+                    artifact_directory=registry.artifact_directory(
+                        StageName.PROCESSED_DATASET.value,
+                    ),
+                    split=split,
+                    vocabulary_size=tokenizer_configuration.vocabulary_size,
+                    max_training_documents=tokenizer_configuration.max_training_documents,
+                    max_training_bytes=tokenizer_configuration.max_training_bytes,
+                    add_bos_token=tokenizer_configuration.add_bos_token,
+                    add_eos_token=tokenizer_configuration.add_eos_token,
+                    add_pad_token=tokenizer_configuration.add_pad_token,
+                    workers=tokenizer_configuration.training_workers,
+                )
+                tokenizer = training_result.tokenizer
+                metrics = {
+                    "vocabulary_size": tokenizer.vocabulary_size,
+                    "merge_count": tokenizer.merge_count,
+                    "training_documents": training_result.training_document_count,
+                    "training_bytes": training_result.training_bytes,
+                    "training_tokens": training_result.training_tokens,
+                    "max_training_documents": training_result.max_training_documents or 0,
+                    "max_training_bytes": training_result.max_training_bytes or 0,
+                    "bytes_per_token": training_result.bytes_per_token,
+                    "workers": training_result.worker_count,
+                    "pair_count_seconds": training_result.pair_count_seconds,
+                    "merge_application_seconds": training_result.merge_application_seconds,
+                    "tokenizer_merges_completed": tokenizer.merge_count,
+                }
+            case _:
+                trained_tokenizer = train_tokenizer(
+                    texts=iter_processed_document_texts(
+                        registry=registry,
+                        split=split,
+                    ),
+                    tokenizer_configuration=tokenizer_configuration,
+                )
+                tokenizer = trained_tokenizer.tokenizer
+                metrics = trained_tokenizer.metrics
+        tokenizer.save(directory=artifact_directory)
         return StageOutput(
             files={"tokenizer": "tokenizer.json"},
-            metrics=trained_tokenizer.metrics,
+            metrics=metrics,
         )

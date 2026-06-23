@@ -126,6 +126,7 @@ class ByteBpeTokenizerConfiguration(Configuration):
     vocabulary_size: int = Field(ge=256)
     max_training_documents: int | None = Field(gt=0)
     max_training_bytes: int | None = Field(gt=0)
+    training_workers: int = Field(default=1, ge=1)
     add_bos_token: bool = True
     add_eos_token: bool = True
     add_pad_token: bool = True
@@ -209,6 +210,7 @@ PreprocessingTransformConfiguration = Annotated[
 class PreprocessingConfiguration(Configuration):
     transforms: tuple[PreprocessingTransformConfiguration, ...] = ()
     output_shard_documents: int = Field(default=10000, gt=0)
+    workers: int = Field(default=1, ge=1)
 
 
 class PackingConfiguration(Configuration):
@@ -217,6 +219,7 @@ class PackingConfiguration(Configuration):
     add_eos: bool = True
     pack_documents: bool = True
     maximum_shard_tokens: int = Field(default=1000000, gt=0)
+    workers: int = Field(default=1, ge=1)
 
 
 class DenseGptConfiguration(Configuration):

@@ -1,6 +1,21 @@
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
+from multiprocessing import get_context
+from pathlib import Path
 
-from llm_lite.data.datasets import PackedSequence
+from llm_lite.config.models import TokenizerConfiguration
+from llm_lite.data.datasets import (
+    PackedDatasetIndex,
+    PackedSequence,
+    PackedShardIndex,
+    PackedShardWriter,
+)
+from llm_lite.data.text_shards import (
+    TextShardReference,
+    iter_text_shard_reference_documents,
+    text_shard_references,
+)
+from llm_lite.tokenizer.loading import load_tokenizer
 
 
 def pack_token_sequences(
@@ -18,3 +33,181 @@ def pack_token_sequences(
                 sequence = sequence + [pad_token_id] * (context_length + 1 - len(sequence))
             yield PackedSequence(token_ids=tuple(sequence))
             start_index += context_length
+
+
+@dataclass(frozen=True)
+class ParallelPackingResult:
+    index: PackedDatasetIndex
+    worker_count: int
+    input_documents: int
+
+
+@dataclass(frozen=True)
+class PackingWorkerInput:
+    worker_index: int
+    shard_references: tuple[TextShardReference, ...]
+
+
+@dataclass(frozen=True)
+class PackingWorkerResult:
+    worker_index: int
+    sequence_count: int
+    input_documents: int
+    shards: tuple[PackedShardIndex, ...]
+
+
+def pack_text_shards(
+    input_artifact_directory: Path,
+    output_artifact_directory: Path,
+    tokenizer_directory: Path,
+    tokenizer_configuration: TokenizerConfiguration,
+    split: str | None,
+    context_length: int,
+    pad_token_id: int,
+    add_bos: bool,
+    add_eos: bool,
+    maximum_shard_tokens: int,
+    workers: int,
+) -> ParallelPackingResult:
+    shard_references = text_shard_references(
+        artifact_directory=input_artifact_directory,
+        split=split,
+    )
+    effective_workers = _effective_worker_count(
+        requested_workers=workers,
+        shard_count=len(shard_references),
+    )
+    worker_inputs = _contiguous_worker_inputs(
+        shard_references=shard_references,
+        worker_count=effective_workers,
+    )
+    worker_arguments = [
+        (
+            worker_input,
+            output_artifact_directory,
+            tokenizer_directory,
+            tokenizer_configuration,
+            context_length,
+            pad_token_id,
+            add_bos,
+            add_eos,
+            maximum_shard_tokens,
+        )
+        for worker_input in worker_inputs
+    ]
+    if effective_workers == 1:
+        worker_results = [_packing_worker(*worker_arguments[0])]
+    else:
+        multiprocessing_context = get_context("spawn")
+        with multiprocessing_context.Pool(processes=effective_workers) as pool:
+            worker_results = pool.starmap(_packing_worker, worker_arguments)
+    index = _merge_packing_worker_results(
+        worker_results=tuple(worker_results),
+        output_artifact_directory=output_artifact_directory,
+        row_length=context_length + 1,
+    )
+    if index.total_sequences == 0:
+        raise ValueError("Packing produced no training sequences.")
+    return ParallelPackingResult(
+        index=index,
+        worker_count=effective_workers,
+        input_documents=sum(worker_result.input_documents for worker_result in worker_results),
+    )
+
+
+def _packing_worker(
+    worker_input: PackingWorkerInput,
+    output_artifact_directory: Path,
+    tokenizer_directory: Path,
+    tokenizer_configuration: TokenizerConfiguration,
+    context_length: int,
+    pad_token_id: int,
+    add_bos: bool,
+    add_eos: bool,
+    maximum_shard_tokens: int,
+) -> PackingWorkerResult:
+    tokenizer = load_tokenizer(
+        directory=tokenizer_directory,
+        tokenizer_configuration=tokenizer_configuration,
+    )
+    writer = PackedShardWriter(
+        artifact_directory=output_artifact_directory,
+        row_length=context_length + 1,
+        maximum_shard_tokens=maximum_shard_tokens,
+        shard_name_prefix=f"part_{worker_input.worker_index:06d}_",
+    )
+    input_documents = 0
+    for shard_reference in worker_input.shard_references:
+        for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
+            input_documents += 1
+            token_ids = tokenizer.encode(text=document.text, add_bos=add_bos, add_eos=add_eos)
+            for sequence in pack_token_sequences(
+                tokenized_document_stream=(token_ids,),
+                context_length=context_length,
+                pad_token_id=pad_token_id,
+            ):
+                writer.append(sequence=sequence)
+    index = writer.close()
+    return PackingWorkerResult(
+        worker_index=worker_input.worker_index,
+        sequence_count=index.total_sequences,
+        input_documents=input_documents,
+        shards=index.shards,
+    )
+
+
+def _merge_packing_worker_results(
+    worker_results: tuple[PackingWorkerResult, ...],
+    output_artifact_directory: Path,
+    row_length: int,
+) -> PackedDatasetIndex:
+    total_sequences = 0
+    shards: list[PackedShardIndex] = []
+    for worker_result in sorted(worker_results, key=lambda result: result.worker_index):
+        for worker_shard in worker_result.shards:
+            shards.append(
+                PackedShardIndex(
+                    shard_index=len(shards),
+                    path=worker_shard.path,
+                    sequence_count=worker_shard.sequence_count,
+                    token_count=worker_shard.token_count,
+                    first_sequence_index=total_sequences,
+                ),
+            )
+            total_sequences += worker_shard.sequence_count
+    index = PackedDatasetIndex(
+        format_version=1,
+        dtype="uint16",
+        row_length=row_length,
+        total_sequences=total_sequences,
+        total_tokens=total_sequences * row_length,
+        shards=tuple(shards),
+    )
+    (output_artifact_directory / "index.json").write_text(
+        index.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    return index
+
+
+def _effective_worker_count(requested_workers: int, shard_count: int) -> int:
+    if shard_count == 0:
+        return 1
+    return min(requested_workers, shard_count)
+
+
+def _contiguous_worker_inputs(
+    shard_references: tuple[TextShardReference, ...],
+    worker_count: int,
+) -> tuple[PackingWorkerInput, ...]:
+    worker_inputs: list[PackingWorkerInput] = []
+    for worker_index in range(worker_count):
+        start_index = worker_index * len(shard_references) // worker_count
+        end_index = (worker_index + 1) * len(shard_references) // worker_count
+        worker_inputs.append(
+            PackingWorkerInput(
+                worker_index=worker_index,
+                shard_references=shard_references[start_index:end_index],
+            ),
+        )
+    return tuple(worker_inputs)

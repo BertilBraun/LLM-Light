@@ -2,6 +2,9 @@ import hashlib
 import unicodedata
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
+from itertools import chain
+from multiprocessing import get_context
+from pathlib import Path
 
 from llm_lite.config.models import (
     AssignSplitTransformConfiguration,
@@ -14,6 +17,15 @@ from llm_lite.config.models import (
     PreprocessingTransformConfiguration,
 )
 from llm_lite.data.document import Document
+from llm_lite.data.text_shards import (
+    TextShardCorpusManifest,
+    TextShardReference,
+    TextShardSplitCounters,
+    TextShardSplitManifest,
+    TextShardWriter,
+    iter_text_shard_reference_documents,
+    text_shard_references,
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +48,27 @@ class PreprocessingCounters:
     lower_cased_documents: int = 0
     deduplicated_documents: int = 0
     split_assigned_documents: int = 0
+
+    def add(self, other: "PreprocessingCounters") -> None:
+        self.input_documents += other.input_documents
+        self.output_documents += other.output_documents
+        self.rejected_documents += other.rejected_documents
+        self.input_bytes += other.input_bytes
+        self.output_bytes += other.output_bytes
+        self.input_characters += other.input_characters
+        self.output_characters += other.output_characters
+        self.unicode_normalized_documents += other.unicode_normalized_documents
+        self.line_endings_normalized_documents += other.line_endings_normalized_documents
+        self.lower_cased_documents += other.lower_cased_documents
+        self.deduplicated_documents += other.deduplicated_documents
+        self.split_assigned_documents += other.split_assigned_documents
+
+
+@dataclass(frozen=True)
+class ParallelPreprocessingResult:
+    corpus_manifest: TextShardCorpusManifest
+    counters: PreprocessingCounters
+    worker_count: int
 
 
 def preprocess_documents(
@@ -67,6 +100,115 @@ def preprocess_documents(
     return PreprocessingResult(
         documents=iter_processed_documents(),
         counters=counters,
+    )
+
+
+def preprocess_text_shards(
+    input_artifact_directory: Path,
+    output_artifact_directory: Path,
+    transforms: tuple[PreprocessingTransformConfiguration, ...],
+    output_shard_documents: int,
+    workers: int,
+) -> ParallelPreprocessingResult:
+    shard_references = text_shard_references(
+        artifact_directory=input_artifact_directory,
+        split=None,
+    )
+    effective_workers = _effective_worker_count(
+        requested_workers=workers,
+        shard_count=len(shard_references),
+    )
+    if effective_workers == 1 or _has_exact_deduplication(transforms=transforms):
+        preprocessing_result = preprocess_documents(
+            documents=chain.from_iterable(
+                iter_text_shard_reference_documents(shard_reference=shard_reference)
+                for shard_reference in shard_references
+            ),
+            transforms=transforms,
+        )
+        writer = TextShardWriter(
+            artifact_directory=output_artifact_directory,
+            shard_document_limit=output_shard_documents,
+            shard_name_prefix="",
+        )
+        for document in preprocessing_result.documents:
+            writer.append(document=document)
+        return ParallelPreprocessingResult(
+            corpus_manifest=writer.close(),
+            counters=preprocessing_result.counters,
+            worker_count=1,
+        )
+    worker_inputs = _contiguous_worker_inputs(
+        shard_references=shard_references,
+        worker_count=effective_workers,
+    )
+    worker_results: list[PreprocessingWorkerResult] = []
+    multiprocessing_context = get_context("spawn")
+    with multiprocessing_context.Pool(processes=effective_workers) as pool:
+        worker_results = pool.starmap(
+            _preprocess_worker,
+            [
+                (
+                    worker_input,
+                    output_artifact_directory,
+                    transforms,
+                    output_shard_documents,
+                )
+                for worker_input in worker_inputs
+            ],
+        )
+    counters = PreprocessingCounters()
+    for worker_result in sorted(worker_results, key=lambda result: result.worker_index):
+        counters.add(other=worker_result.counters)
+    corpus_manifest = _merge_worker_text_manifests(
+        worker_results=tuple(worker_results),
+        output_artifact_directory=output_artifact_directory,
+        output_shard_documents=output_shard_documents,
+    )
+    return ParallelPreprocessingResult(
+        corpus_manifest=corpus_manifest,
+        counters=counters,
+        worker_count=effective_workers,
+    )
+
+
+@dataclass(frozen=True)
+class PreprocessingWorkerInput:
+    worker_index: int
+    shard_references: tuple[TextShardReference, ...]
+
+
+@dataclass(frozen=True)
+class PreprocessingWorkerResult:
+    worker_index: int
+    counters: PreprocessingCounters
+    corpus_manifest: TextShardCorpusManifest
+
+
+def _preprocess_worker(
+    worker_input: PreprocessingWorkerInput,
+    output_artifact_directory: Path,
+    transforms: tuple[PreprocessingTransformConfiguration, ...],
+    output_shard_documents: int,
+) -> PreprocessingWorkerResult:
+    preprocessing_result = preprocess_documents(
+        documents=chain.from_iterable(
+            iter_text_shard_reference_documents(shard_reference=shard_reference)
+            for shard_reference in worker_input.shard_references
+        ),
+        transforms=transforms,
+    )
+    writer = TextShardWriter(
+        artifact_directory=output_artifact_directory,
+        shard_document_limit=output_shard_documents,
+        shard_name_prefix=f"part_{worker_input.worker_index:06d}_",
+    )
+    for document in preprocessing_result.documents:
+        writer.append(document=document)
+    return PreprocessingWorkerResult(
+        worker_index=worker_input.worker_index,
+        counters=preprocessing_result.counters,
+        corpus_manifest=writer.close(),
     )
 
 
@@ -178,3 +320,75 @@ def _assigned_split(
     if normalized_value < validation_threshold:
         return "validation"
     return "test"
+
+
+def _effective_worker_count(requested_workers: int, shard_count: int) -> int:
+    if shard_count == 0:
+        return 1
+    return min(requested_workers, shard_count)
+
+
+def _has_exact_deduplication(
+    transforms: tuple[PreprocessingTransformConfiguration, ...],
+) -> bool:
+    for transform in transforms:
+        match transform:
+            case ExactDeduplicationTransformConfiguration():
+                return True
+            case _:
+                continue
+    return False
+
+
+def _contiguous_worker_inputs(
+    shard_references: tuple[TextShardReference, ...],
+    worker_count: int,
+) -> tuple[PreprocessingWorkerInput, ...]:
+    worker_inputs: list[PreprocessingWorkerInput] = []
+    for worker_index in range(worker_count):
+        start_index = worker_index * len(shard_references) // worker_count
+        end_index = (worker_index + 1) * len(shard_references) // worker_count
+        worker_inputs.append(
+            PreprocessingWorkerInput(
+                worker_index=worker_index,
+                shard_references=shard_references[start_index:end_index],
+            ),
+        )
+    return tuple(worker_inputs)
+
+
+def _merge_worker_text_manifests(
+    worker_results: tuple[PreprocessingWorkerResult, ...],
+    output_artifact_directory: Path,
+    output_shard_documents: int,
+) -> TextShardCorpusManifest:
+    split_counters: dict[str, TextShardSplitCounters] = {}
+    for worker_result in sorted(worker_results, key=lambda result: result.worker_index):
+        for split_manifest in worker_result.corpus_manifest.splits:
+            counters = split_counters.get(split_manifest.split)
+            if counters is None:
+                counters = TextShardSplitCounters()
+                split_counters[split_manifest.split] = counters
+            counters.documents += split_manifest.documents
+            counters.bytes += split_manifest.bytes
+            counters.characters += split_manifest.characters
+            counters.shards += split_manifest.shards
+    corpus_manifest = TextShardCorpusManifest(
+        format_version=1,
+        shard_document_limit=output_shard_documents,
+        splits=tuple(
+            TextShardSplitManifest(
+                split=split_name,
+                documents=counters.documents,
+                bytes=counters.bytes,
+                characters=counters.characters,
+                shards=counters.shards,
+            )
+            for split_name, counters in sorted(split_counters.items())
+        ),
+    )
+    (output_artifact_directory / "corpus.json").write_text(
+        corpus_manifest.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+    return corpus_manifest

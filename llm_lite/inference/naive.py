@@ -1,12 +1,12 @@
 import torch
 from torch import nn
 
-from llm_lite.tokenizer.character import CharacterTokenizer
+from llm_lite.tokenizer.loading import TextTokenizer
 
 
 def generate_greedy(
     model: nn.Module,
-    tokenizer: CharacterTokenizer,
+    tokenizer: TextTokenizer,
     prompt: str,
     maximum_new_tokens: int,
 ) -> str:

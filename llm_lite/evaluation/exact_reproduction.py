@@ -6,7 +6,7 @@ from llm_lite.config.models import (
     InferenceConfiguration,
 )
 from llm_lite.inference.naive import generate_greedy
-from llm_lite.tokenizer.character import CharacterTokenizer
+from llm_lite.tokenizer.loading import TextTokenizer
 
 
 class ExactReproductionResult(BaseModel):
@@ -19,7 +19,7 @@ class ExactReproductionResult(BaseModel):
 
 def evaluate_exact_reproduction(
     model: nn.Module,
-    tokenizer: CharacterTokenizer,
+    tokenizer: TextTokenizer,
     evaluation_configuration: ExactReproductionEvaluationConfiguration,
     inference_configuration: InferenceConfiguration,
 ) -> ExactReproductionResult:

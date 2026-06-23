@@ -7,7 +7,9 @@ from llm_lite.pipeline.runner import run_pipeline
 def test_local_text_pipeline_produces_packed_dataset(tmp_path: Path) -> None:
     run_directory = tmp_path / "verify_local_text"
     configuration_path = tmp_path / "verify_local_text.yaml"
-    configuration_text = Path("configs/verify_local_text.yaml").read_text(encoding="utf-8")
+    configuration_text = Path("tests/configs/verify_local_text.yaml").read_text(
+        encoding="utf-8",
+    )
     configuration_path.write_text(
         configuration_text.replace(
             "output_dir: runs/verify_local_text",

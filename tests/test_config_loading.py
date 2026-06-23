@@ -22,6 +22,15 @@ def test_load_verify_configuration() -> None:
     assert exact_reproduction_configuration.expected_completion == "hello world\n"
 
 
+def test_load_byte_bpe_verification_configuration() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("tests/configs/verify_byte_bpe.yaml"),
+    )
+
+    assert experiment_configuration.experiment.name == "verify_byte_bpe"
+    assert experiment_configuration.tokenizer.type.value == "byte_bpe"
+
+
 def test_evaluation_configuration_requires_configured_evaluator() -> None:
     with pytest.raises(ValidationError, match="At least one evaluation block"):
         EvaluationConfiguration.model_validate({})

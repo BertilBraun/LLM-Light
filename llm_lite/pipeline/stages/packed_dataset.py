@@ -9,7 +9,7 @@ from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
 from llm_lite.pipeline.stages.io import iter_processed_document_texts
-from llm_lite.tokenizer.character import CharacterTokenizer
+from llm_lite.tokenizer.loading import load_tokenizer
 
 
 @dataclass(frozen=True)
@@ -26,8 +26,9 @@ class PackedDatasetStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        tokenizer = CharacterTokenizer.load(
+        tokenizer = load_tokenizer(
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
+            tokenizer_configuration=experiment_configuration.tokenizer,
         )
         if tokenizer.pad_token_id is None:
             raise ValueError("Packing requires a configured pad token.")

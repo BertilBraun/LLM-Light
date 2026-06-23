@@ -7,7 +7,7 @@ from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
 from llm_lite.pipeline.stages.io import iter_processed_document_texts
-from llm_lite.tokenizer.character import train_character_tokenizer
+from llm_lite.tokenizer.loading import train_tokenizer
 
 
 @dataclass(frozen=True)
@@ -24,16 +24,14 @@ class TokenizerStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        tokenizer = train_character_tokenizer(
+        trained_tokenizer = train_tokenizer(
             texts=iter_processed_document_texts(registry=registry),
-            add_bos_token=experiment_configuration.tokenizer.add_bos_token,
-            add_eos_token=experiment_configuration.tokenizer.add_eos_token,
-            add_pad_token=experiment_configuration.tokenizer.add_pad_token,
+            tokenizer_configuration=experiment_configuration.tokenizer,
         )
-        tokenizer.save(directory=artifact_directory)
+        trained_tokenizer.tokenizer.save(directory=artifact_directory)
         return StageOutput(
             files={"tokenizer": "tokenizer.json"},
-            metrics={"vocabulary_size": tokenizer.vocabulary_size},
+            metrics=trained_tokenizer.metrics,
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:

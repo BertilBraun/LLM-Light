@@ -7,7 +7,7 @@ from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.tokenizer.character import CharacterTokenizer
+from llm_lite.tokenizer.loading import load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.training.trainer import train_model
 
@@ -32,8 +32,9 @@ class PretrainingStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        tokenizer = CharacterTokenizer.load(
+        tokenizer = load_tokenizer(
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
+            tokenizer_configuration=experiment_configuration.tokenizer,
         )
         dataset = load_packed_sequence_dataset(
             artifact_directory=registry.artifact_directory(StageName.PACKED_DATASET.value),

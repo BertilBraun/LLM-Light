@@ -5,9 +5,9 @@ This repository currently implements milestones M0 and M1, with M2 local text
 ingestion and TinyStories-ready preprocessing underway: typed experiment
 configuration, local artifact manifests, ordered pipeline execution, inline text
 and local text data, Unicode and line-ending normalization, exact
-deduplication, deterministic split metadata, a character tokenizer, tiny dense
-GPT pretraining, checkpoint resume, greedy inference, and evaluator-specific
-exact-reproduction evaluation.
+deduplication, deterministic split metadata, character and byte-level BPE
+tokenizers, tiny dense GPT pretraining, checkpoint resume, greedy inference,
+and evaluator-specific exact-reproduction evaluation.
 
 Current verification stage order:
 
@@ -50,7 +50,13 @@ python -m pytest
 Run the local text verification pipeline:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
+```
+
+Run the byte-level BPE verification pipeline:
+
+```bash
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
 ```
 
 ## Local Text Data
@@ -94,8 +100,22 @@ Recommended preliminary TinyStories defaults are NFC Unicode normalization,
 LF line endings, minimum length 50 characters, maximum length 4096 characters,
 exact deduplication after normalization, no lowercasing, and deterministic
 split metadata. `configs/tinystories_local_text.yaml` points at
-`data/tinystories/**/*.txt` as a local prepared corpus path; it does not
-download data.
+`data/tinystories/**/*.txt` as a local prepared corpus path and uses byte-level
+BPE; it does not download data.
+
+Byte-level BPE starts from all 256 byte values plus configured special tokens,
+then learns deterministic pair merges up to `tokenizer.vocabulary_size`.
+Encoding and decoding preserve Unicode, whitespace, tabs, and newlines through
+UTF-8 bytes. For TinyStories-style runs, start with:
+
+```yaml
+tokenizer:
+  type: byte_bpe
+  vocabulary_size: 8192
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+```
 
 Inspect training curves in TensorBoard:
 
@@ -193,14 +213,15 @@ M2 local text validation should be run with:
 python -m pytest -q
 python -m ruff check .
 python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
-python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
 ```
 
 Validated on 2026-06-23 with:
 
 ```text
 python -m pytest -q
-33 passed
+39 passed
 
 python -m ruff check .
 All checks passed!
@@ -208,12 +229,21 @@ All checks passed!
 python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
 pretraining complete at step 60, compatible skip
 
-python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
 raw_documents: 1
 processed_documents: 1
 rejected_documents: 0
 total_characters: 12
 total_bytes: 12
+packed sequences: 1
+exact reproduction: passed
+
+python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
+vocabulary_size: 260
+merge_count: 1
+training_documents: 1
+training_bytes: 12
+training_tokens: 11
 packed sequences: 1
 exact reproduction: passed
 ```

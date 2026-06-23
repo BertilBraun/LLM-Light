@@ -9,7 +9,7 @@ from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
-from llm_lite.tokenizer.character import CharacterTokenizer
+from llm_lite.tokenizer.loading import load_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint
 
 
@@ -35,8 +35,9 @@ class EvaluationStage:
         exact_reproduction_configuration = experiment_configuration.evaluation.exact_reproduction
         if exact_reproduction_configuration is None:
             raise ValueError("Exact reproduction evaluation is not configured.")
-        tokenizer = CharacterTokenizer.load(
+        tokenizer = load_tokenizer(
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
+            tokenizer_configuration=experiment_configuration.tokenizer,
         )
         model = DenseGpt(
             model_configuration=experiment_configuration.model,

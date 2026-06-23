@@ -10,7 +10,8 @@ dataset:
     - data/tinystories/**/*.txt
 
 tokenizer:
-  type: character
+  type: byte_bpe
+  vocabulary_size: 256
   add_bos_token: true
   add_eos_token: true
   add_pad_token: true

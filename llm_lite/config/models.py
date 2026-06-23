@@ -12,6 +12,7 @@ class DatasetType(str, Enum):
 
 class TokenizerType(str, Enum):
     CHARACTER = "character"
+    BYTE_BPE = "byte_bpe"
 
 
 class PreprocessingTransformType(str, Enum):
@@ -71,13 +72,29 @@ class LocalTextDatasetConfiguration(BaseModel):
     glob_patterns: tuple[str, ...]
 
 
-class TokenizerConfiguration(BaseModel):
+class CharacterTokenizerConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    type: TokenizerType
+    type: Literal[TokenizerType.CHARACTER]
     add_bos_token: bool
     add_eos_token: bool
     add_pad_token: bool
+
+
+class ByteBpeTokenizerConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[TokenizerType.BYTE_BPE]
+    vocabulary_size: int = Field(ge=256)
+    add_bos_token: bool
+    add_eos_token: bool
+    add_pad_token: bool
+
+
+TokenizerConfiguration = Annotated[
+    CharacterTokenizerConfiguration | ByteBpeTokenizerConfiguration,
+    Field(discriminator="type"),
+]
 
 
 class NormalizeLineEndingsTransformConfiguration(BaseModel):

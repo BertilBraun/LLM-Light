@@ -1,0 +1,83 @@
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Protocol
+
+from llm_lite.config.models import (
+    ByteBpeTokenizerConfiguration,
+    CharacterTokenizerConfiguration,
+    TokenizerConfiguration,
+)
+from llm_lite.tokenizer.byte_bpe import ByteBpeTokenizer, train_byte_bpe_tokenizer
+from llm_lite.tokenizer.character import CharacterTokenizer, train_character_tokenizer
+
+
+class TextTokenizer(Protocol):
+    @property
+    def vocabulary_size(self) -> int: ...
+
+    @property
+    def pad_token_id(self) -> int | None: ...
+
+    @property
+    def eos_token_id(self) -> int: ...
+
+    def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]: ...
+
+    def decode(self, token_ids: Sequence[int]) -> str: ...
+
+    def save(self, directory: Path) -> None: ...
+
+
+@dataclass(frozen=True)
+class TrainedTokenizer:
+    tokenizer: TextTokenizer
+    metrics: dict[str, int | float]
+
+
+def train_tokenizer(
+    texts: Iterable[str],
+    tokenizer_configuration: TokenizerConfiguration,
+) -> TrainedTokenizer:
+    match tokenizer_configuration:
+        case CharacterTokenizerConfiguration():
+            tokenizer = train_character_tokenizer(
+                texts=texts,
+                add_bos_token=tokenizer_configuration.add_bos_token,
+                add_eos_token=tokenizer_configuration.add_eos_token,
+                add_pad_token=tokenizer_configuration.add_pad_token,
+            )
+            return TrainedTokenizer(
+                tokenizer=tokenizer,
+                metrics={"vocabulary_size": tokenizer.vocabulary_size},
+            )
+        case ByteBpeTokenizerConfiguration():
+            training_result = train_byte_bpe_tokenizer(
+                texts=texts,
+                vocabulary_size=tokenizer_configuration.vocabulary_size,
+                add_bos_token=tokenizer_configuration.add_bos_token,
+                add_eos_token=tokenizer_configuration.add_eos_token,
+                add_pad_token=tokenizer_configuration.add_pad_token,
+            )
+            return TrainedTokenizer(
+                tokenizer=training_result.tokenizer,
+                metrics={
+                    "vocabulary_size": training_result.tokenizer.vocabulary_size,
+                    "merge_count": training_result.tokenizer.merge_count,
+                    "training_documents": training_result.training_document_count,
+                    "training_bytes": training_result.training_bytes,
+                    "training_tokens": training_result.training_tokens,
+                    "bytes_per_token": training_result.bytes_per_token,
+                },
+            )
+
+
+def load_tokenizer(
+    directory: Path,
+    tokenizer_configuration: TokenizerConfiguration,
+) -> TextTokenizer:
+    match tokenizer_configuration:
+        case CharacterTokenizerConfiguration():
+            return CharacterTokenizer.load(directory=directory)
+        case ByteBpeTokenizerConfiguration():
+            return ByteBpeTokenizer.load(directory=directory)

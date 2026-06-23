@@ -42,9 +42,13 @@ class CharacterTokenizer:
     def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]:
         token_ids: list[int] = []
         if add_bos:
+            if self.bos_token is None:
+                raise ValueError("BOS token is not configured.")
             token_ids.append(self.bos_token_id)
         token_ids.extend(self.token_to_id[character] for character in text)
         if add_eos:
+            if self.eos_token is None:
+                raise ValueError("EOS token is not configured.")
             token_ids.append(self.eos_token_id)
         return token_ids
 

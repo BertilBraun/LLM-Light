@@ -3,7 +3,7 @@ from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
 from llm_lite.data.document import RawDocumentRecord
-from llm_lite.data.sources import load_inline_documents
+from llm_lite.data.sources import iter_dataset_documents
 from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
@@ -24,10 +24,18 @@ class RawDatasetStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        documents = load_inline_documents(dataset_configuration=experiment_configuration.dataset)
         data_path = artifact_directory / "documents.jsonl"
+        document_count = 0
+        total_bytes = 0
+        total_characters = 0
         with data_path.open("w", encoding="utf-8") as data_file:
-            for document in documents:
+            for document in iter_dataset_documents(
+                experiment_configuration=experiment_configuration,
+            ):
+                document_count += 1
+                document_bytes = len(document.text.encode("utf-8"))
+                total_bytes += document_bytes
+                total_characters += len(document.text)
                 document_record = RawDocumentRecord(
                     document_id=document.document_id,
                     text=document.text,
@@ -36,7 +44,13 @@ class RawDatasetStage:
                 data_file.write(document_record.model_dump_json() + "\n")
         return StageOutput(
             files={"documents": "documents.jsonl"},
-            metrics={"documents": len(documents)},
+            metrics={
+                "raw_documents": document_count,
+                "processed_documents": document_count,
+                "rejected_documents": 0,
+                "total_characters": total_characters,
+                "total_bytes": total_bytes,
+            },
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:

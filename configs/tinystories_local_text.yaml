@@ -1,0 +1,81 @@
+experiment:
+  name: tinystories_local_text
+  seed: 1337
+  output_dir: runs/tinystories_local_text
+
+dataset:
+  type: local_text
+  paths: []
+  glob_patterns:
+    - data/tinystories/**/*.txt
+
+tokenizer:
+  type: character
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+
+preprocessing:
+  transforms:
+    - type: normalize_unicode
+      form: NFC
+    - type: normalize_line_endings
+    - type: min_length
+      min_characters: 50
+    - type: max_length
+      max_characters: 4096
+    - type: exact_deduplication
+    - type: assign_split
+      train_probability: 0.98
+      validation_probability: 0.01
+      test_probability: 0.01
+
+packing:
+  context_length: 512
+  add_bos: true
+  add_eos: true
+  pack_documents: true
+  maximum_shard_tokens: 1000000
+
+model:
+  type: dense_gpt
+  dimension: 192
+  layers: 6
+  attention_heads: 6
+  feed_forward_dimension: 768
+  dropout: 0.1
+  tie_embeddings: true
+
+training:
+  objective: causal_language_modeling
+  maximum_steps: 1000
+  batch_size_sequences: 8
+  dataloader:
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+    prefetch_factor: null
+  optimizer:
+    learning_rate: 0.0006
+    weight_decay: 0.1
+  precision: fp32
+  gradient_clip_norm: 1.0
+  checkpoint_interval_steps: 100
+  log_interval_steps: 10
+
+post_training:
+  type: none
+
+evaluation:
+  exact_reproduction:
+    prompt: "Once upon a time"
+    expected_completion: ""
+
+inference:
+  engine: naive
+  precision: fp32
+  quantization: none
+  maximum_new_tokens: 64
+
+distributed:
+  enabled: false

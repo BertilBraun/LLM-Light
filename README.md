@@ -1,10 +1,13 @@
 # LLM-Light
 
 LLM-Light is a small PyTorch-native, configuration-driven LLM training pipeline.
-This repository currently implements milestones M0 and M1 only: typed experiment
+This repository currently implements milestones M0 and M1, with M2 local text
+ingestion and TinyStories-ready preprocessing underway: typed experiment
 configuration, local artifact manifests, ordered pipeline execution, inline text
-data, a character tokenizer, tiny dense GPT pretraining, checkpoint resume,
-greedy inference, and evaluator-specific exact-reproduction evaluation.
+and local text data, Unicode and line-ending normalization, exact
+deduplication, deterministic split metadata, a character tokenizer, tiny dense
+GPT pretraining, checkpoint resume, greedy inference, and evaluator-specific
+exact-reproduction evaluation.
 
 Current verification stage order:
 
@@ -43,6 +46,56 @@ Run tests:
 ```bash
 python -m pytest
 ```
+
+Run the local text verification pipeline:
+
+```bash
+python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+```
+
+## Local Text Data
+
+Use `dataset.type: local_text` to ingest UTF-8 text files from explicit paths,
+glob patterns, or both. Files are resolved, deduplicated, and processed in
+deterministic path order. Raw documents include stable document ids plus
+metadata for source type, absolute path, byte size, and content hash.
+
+```yaml
+dataset:
+  type: local_text
+  paths:
+    - data/stories/example.txt
+  glob_patterns:
+    - data/stories/**/*.txt
+```
+
+Preprocessing remains ordered and streaming. `lower_case` is available but is
+not recommended as a default for story or code corpora because it destroys
+useful casing signal.
+
+```yaml
+preprocessing:
+  transforms:
+    - type: normalize_unicode
+      form: NFC
+    - type: normalize_line_endings
+    - type: min_length
+      min_characters: 50
+    - type: max_length
+      max_characters: 4096
+    - type: exact_deduplication
+    - type: assign_split
+      train_probability: 0.98
+      validation_probability: 0.01
+      test_probability: 0.01
+```
+
+Recommended preliminary TinyStories defaults are NFC Unicode normalization,
+LF line endings, minimum length 50 characters, maximum length 4096 characters,
+exact deduplication after normalization, no lowercasing, and deterministic
+split metadata. `configs/tinystories_local_text.yaml` points at
+`data/tinystories/**/*.txt` as a local prepared corpus path; it does not
+download data.
 
 Inspect training curves in TensorBoard:
 
@@ -132,4 +185,35 @@ exact reproduction: passed
 generated_text: "hello world\n"
 tensorboard event files: present
 pipeline event log: present
+```
+
+M2 local text validation should be run with:
+
+```bash
+python -m pytest -q
+python -m ruff check .
+python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
+python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+```
+
+Validated on 2026-06-23 with:
+
+```text
+python -m pytest -q
+33 passed
+
+python -m ruff check .
+All checks passed!
+
+python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
+pretraining complete at step 60, compatible skip
+
+python -m llm_lite.scripts.run_pipeline --config configs/verify_local_text.yaml
+raw_documents: 1
+processed_documents: 1
+rejected_documents: 0
+total_characters: 12
+total_bytes: 12
+packed sequences: 1
+exact reproduction: passed
 ```

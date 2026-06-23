@@ -51,11 +51,18 @@ class ProcessedDatasetStage:
         return StageOutput(
             files={"metadata": "metadata.jsonl", "documents": "documents"},
             metrics={
-                "input_documents": counters.input_documents,
-                "output_documents": counters.output_documents,
+                "raw_documents": counters.input_documents,
+                "processed_documents": counters.output_documents,
                 "rejected_documents": counters.rejected_documents,
+                "total_characters": counters.output_characters,
+                "total_bytes": counters.output_bytes,
+                "input_characters": counters.input_characters,
                 "input_bytes": counters.input_bytes,
-                "output_bytes": counters.output_bytes,
+                "unicode_normalized_documents": counters.unicode_normalized_documents,
+                "line_endings_normalized_documents": counters.line_endings_normalized_documents,
+                "lower_cased_documents": counters.lower_cased_documents,
+                "deduplicated_documents": counters.deduplicated_documents,
+                "split_assigned_documents": counters.split_assigned_documents,
             },
         )
 

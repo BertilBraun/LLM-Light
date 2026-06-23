@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class DatasetType(str, Enum):
     INLINE_TEXT = "inline_text"
+    LOCAL_TEXT = "local_text"
 
 
 class TokenizerType(str, Enum):
@@ -14,9 +15,13 @@ class TokenizerType(str, Enum):
 
 
 class PreprocessingTransformType(str, Enum):
+    NORMALIZE_UNICODE = "normalize_unicode"
     NORMALIZE_LINE_ENDINGS = "normalize_line_endings"
+    LOWER_CASE = "lower_case"
     MIN_LENGTH = "min_length"
     MAX_LENGTH = "max_length"
+    EXACT_DEDUPLICATION = "exact_deduplication"
+    ASSIGN_SPLIT = "assign_split"
 
 
 class ModelType(str, Enum):
@@ -54,8 +59,16 @@ class ExperimentConfiguration(BaseModel):
 class InlineTextDatasetConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    type: DatasetType
+    type: Literal[DatasetType.INLINE_TEXT]
     documents: tuple[str, ...]
+
+
+class LocalTextDatasetConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[DatasetType.LOCAL_TEXT]
+    paths: tuple[Path, ...]
+    glob_patterns: tuple[str, ...]
 
 
 class TokenizerConfiguration(BaseModel):
@@ -73,6 +86,25 @@ class NormalizeLineEndingsTransformConfiguration(BaseModel):
     type: Literal[PreprocessingTransformType.NORMALIZE_LINE_ENDINGS]
 
 
+class NormalizeUnicodeTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.NORMALIZE_UNICODE]
+    form: str
+
+    @model_validator(mode="after")
+    def require_supported_unicode_form(self) -> "NormalizeUnicodeTransformConfiguration":
+        if self.form not in {"NFC", "NFD", "NFKC", "NFKD"}:
+            raise ValueError("Unicode normalization form must be NFC, NFD, NFKC, or NFKD.")
+        return self
+
+
+class LowerCaseTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.LOWER_CASE]
+
+
 class MinLengthTransformConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -87,10 +119,38 @@ class MaxLengthTransformConfiguration(BaseModel):
     max_characters: int = Field(gt=0)
 
 
+class ExactDeduplicationTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.EXACT_DEDUPLICATION]
+
+
+class AssignSplitTransformConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[PreprocessingTransformType.ASSIGN_SPLIT]
+    train_probability: float = Field(ge=0.0, le=1.0)
+    validation_probability: float = Field(ge=0.0, le=1.0)
+    test_probability: float = Field(ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def require_probabilities_sum_to_one(self) -> "AssignSplitTransformConfiguration":
+        probability_sum = (
+            self.train_probability + self.validation_probability + self.test_probability
+        )
+        if abs(probability_sum - 1.0) > 0.000001:
+            raise ValueError("Split assignment probabilities must sum to 1.0.")
+        return self
+
+
 PreprocessingTransformConfiguration = Annotated[
-    NormalizeLineEndingsTransformConfiguration
+    NormalizeUnicodeTransformConfiguration
+    | NormalizeLineEndingsTransformConfiguration
+    | LowerCaseTransformConfiguration
     | MinLengthTransformConfiguration
-    | MaxLengthTransformConfiguration,
+    | MaxLengthTransformConfiguration
+    | ExactDeduplicationTransformConfiguration
+    | AssignSplitTransformConfiguration,
     Field(discriminator="type"),
 ]
 
@@ -205,7 +265,10 @@ class ExperimentFile(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     experiment: ExperimentConfiguration
-    dataset: InlineTextDatasetConfiguration
+    dataset: Annotated[
+        InlineTextDatasetConfiguration | LocalTextDatasetConfiguration,
+        Field(discriminator="type"),
+    ]
     preprocessing: PreprocessingConfiguration
     tokenizer: TokenizerConfiguration
     packing: PackingConfiguration

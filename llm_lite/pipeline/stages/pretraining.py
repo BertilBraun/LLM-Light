@@ -3,9 +3,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict
 from torch import nn
 
-from llm_lite.config.models import ExperimentFile
+from llm_lite.config.models import DenseGptConfiguration, ExperimentFile, TrainingObjective
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.gpt import DenseGpt
@@ -16,6 +17,16 @@ from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.training.trainer import train_model
 
+PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION = 2
+
+
+class PretrainingReconstructionContract(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    contract_version: int
+    model: DenseGptConfiguration
+    objective: TrainingObjective
+
 
 @dataclass(frozen=True)
 class PretrainingStage:
@@ -23,17 +34,10 @@ class PretrainingStage:
     parents: tuple[StageName, ...] = (StageName.PACKED_DATASET, StageName.TOKENIZER)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
-        training_contract = experiment_configuration.training.model_dump(mode="json")
-        training_contract.pop("maximum_steps")
-        training_contract.pop("checkpoint_interval_steps")
-        training_contract.pop("log_interval_steps")
-        training_contract.pop("evaluation")
         return hash_json_value(
-            value={
-                "logging_schema_version": 1,
-                "model": experiment_configuration.model.model_dump(mode="json"),
-                "training_contract": training_contract,
-            },
+            value=_pretraining_reconstruction_contract(
+                experiment_configuration=experiment_configuration,
+            ).model_dump(mode="json"),
         )
 
     def run(
@@ -97,6 +101,32 @@ class PretrainingStage:
         if checkpoint_state is not None:
             return f"complete at step {checkpoint_state.step}, skip"
         return "compatible, skip"
+
+    def continuation_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None:
+        checkpoint_state = latest_checkpoint(
+            checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
+            / "checkpoints",
+        )
+        if checkpoint_state is None:
+            return "resume-compatible, execute"
+        maximum_steps = experiment_configuration.training.maximum_steps
+        if checkpoint_state.step < maximum_steps:
+            return f"resume from step {checkpoint_state.step} to {maximum_steps}"
+        return None
+
+
+def _pretraining_reconstruction_contract(
+    experiment_configuration: ExperimentFile,
+) -> PretrainingReconstructionContract:
+    return PretrainingReconstructionContract(
+        contract_version=PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION,
+        model=experiment_configuration.model,
+        objective=experiment_configuration.training.objective,
+    )
 
 
 def _training_evaluation_callback(

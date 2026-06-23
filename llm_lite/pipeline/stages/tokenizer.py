@@ -5,7 +5,7 @@ from llm_lite.config.models import ExperimentFile
 from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.pipeline.stages.base import compatible_skip_action
+from llm_lite.pipeline.stages.base import compatible_skip_action, no_continuation_action
 from llm_lite.pipeline.stages.io import iter_processed_document_texts, tokenizer_training_split
 from llm_lite.tokenizer.loading import train_tokenizer
 
@@ -39,3 +39,13 @@ class TokenizerStage:
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         return compatible_skip_action(registry=registry)
+
+    def continuation_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None:
+        return no_continuation_action(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
+        )

@@ -13,7 +13,6 @@ from llm_lite.pipeline.logging import (
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
-from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.utilities.random import seed_everything
 
 
@@ -107,16 +106,15 @@ def _review_pipeline(
             configuration_hash=configuration_hash,
             parent_hashes=parent_hashes,
         ):
-            compatible_resume_action = _compatible_resume_action(
+            continuation_action = stage.continuation_action(
                 experiment_configuration=experiment_configuration,
                 registry=registry,
-                stage=stage,
             )
-            if compatible_resume_action is not None:
+            if continuation_action is not None:
                 review.append(
                     StageReview(
                         stage_name=stage.name,
-                        action=compatible_resume_action,
+                        action=continuation_action,
                     ),
                 )
                 continue
@@ -148,17 +146,14 @@ def _execute_pipeline(
             configuration_hash=configuration_hash,
             parent_hashes=parent_hashes,
         )
-        resume_compatible_stage = (
-            compatible
-            and stage.name not in force_stage_names
-            and _compatible_resume_action(
-                experiment_configuration=experiment_configuration,
-                registry=registry,
-                stage=stage,
-            )
-            is not None
+        continuation_action = stage.continuation_action(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
         )
-        if compatible and stage.name not in force_stage_names and not resume_compatible_stage:
+        continue_compatible_stage = (
+            compatible and stage.name not in force_stage_names and continuation_action is not None
+        )
+        if compatible and stage.name not in force_stage_names and not continue_compatible_stage:
             print(f"[skip] {stage.name.value}: compatible artifact found", flush=True)
             _log_stage_event(
                 event_logger=event_logger,
@@ -169,7 +164,7 @@ def _execute_pipeline(
             continue
         artifact_directory = registry.artifacts_directory / stage.name.value
         if artifact_directory.exists() and (
-            stage.name in force_stage_names or not resume_compatible_stage
+            stage.name in force_stage_names or not continue_compatible_stage
         ):
             shutil.rmtree(artifact_directory)
         artifact_directory.mkdir(parents=True, exist_ok=True)
@@ -226,25 +221,6 @@ def _expanded_force_stages(
     ordered_stage_names = tuple(stage.name for stage in stages)
     first_forced_index = min(ordered_stage_names.index(stage_name) for stage_name in force_stages)
     return set(ordered_stage_names[first_forced_index:])
-
-
-def _compatible_resume_action(
-    experiment_configuration: ExperimentFile,
-    registry: ArtifactRegistry,
-    stage: PipelineStage,
-) -> str | None:
-    if stage.name != StageName.PRETRAINING:
-        return None
-    checkpoint_state = latest_checkpoint(
-        checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-        / "checkpoints",
-    )
-    if checkpoint_state is None:
-        return "resume-compatible, execute"
-    maximum_steps = experiment_configuration.training.maximum_steps
-    if checkpoint_state.step < maximum_steps:
-        return f"resume from step {checkpoint_state.step} to {maximum_steps}"
-    return None
 
 
 def _print_review(review: list[StageReview]) -> None:

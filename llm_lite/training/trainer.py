@@ -5,7 +5,7 @@ from typing import Protocol
 
 import torch
 from torch import nn
-from torch.optim import AdamW
+from torch.optim import AdamW, Optimizer
 from torch.utils.data import Dataset, IterableDataset
 
 from llm_lite.config.models import TrainingConfiguration
@@ -46,6 +46,10 @@ def train_model(
         checkpoint_directory=checkpoint_directory,
         model=model,
         optimizer=optimizer,
+    )
+    _apply_current_optimizer_configuration(
+        optimizer=optimizer,
+        training_configuration=training_configuration,
     )
     start_step = 0 if loaded_checkpoint_step is None else loaded_checkpoint_step
     data_iterator = create_training_data_iterator(
@@ -118,3 +122,12 @@ def train_model(
         resumed_from_step=start_step,
         evaluation_path=evaluation_path,
     )
+
+
+def _apply_current_optimizer_configuration(
+    optimizer: Optimizer,
+    training_configuration: TrainingConfiguration,
+) -> None:
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = training_configuration.optimizer.learning_rate
+        parameter_group["weight_decay"] = training_configuration.optimizer.weight_decay

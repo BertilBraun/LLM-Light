@@ -28,6 +28,12 @@ class PipelineStage(Protocol):
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str: ...
 
+    def continuation_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None: ...
+
     def run(
         self,
         experiment_configuration: ExperimentFile,

@@ -7,7 +7,7 @@ from llm_lite.data.text_shards import TextShardCorpusManifest, write_text_shards
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.pipeline.stages.base import compatible_skip_action
+from llm_lite.pipeline.stages.base import compatible_skip_action, no_continuation_action
 from llm_lite.pipeline.stages.io import iter_raw_documents
 
 
@@ -65,6 +65,16 @@ class ProcessedDatasetStage:
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         return compatible_skip_action(registry=registry)
+
+    def continuation_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None:
+        return no_continuation_action(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
+        )
 
 
 def _shard_count(corpus_manifest: TextShardCorpusManifest) -> int:

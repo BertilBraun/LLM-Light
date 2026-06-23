@@ -13,6 +13,7 @@ from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
+from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.training.trainer import train_model
@@ -29,7 +30,7 @@ class PretrainingReconstructionContract(BaseModel):
 
 
 @dataclass(frozen=True)
-class PretrainingStage:
+class PretrainingStage(BasePipelineStage):
     name: StageName = StageName.PRETRAINING
     parents: tuple[StageName, ...] = (StageName.PACKED_DATASET, StageName.TOKENIZER)
 

@@ -8,13 +8,13 @@ from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.pipeline.stages.base import compatible_skip_action, no_continuation_action
+from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.tokenizer.loading import load_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint
 
 
 @dataclass(frozen=True)
-class EvaluationStage:
+class EvaluationStage(BasePipelineStage):
     name: StageName = StageName.EVALUATION
     parents: tuple[StageName, ...] = (StageName.PRETRAINING, StageName.TOKENIZER)
 
@@ -61,16 +61,3 @@ class EvaluationStage:
             encoding="utf-8",
         )
         return StageOutput(files={"report": "report.json"}, metrics=evaluation_result.metrics)
-
-    def compatible_action(self, registry: ArtifactRegistry) -> str:
-        return compatible_skip_action(registry=registry)
-
-    def continuation_action(
-        self,
-        experiment_configuration: ExperimentFile,
-        registry: ArtifactRegistry,
-    ) -> str | None:
-        return no_continuation_action(
-            experiment_configuration=experiment_configuration,
-            registry=registry,
-        )

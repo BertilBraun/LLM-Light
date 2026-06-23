@@ -7,13 +7,13 @@ from llm_lite.data.packing import pack_token_sequences
 from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.pipeline.stages.base import compatible_skip_action, no_continuation_action
+from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.pipeline.stages.io import iter_processed_document_texts, packing_split
 from llm_lite.tokenizer.loading import load_tokenizer
 
 
 @dataclass(frozen=True)
-class PackedDatasetStage:
+class PackedDatasetStage(BasePipelineStage):
     name: StageName = StageName.PACKED_DATASET
     parents: tuple[StageName, ...] = (StageName.PROCESSED_DATASET, StageName.TOKENIZER)
 
@@ -61,17 +61,4 @@ class PackedDatasetStage:
                 "shards": len(index.shards),
                 "training_split": "all" if split is None else split,
             },
-        )
-
-    def compatible_action(self, registry: ArtifactRegistry) -> str:
-        return compatible_skip_action(registry=registry)
-
-    def continuation_action(
-        self,
-        experiment_configuration: ExperimentFile,
-        registry: ArtifactRegistry,
-    ) -> str | None:
-        return no_continuation_action(
-            experiment_configuration=experiment_configuration,
-            registry=registry,
         )

@@ -7,12 +7,12 @@ from llm_lite.data.text_shards import TextShardCorpusManifest, write_text_shards
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
-from llm_lite.pipeline.stages.base import compatible_skip_action, no_continuation_action
+from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.pipeline.stages.io import iter_raw_documents
 
 
 @dataclass(frozen=True)
-class ProcessedDatasetStage:
+class ProcessedDatasetStage(BasePipelineStage):
     name: StageName = StageName.PROCESSED_DATASET
     parents: tuple[StageName, ...] = (StageName.RAW_DATASET,)
 
@@ -61,19 +61,6 @@ class ProcessedDatasetStage:
         return StageOutput(
             files={"corpus": "corpus.json"},
             metrics=metrics,
-        )
-
-    def compatible_action(self, registry: ArtifactRegistry) -> str:
-        return compatible_skip_action(registry=registry)
-
-    def continuation_action(
-        self,
-        experiment_configuration: ExperimentFile,
-        registry: ArtifactRegistry,
-    ) -> str | None:
-        return no_continuation_action(
-            experiment_configuration=experiment_configuration,
-            registry=registry,
         )
 
 

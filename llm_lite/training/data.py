@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 from torch.utils.data.distributed import DistributedSampler
 
 from llm_lite.config.models import DataLoaderConfiguration
+from llm_lite.training.objectives import TrainingBatch
 
 
 @runtime_checkable
@@ -26,8 +27,8 @@ class DistributedDataAssignment:
 
 @dataclass
 class InfiniteDataIterator:
-    data_loader: DataLoader[torch.Tensor]
-    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor]
+    data_loader: DataLoader[TrainingBatch]
+    dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch]
     sampler: EpochAwareSampler | None
     epoch: int
 
@@ -35,7 +36,7 @@ class InfiniteDataIterator:
         self._set_epoch()
         self._iterator = iter(self.data_loader)
 
-    def next_batch(self) -> torch.Tensor:
+    def next_batch(self) -> TrainingBatch:
         try:
             return next(self._iterator)
         except StopIteration:
@@ -55,7 +56,7 @@ class InfiniteDataIterator:
 
 
 def create_training_data_iterator(
-    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch],
     batch_size_sequences: int,
     dataloader_configuration: DataLoaderConfiguration,
     seed: int,
@@ -108,7 +109,7 @@ def _distributed_sampler(
     dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
     seed: int,
     distributed_data_assignment: DistributedDataAssignment | None,
-) -> DistributedSampler[torch.Tensor] | None:
+    ) -> DistributedSampler[TrainingBatch] | None:
     if distributed_data_assignment is None:
         return None
     if isinstance(dataset, IterableDataset):

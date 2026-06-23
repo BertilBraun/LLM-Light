@@ -13,6 +13,7 @@ from llm_lite.data.datasets import (
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.tokenizer.character import train_character_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
+from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
 from llm_lite.training.trainer import train_model
 
 
@@ -48,6 +49,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
         evaluation_callback=None,
+        objective_runner=CausalLanguageModelingObjectiveRunner(),
     )
     second_result = train_model(
         model=model,
@@ -56,6 +58,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
         evaluation_callback=None,
+        objective_runner=CausalLanguageModelingObjectiveRunner(),
     )
 
     assert first_result.final_step == experiment_configuration.training.maximum_steps

@@ -38,6 +38,10 @@ class TrainingObjective(str, Enum):
 
 class PostTrainingType(str, Enum):
     NONE = "none"
+    DIRECT_PREFERENCE_OPTIMIZATION = "direct_preference_optimization"
+    PYTHON_GENERATED_DIRECT_PREFERENCE_OPTIMIZATION = (
+        "python_generated_direct_preference_optimization"
+    )
 
 
 class InferenceEngine(str, Enum):
@@ -292,8 +296,36 @@ class TrainingConfiguration(Configuration):
     evaluation: TrainingEvaluationConfiguration | None = None
 
 
-class PostTrainingConfiguration(Configuration):
-    type: PostTrainingType = PostTrainingType.NONE
+class NoPostTrainingConfiguration(Configuration):
+    type: Literal[PostTrainingType.NONE] = PostTrainingType.NONE
+
+
+class DirectPreferenceOptimizationConfiguration(Configuration):
+    type: Literal[PostTrainingType.DIRECT_PREFERENCE_OPTIMIZATION]
+    preference_dataset_path: Path
+    beta: float = Field(default=0.1, gt=0.0)
+    maximum_steps: int = Field(gt=0)
+    batch_size_pairs: int = Field(gt=0)
+
+
+class PythonGeneratedDirectPreferenceOptimizationConfiguration(Configuration):
+    type: Literal[PostTrainingType.PYTHON_GENERATED_DIRECT_PREFERENCE_OPTIMIZATION]
+    tasks_path: Path
+    samples_per_prompt: int = Field(gt=1)
+    beta: float = Field(default=0.1, gt=0.0)
+    maximum_steps: int = Field(gt=0)
+    batch_size_pairs: int = Field(gt=0)
+    maximum_tasks: int | None = Field(default=None, gt=0)
+    execution_timeout_seconds: float = Field(default=2.0, gt=0.0)
+    stop_sequences: tuple[str, ...] = ("\n\ndef ", "\nclass ", "\nif __name__")
+
+
+PostTrainingConfiguration = Annotated[
+    NoPostTrainingConfiguration
+    | DirectPreferenceOptimizationConfiguration
+    | PythonGeneratedDirectPreferenceOptimizationConfiguration,
+    Field(discriminator="type"),
+]
 
 
 class ExactReproductionEvaluationConfiguration(Configuration):
@@ -408,7 +440,7 @@ class ExperimentFile(Configuration):
     packing: PackingConfiguration
     model: DenseGptConfiguration
     training: TrainingConfiguration
-    post_training: PostTrainingConfiguration = PostTrainingConfiguration()
+    post_training: PostTrainingConfiguration = NoPostTrainingConfiguration()
     evaluation: EvaluationConfiguration = EvaluationConfiguration()
     inference: InferenceConfiguration = InferenceConfiguration()
     distributed: DistributedConfiguration = DistributedConfiguration()

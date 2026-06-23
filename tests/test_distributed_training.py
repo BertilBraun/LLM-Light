@@ -20,6 +20,7 @@ from llm_lite.data.datasets import (
     write_packed_sequence_stream,
 )
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
 from llm_lite.training.trainer import train_model_distributed
 
 
@@ -106,6 +107,7 @@ def _distributed_training_worker(
         seed=7,
         evaluation_callback=None,
         model_configuration_hash="tiny-model",
+        objective_runner=CausalLanguageModelingObjectiveRunner(),
     )
     result_path = Path(artifact_directory) / f"rank_{rank}_result.json"
     result_path.write_text(

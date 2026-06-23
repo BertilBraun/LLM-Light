@@ -20,6 +20,7 @@ from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
+from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
 from llm_lite.training.trainer import train_model, train_model_distributed
 
 PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION = 2
@@ -82,6 +83,7 @@ class PretrainingStage(BasePipelineStage):
                 model_configuration_hash=hash_json_value(
                     value=experiment_configuration.model.model_dump(mode="json"),
                 ),
+                objective_runner=CausalLanguageModelingObjectiveRunner(),
             )
         else:
             result = train_model(
@@ -91,6 +93,7 @@ class PretrainingStage(BasePipelineStage):
                 artifact_directory=artifact_directory,
                 seed=experiment_configuration.experiment.seed,
                 evaluation_callback=evaluation_callback,
+                objective_runner=CausalLanguageModelingObjectiveRunner(),
             )
         files = {
             "checkpoint": str(result.checkpoint_path.relative_to(artifact_directory)),

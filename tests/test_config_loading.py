@@ -7,10 +7,13 @@ from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.config.models import (
     DataLoaderConfiguration,
     DecodingStrategy,
+    DirectPreferenceOptimizationConfiguration,
     EvaluationConfiguration,
     InferenceConfiguration,
     InferenceEngine,
+    PostTrainingType,
     Precision,
+    PythonGeneratedDirectPreferenceOptimizationConfiguration,
     QuantizationType,
 )
 
@@ -109,6 +112,42 @@ def test_inference_configuration_defaults_common_runtime_options() -> None:
     assert inference_configuration.precision is Precision.FP32
     assert inference_configuration.quantization is QuantizationType.NONE
     assert inference_configuration.decoding.strategy is DecodingStrategy.GREEDY
+
+
+def test_direct_preference_optimization_configuration_loads() -> None:
+    post_training_configuration = DirectPreferenceOptimizationConfiguration.model_validate(
+        {
+            "type": "direct_preference_optimization",
+            "preference_dataset_path": "preferences.jsonl",
+            "beta": 0.2,
+            "maximum_steps": 3,
+            "batch_size_pairs": 2,
+        },
+    )
+
+    assert post_training_configuration.type is PostTrainingType.DIRECT_PREFERENCE_OPTIMIZATION
+    assert post_training_configuration.beta == 0.2
+
+
+def test_python_generated_dpo_configuration_loads() -> None:
+    post_training_configuration = (
+        PythonGeneratedDirectPreferenceOptimizationConfiguration.model_validate(
+            {
+                "type": "python_generated_direct_preference_optimization",
+                "tasks_path": "tasks.jsonl",
+                "samples_per_prompt": 4,
+                "beta": 0.1,
+                "maximum_steps": 3,
+                "batch_size_pairs": 2,
+            },
+        )
+    )
+
+    assert (
+        post_training_configuration.type
+        is PostTrainingType.PYTHON_GENERATED_DIRECT_PREFERENCE_OPTIMIZATION
+    )
+    assert post_training_configuration.samples_per_prompt == 4
 
 
 def test_dataloader_configuration_rejects_worker_options_without_workers() -> None:

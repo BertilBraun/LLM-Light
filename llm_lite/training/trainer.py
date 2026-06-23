@@ -25,7 +25,7 @@ from llm_lite.training.distributed import (
     unwrap_distributed_model,
 )
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
-from llm_lite.training.objectives import causal_language_modeling_loss
+from llm_lite.training.objectives import TrainingBatch, TrainingObjectiveRunner
 
 
 @dataclass(frozen=True)
@@ -43,11 +43,12 @@ class TrainingEvaluationCallback(Protocol):
 
 def train_model(
     model: nn.Module,
-    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch],
     training_configuration: TrainingConfiguration,
     artifact_directory: Path,
     seed: int,
     evaluation_callback: TrainingEvaluationCallback | None,
+    objective_runner: TrainingObjectiveRunner,
 ) -> TrainingResult:
     optimizer = AdamW(
         model.parameters(),
@@ -81,16 +82,19 @@ def train_model(
     try:
         for step in range(start_step + 1, training_configuration.maximum_steps + 1):
             token_batch = data_iterator.next_batch()
+            prepared_batch = objective_runner.prepare_batch(
+                batch=token_batch,
+                device=_model_device(model=model),
+            )
             optimizer.zero_grad(set_to_none=True)
-            model_output = model(token_batch)
-            loss = causal_language_modeling_loss(logits=model_output.logits, token_ids=token_batch)
+            loss = objective_runner.loss(model=model, batch=prepared_batch)
             loss.backward()
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(),
                 max_norm=training_configuration.gradient_clip_norm,
             )
             optimizer.step()
-            tokens_processed += int(token_batch.numel())
+            tokens_processed += _batch_token_count(batch=prepared_batch)
             final_loss = float(loss.detach().cpu().item())
             if step % training_configuration.log_interval_steps == 0:
                 metrics_logger.write(
@@ -139,13 +143,14 @@ def train_model(
 
 def train_model_distributed(
     model: nn.Module,
-    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch],
     training_configuration: TrainingConfiguration,
     distributed_configuration: DistributedConfiguration,
     artifact_directory: Path,
     seed: int,
     evaluation_callback: TrainingEvaluationCallback | None,
     model_configuration_hash: str,
+    objective_runner: TrainingObjectiveRunner,
 ) -> TrainingResult:
     distributed_runtime = initialize_distributed_runtime(
         distributed_configuration=distributed_configuration,
@@ -162,6 +167,7 @@ def train_model_distributed(
             seed=seed,
             evaluation_callback=evaluation_callback,
             model_configuration_hash=model_configuration_hash,
+            objective_runner=objective_runner,
         )
     finally:
         distributed_runtime.close()
@@ -169,7 +175,7 @@ def train_model_distributed(
 
 def _train_model_distributed_initialized(
     model: nn.Module,
-    dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
+    dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch],
     training_configuration: TrainingConfiguration,
     distributed_configuration: DistributedConfiguration,
     distributed_runtime: DistributedRuntime,
@@ -177,6 +183,7 @@ def _train_model_distributed_initialized(
     seed: int,
     evaluation_callback: TrainingEvaluationCallback | None,
     model_configuration_hash: str,
+    objective_runner: TrainingObjectiveRunner,
 ) -> TrainingResult:
     model = prepare_model_for_distributed_training(
         model=model,
@@ -223,17 +230,20 @@ def _train_model_distributed_initialized(
     model.train()
     try:
         for step in range(start_step + 1, training_configuration.maximum_steps + 1):
-            token_batch = data_iterator.next_batch().to(distributed_runtime.device)
+            token_batch = data_iterator.next_batch()
+            prepared_batch = objective_runner.prepare_batch(
+                batch=token_batch,
+                device=distributed_runtime.device,
+            )
             optimizer.zero_grad(set_to_none=True)
-            model_output = model(token_batch)
-            loss = causal_language_modeling_loss(logits=model_output.logits, token_ids=token_batch)
+            loss = objective_runner.loss(model=model, batch=prepared_batch)
             loss.backward()
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(),
                 max_norm=training_configuration.gradient_clip_norm,
             )
             optimizer.step()
-            tokens_processed += int(token_batch.numel())
+            tokens_processed += _batch_token_count(batch=prepared_batch)
             final_loss = distributed_runtime.reduce_mean(float(loss.detach().cpu().item()))
             global_tokens_processed = distributed_runtime.reduce_sum(float(tokens_processed))
             global_gradient_norm = distributed_runtime.reduce_mean(
@@ -356,3 +366,15 @@ def _apply_current_optimizer_configuration(
     for parameter_group in optimizer.param_groups:
         parameter_group["lr"] = training_configuration.optimizer.learning_rate
         parameter_group["weight_decay"] = training_configuration.optimizer.weight_decay
+
+
+def _model_device(model: nn.Module) -> torch.device:
+    return next(model.parameters()).device
+
+
+def _batch_token_count(batch: TrainingBatch) -> int:
+    match batch:
+        case torch.Tensor():
+            return int(batch.numel())
+        case _:
+            return int(batch.chosen_token_ids.numel() + batch.rejected_token_ids.numel())

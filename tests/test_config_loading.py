@@ -31,9 +31,21 @@ def test_load_byte_bpe_verification_configuration() -> None:
     assert experiment_configuration.tokenizer.type.value == "byte_bpe"
 
 
-def test_evaluation_configuration_requires_configured_evaluator() -> None:
-    with pytest.raises(ValidationError, match="At least one evaluation block"):
-        EvaluationConfiguration.model_validate({})
+def test_load_tinystories_huggingface_smoke_configuration() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/tinystories_hf_smoke.yaml"),
+    )
+
+    assert experiment_configuration.dataset.type.value == "huggingface"
+    assert experiment_configuration.training.evaluation is not None
+
+
+def test_evaluation_configuration_allows_no_configured_evaluator() -> None:
+    evaluation_configuration = EvaluationConfiguration.model_validate({})
+
+    assert evaluation_configuration.exact_reproduction is None
+    assert evaluation_configuration.perplexity is None
+    assert evaluation_configuration.fixed_prompt_generation is None
 
 
 def test_evaluation_configuration_rejects_unknown_evaluator() -> None:

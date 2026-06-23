@@ -2,6 +2,8 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.pipeline.hashing import hash_file
 
@@ -24,7 +26,10 @@ class ArtifactRegistry:
         manifest_path = self.manifest_path(artifact_type=artifact_type)
         if not manifest_path.exists():
             return None
-        return ArtifactManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+        try:
+            return ArtifactManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+        except ValidationError:
+            return None
 
     def write_running_manifest(
         self,

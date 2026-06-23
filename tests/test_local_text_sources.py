@@ -21,7 +21,7 @@ def test_resolve_local_text_paths_deduplicates_and_sorts() -> None:
     assert len(resolved_paths) == len(set(resolved_paths))
 
 
-def test_iter_local_text_documents_records_stable_metadata() -> None:
+def test_iter_local_text_documents_records_stable_document() -> None:
     dataset_configuration = LocalTextDatasetConfiguration(
         type=DatasetType.LOCAL_TEXT,
         paths=(Path("tests/fixtures/local_text/hello_world.txt"),),
@@ -33,7 +33,4 @@ def test_iter_local_text_documents_records_stable_metadata() -> None:
     assert len(documents) == 1
     assert documents[0].document_id.startswith("local-text-")
     assert documents[0].text == "hello world\n"
-    assert documents[0].metadata["source"] == "local_text"
-    assert documents[0].metadata["path"].endswith("/tests/fixtures/local_text/hello_world.txt")
-    assert documents[0].metadata["byte_size"] == 12
-    assert str(documents[0].metadata["content_hash"]).startswith("sha256:")
+    assert documents[0].split is None

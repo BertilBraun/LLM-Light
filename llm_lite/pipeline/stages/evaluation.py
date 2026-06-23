@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
-from llm_lite.evaluation.exact_reproduction import evaluate_exact_reproduction
+from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
@@ -32,9 +32,6 @@ class EvaluationStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        exact_reproduction_configuration = experiment_configuration.evaluation.exact_reproduction
-        if exact_reproduction_configuration is None:
-            raise ValueError("Exact reproduction evaluation is not configured.")
         tokenizer = load_tokenizer(
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
             tokenizer_configuration=experiment_configuration.tokenizer,
@@ -51,24 +48,19 @@ class EvaluationStage:
         )
         if checkpoint_step is None:
             raise ValueError("Evaluation requires a completed training checkpoint.")
-        exact_reproduction_result = evaluate_exact_reproduction(
+        evaluation_result = run_configured_evaluators(
             model=model,
             tokenizer=tokenizer,
-            evaluation_configuration=exact_reproduction_configuration,
+            registry=registry,
+            evaluation_configuration=experiment_configuration.evaluation,
             inference_configuration=experiment_configuration.inference,
+            packing_configuration=experiment_configuration.packing,
         )
-        report = {
-            "exact_reproduction": exact_reproduction_result.model_dump(),
-        }
         (artifact_directory / "report.json").write_text(
-            json.dumps(report, indent=2), encoding="utf-8"
+            json.dumps(evaluation_result.report, indent=2),
+            encoding="utf-8",
         )
-        if not exact_reproduction_result.passed:
-            raise ValueError("Exact reproduction evaluation failed.")
-        return StageOutput(
-            files={"report": "report.json"},
-            metrics={"exact_reproduction_passed": exact_reproduction_result.passed},
-        )
+        return StageOutput(files={"report": "report.json"}, metrics=evaluation_result.metrics)
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         return compatible_skip_action(registry=registry)

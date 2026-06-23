@@ -2,9 +2,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
-from llm_lite.data.document import DocumentMetadataRecord
 from llm_lite.data.preprocessing import preprocess_documents
-from llm_lite.pipeline.hashing import hash_model
+from llm_lite.data.text_shards import TextShardCorpusManifest, write_text_shards
+from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
@@ -17,7 +17,12 @@ class ProcessedDatasetStage:
     parents: tuple[StageName, ...] = (StageName.RAW_DATASET,)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
-        return hash_model(model=experiment_configuration.preprocessing)
+        return hash_json_value(
+            value={
+                "preprocessing": experiment_configuration.preprocessing.model_dump(mode="json"),
+                "processed_dataset_format_version": 2,
+            },
+        )
 
     def run(
         self,
@@ -25,31 +30,18 @@ class ProcessedDatasetStage:
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
-        data_directory = artifact_directory / "documents"
-        data_directory.mkdir(parents=True, exist_ok=True)
-        metadata_path = artifact_directory / "metadata.jsonl"
         preprocessing_result = preprocess_documents(
             documents=iter_raw_documents(registry=registry),
             transforms=experiment_configuration.preprocessing.transforms,
         )
-        with metadata_path.open("w", encoding="utf-8") as metadata_file:
-            for document_index, document in enumerate(preprocessing_result.documents):
-                document_path = f"documents/document_{document_index:08d}.txt"
-                with (artifact_directory / document_path).open(
-                    "w",
-                    encoding="utf-8",
-                    newline="",
-                ) as document_file:
-                    document_file.write(document.text)
-                metadata_record = DocumentMetadataRecord(
-                    document_id=document.document_id,
-                    path=document_path,
-                    metadata=document.metadata,
-                )
-                metadata_file.write(metadata_record.model_dump_json() + "\n")
+        corpus_manifest = write_text_shards(
+            documents=preprocessing_result.documents,
+            artifact_directory=artifact_directory,
+            shard_document_limit=experiment_configuration.preprocessing.output_shard_documents,
+        )
         counters = preprocessing_result.counters
         return StageOutput(
-            files={"metadata": "metadata.jsonl", "documents": "documents"},
+            files={"corpus": "corpus.json"},
             metrics={
                 "raw_documents": counters.input_documents,
                 "processed_documents": counters.output_documents,
@@ -63,8 +55,13 @@ class ProcessedDatasetStage:
                 "lower_cased_documents": counters.lower_cased_documents,
                 "deduplicated_documents": counters.deduplicated_documents,
                 "split_assigned_documents": counters.split_assigned_documents,
+                "shards": _shard_count(corpus_manifest=corpus_manifest),
             },
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         return compatible_skip_action(registry=registry)
+
+
+def _shard_count(corpus_manifest: TextShardCorpusManifest) -> int:
+    return sum(split.shards for split in corpus_manifest.splits)

@@ -1,31 +1,49 @@
 from collections.abc import Iterator
 
-from llm_lite.data.document import Document, DocumentMetadataRecord, RawDocumentRecord
+from llm_lite.data.document import Document
+from llm_lite.data.text_shards import (
+    iter_text_shard_documents,
+    iter_text_shard_texts,
+    load_text_shard_corpus_manifest,
+)
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
 
+TRAIN_SPLIT_NAME = "train"
+
 
 def iter_raw_documents(registry: ArtifactRegistry) -> Iterator[Document]:
-    documents_path = registry.artifact_directory(StageName.RAW_DATASET.value) / "documents.jsonl"
-    with documents_path.open("r", encoding="utf-8") as documents_file:
-        for line in documents_file:
-            document_record = RawDocumentRecord.model_validate_json(line)
-            yield Document(
-                document_id=document_record.document_id,
-                text=document_record.text,
-                metadata=document_record.metadata,
-            )
+    artifact_directory = registry.artifact_directory(StageName.RAW_DATASET.value)
+    yield from iter_text_shard_documents(artifact_directory=artifact_directory, split=None)
 
 
-def iter_processed_document_texts(registry: ArtifactRegistry) -> Iterator[str]:
-    processed_directory = registry.artifact_directory(StageName.PROCESSED_DATASET.value)
-    metadata_path = processed_directory / "metadata.jsonl"
-    with metadata_path.open("r", encoding="utf-8") as metadata_file:
-        for line in metadata_file:
-            metadata_record = DocumentMetadataRecord.model_validate_json(line)
-            with (processed_directory / metadata_record.path).open(
-                "r",
-                encoding="utf-8",
-                newline="",
-            ) as document_file:
-                yield document_file.read()
+def iter_processed_document_texts(
+    registry: ArtifactRegistry,
+    split: str | None,
+) -> Iterator[str]:
+    artifact_directory = registry.artifact_directory(StageName.PROCESSED_DATASET.value)
+    yield from iter_text_shard_texts(artifact_directory=artifact_directory, split=split)
+
+
+def tokenizer_training_split(registry: ArtifactRegistry) -> str | None:
+    return _preferred_training_split(
+        registry=registry,
+        stage_name=StageName.PROCESSED_DATASET,
+    )
+
+
+def packing_split(registry: ArtifactRegistry) -> str | None:
+    return _preferred_training_split(
+        registry=registry,
+        stage_name=StageName.PROCESSED_DATASET,
+    )
+
+
+def _preferred_training_split(registry: ArtifactRegistry, stage_name: StageName) -> str | None:
+    corpus_manifest = load_text_shard_corpus_manifest(
+        artifact_directory=registry.artifact_directory(stage_name.value),
+    )
+    split_names = {split_manifest.split for split_manifest in corpus_manifest.splits}
+    if TRAIN_SPLIT_NAME in split_names:
+        return TRAIN_SPLIT_NAME
+    return None

@@ -103,7 +103,7 @@ def _apply_transform(
             return Document(
                 document_id=document.document_id,
                 text=normalized_text,
-                metadata=document.metadata,
+                split=document.split,
             )
         case NormalizeLineEndingsTransformConfiguration():
             normalized_text = document.text.replace("\r\n", "\n").replace("\r", "\n")
@@ -112,7 +112,7 @@ def _apply_transform(
             return Document(
                 document_id=document.document_id,
                 text=normalized_text,
-                metadata=document.metadata,
+                split=document.split,
             )
         case LowerCaseTransformConfiguration():
             lowered_text = document.text.lower()
@@ -121,7 +121,7 @@ def _apply_transform(
             return Document(
                 document_id=document.document_id,
                 text=lowered_text,
-                metadata=document.metadata,
+                split=document.split,
             )
         case ExactDeduplicationTransformConfiguration():
             document_hash = _text_hash(text=document.text)
@@ -132,7 +132,7 @@ def _apply_transform(
             return Document(
                 document_id=document.document_id,
                 text=document.text,
-                metadata={**document.metadata, "processed_content_hash": document_hash},
+                split=document.split,
             )
         case MinLengthTransformConfiguration(min_characters=min_characters):
             if len(document.text) < min_characters:
@@ -146,6 +146,8 @@ def _apply_transform(
             train_probability=train_probability,
             validation_probability=validation_probability,
         ):
+            if document.split is not None:
+                raise ValueError("Assign split cannot overwrite an existing document split.")
             counters.split_assigned_documents += 1
             split_name = _assigned_split(
                 document_id=document.document_id,
@@ -155,7 +157,7 @@ def _apply_transform(
             return Document(
                 document_id=document.document_id,
                 text=document.text,
-                metadata={**document.metadata, "split": split_name},
+                split=split_name,
             )
 
 

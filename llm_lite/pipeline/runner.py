@@ -11,7 +11,7 @@ from llm_lite.pipeline.logging import (
     PipelineEventType,
 )
 from llm_lite.pipeline.registry import ArtifactRegistry
-from llm_lite.pipeline.stage import PipelineStage, StageName
+from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
 from llm_lite.utilities.random import seed_everything
 
@@ -135,6 +135,7 @@ def _execute_pipeline(
             parent_hashes=parent_hashes,
         )
         if compatible and stage.name not in force_stage_names:
+            print(f"[skip] {stage.name.value}: compatible artifact found", flush=True)
             _log_stage_event(
                 event_logger=event_logger,
                 event_type=PipelineEventType.STAGE_SKIP,
@@ -142,10 +143,10 @@ def _execute_pipeline(
                 message="compatible artifact found",
             )
             continue
-        artifact_directory = registry.artifact_directory(artifact_type=stage.name.value)
-        if stage.name in force_stage_names and artifact_directory.exists():
+        artifact_directory = registry.artifacts_directory / stage.name.value
+        if artifact_directory.exists():
             shutil.rmtree(artifact_directory)
-            artifact_directory.mkdir(parents=True, exist_ok=True)
+        artifact_directory.mkdir(parents=True, exist_ok=True)
         registry.write_running_manifest(
             artifact_type=stage.name.value,
             configuration_hash=configuration_hash,
@@ -157,6 +158,7 @@ def _execute_pipeline(
             stage_name=stage.name,
             message="stage execution started",
         )
+        print(f"[start] {stage.name.value}", flush=True)
         stage_output = stage.run(
             experiment_configuration=experiment_configuration,
             registry=registry,
@@ -169,6 +171,7 @@ def _execute_pipeline(
             files=stage_output.files,
             metrics=stage_output.metrics,
         )
+        _print_stage_output(stage_name=stage.name, stage_output=stage_output)
         _log_stage_event(
             event_logger=event_logger,
             event_type=PipelineEventType.STAGE_COMPLETE,
@@ -200,8 +203,26 @@ def _expanded_force_stages(
 
 
 def _print_review(review: list[StageReview]) -> None:
+    print("Pipeline review:", flush=True)
     for review_item in review:
-        print(f"{review_item.stage_name.value:18} {review_item.action}")
+        print(f"{review_item.stage_name.value:18} {review_item.action}", flush=True)
+    print(flush=True)
+
+
+def _print_stage_output(stage_name: StageName, stage_output: StageOutput) -> None:
+    print(f"[done]  {stage_name.value}", flush=True)
+    if stage_output.files:
+        files = ", ".join(
+            f"{file_name}={relative_path}"
+            for file_name, relative_path in sorted(stage_output.files.items())
+        )
+        print(f"        files: {files}", flush=True)
+    if stage_output.metrics:
+        metrics = ", ".join(
+            f"{metric_name}={metric_value}"
+            for metric_name, metric_value in sorted(stage_output.metrics.items())
+        )
+        print(f"        metrics: {metrics}", flush=True)
 
 
 def _log_review(review: list[StageReview], event_logger: PipelineEventLogger) -> None:

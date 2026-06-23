@@ -1,4 +1,4 @@
-import hashlib
+import pytest
 
 from llm_lite.config.models import (
     AssignSplitTransformConfiguration,
@@ -20,7 +20,7 @@ def test_preprocess_documents_normalizes_line_endings() -> None:
             Document(
                 document_id="document-1",
                 text="hello\r\nworld\r",
-                metadata={},
+                split=None,
             ),
         ],
         transforms=(
@@ -40,8 +40,8 @@ def test_preprocess_documents_normalizes_line_endings() -> None:
 def test_preprocess_documents_filters_by_length() -> None:
     result = preprocess_documents(
         documents=[
-            Document(document_id="short", text="hi", metadata={}),
-            Document(document_id="long", text="hello", metadata={}),
+            Document(document_id="short", text="hi", split=None),
+            Document(document_id="long", text="hello", split=None),
         ],
         transforms=(
             MinLengthTransformConfiguration(
@@ -69,7 +69,7 @@ def test_preprocess_documents_normalizes_unicode() -> None:
             Document(
                 document_id="document-1",
                 text="Cafe\u0301",
-                metadata={},
+                split=None,
             ),
         ],
         transforms=(
@@ -82,7 +82,7 @@ def test_preprocess_documents_normalizes_unicode() -> None:
 
     documents = list(result.documents)
 
-    assert documents[0].text == "Café"
+    assert documents[0].text == "Caf\u00e9"
     assert result.counters.unicode_normalized_documents == 1
 
 
@@ -92,7 +92,7 @@ def test_preprocess_documents_lower_case_is_optional_transform() -> None:
             Document(
                 document_id="document-1",
                 text="Hello",
-                metadata={},
+                split=None,
             ),
         ],
         transforms=(LowerCaseTransformConfiguration(type=PreprocessingTransformType.LOWER_CASE),),
@@ -107,9 +107,9 @@ def test_preprocess_documents_lower_case_is_optional_transform() -> None:
 def test_preprocess_documents_exact_deduplication() -> None:
     result = preprocess_documents(
         documents=[
-            Document(document_id="document-1", text="same", metadata={}),
-            Document(document_id="document-2", text="same", metadata={}),
-            Document(document_id="document-3", text="different", metadata={}),
+            Document(document_id="document-1", text="same", split=None),
+            Document(document_id="document-2", text="same", split=None),
+            Document(document_id="document-3", text="different", split=None),
         ],
         transforms=(
             ExactDeduplicationTransformConfiguration(
@@ -119,10 +119,8 @@ def test_preprocess_documents_exact_deduplication() -> None:
     )
 
     documents = list(result.documents)
-    expected_hash = f"sha256:{hashlib.sha256(b'same').hexdigest()}"
 
     assert [document.document_id for document in documents] == ["document-1", "document-3"]
-    assert documents[0].metadata["processed_content_hash"] == expected_hash
     assert result.counters.deduplicated_documents == 1
     assert result.counters.rejected_documents == 1
 
@@ -134,11 +132,27 @@ def test_preprocess_documents_assigns_split_deterministically() -> None:
         validation_probability=0.25,
         test_probability=0.25,
     )
-    documents = [Document(document_id="document-1", text="text", metadata={})]
+    documents = [Document(document_id="document-1", text="text", split=None)]
 
     first_result = preprocess_documents(documents=documents, transforms=(transform,))
     second_result = preprocess_documents(documents=documents, transforms=(transform,))
 
     first_document = list(first_result.documents)[0]
     second_document = list(second_result.documents)[0]
-    assert first_document.metadata["split"] == second_document.metadata["split"]
+    assert first_document.split == second_document.split
+
+
+def test_preprocess_documents_rejects_reassigning_existing_split() -> None:
+    transform = AssignSplitTransformConfiguration(
+        type=PreprocessingTransformType.ASSIGN_SPLIT,
+        train_probability=0.5,
+        validation_probability=0.25,
+        test_probability=0.25,
+    )
+    result = preprocess_documents(
+        documents=[Document(document_id="document-1", text="text", split="validation")],
+        transforms=(transform,),
+    )
+
+    with pytest.raises(ValueError, match="existing document split"):
+        list(result.documents)

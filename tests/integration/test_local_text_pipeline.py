@@ -43,4 +43,7 @@ def test_local_text_pipeline_produces_packed_dataset(tmp_path: Path) -> None:
     assert raw_manifest["metrics"]["raw_documents"] == 1
     assert processed_manifest["metrics"]["processed_documents"] == 1
     assert processed_manifest["metrics"]["total_characters"] == 12
+    assert (run_directory / "artifacts" / "raw_dataset" / "unsplit").is_dir()
+    assert (run_directory / "artifacts" / "processed_dataset" / "train").is_dir()
+    assert list((run_directory / "artifacts" / "processed_dataset" / "train").glob("*.tar.gz"))
     assert packed_index["total_sequences"] >= 1

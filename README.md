@@ -5,9 +5,10 @@ This repository currently implements milestones M0 and M1, with M2 local text
 ingestion and TinyStories-ready preprocessing underway: typed experiment
 configuration, local artifact manifests, ordered pipeline execution, inline text
 and local text data, Unicode and line-ending normalization, exact
-deduplication, deterministic split metadata, character and byte-level BPE
+deduplication, split-sharded text artifacts, character and byte-level BPE
 tokenizers, tiny dense GPT pretraining, checkpoint resume, greedy inference,
-and evaluator-specific exact-reproduction evaluation.
+configurable exact-reproduction/perplexity/generation evaluation, and optional
+training-time evaluation.
 
 Current verification stage order:
 
@@ -63,8 +64,21 @@ python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.y
 
 Use `dataset.type: local_text` to ingest UTF-8 text files from explicit paths,
 glob patterns, or both. Files are resolved, deduplicated, and processed in
-deterministic path order. Raw documents include stable document ids plus
-metadata for source type, absolute path, byte size, and content hash.
+deterministic path order. Raw and processed text artifacts are written as
+split folders containing compressed tar shards of plain `.txt` members:
+
+```text
+processed_dataset/
+  corpus.json
+  train/
+    shard_000000.tar.gz
+  validation/
+    shard_000000.tar.gz
+```
+
+Inside each shard, samples are plain files named from their document id. There
+is no per-document JSON metadata in the processed corpus. Split membership is
+defined by the containing folder.
 
 ```yaml
 dataset:
@@ -81,6 +95,7 @@ useful casing signal.
 
 ```yaml
 preprocessing:
+  output_shard_documents: 10000
   transforms:
     - type: normalize_unicode
       form: NFC
@@ -103,6 +118,30 @@ split metadata. `configs/tinystories_local_text.yaml` points at
 `data/tinystories/**/*.txt` as a local prepared corpus path and uses byte-level
 BPE; it does not download data.
 
+Use `dataset.type: huggingface` to stream a text column from Hugging Face
+Datasets and map source splits into pipeline split folders:
+
+```yaml
+dataset:
+  type: huggingface
+  name: roneneldan/TinyStories
+  text_column: text
+  streaming: true
+  splits:
+    - source_split: train
+      split: train
+      max_documents: 1000
+    - source_split: validation
+      split: validation
+      max_documents: 200
+    - source_split: validation
+      split: validation_small
+      max_documents: 50
+```
+
+When a source already assigns splits, do not configure `assign_split`; the
+preprocessor rejects split reassignment.
+
 Byte-level BPE starts from all 256 byte values plus configured special tokens,
 then learns deterministic pair merges up to `tokenizer.vocabulary_size`.
 Encoding and decoding preserve Unicode, whitespace, tabs, and newlines through
@@ -111,10 +150,33 @@ UTF-8 bytes. For TinyStories-style runs, start with:
 ```yaml
 tokenizer:
   type: byte_bpe
-  vocabulary_size: 8192
+  vocabulary_size: 1024
   add_bos_token: true
   add_eos_token: true
   add_pad_token: true
+```
+
+Evaluation is configured by named optional blocks. Exact reproduction is kept
+for tiny verification configs; story runs should generally use perplexity and
+fixed-prompt generation:
+
+```yaml
+training:
+  evaluation:
+    interval_steps: 50
+    evaluators:
+      perplexity:
+        split: validation_small
+        maximum_documents: 50
+
+evaluation:
+  perplexity:
+    split: validation
+    maximum_documents: 200
+  fixed_prompt_generation:
+    prompts:
+      - "Once upon a time"
+    maximum_new_tokens: 120
 ```
 
 Inspect training curves in TensorBoard:
@@ -221,7 +283,7 @@ Validated on 2026-06-23 with:
 
 ```text
 python -m pytest -q
-39 passed
+43 passed
 
 python -m ruff check .
 All checks passed!

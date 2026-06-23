@@ -8,7 +8,7 @@ from llm_lite.pipeline.hashing import hash_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import compatible_skip_action
-from llm_lite.pipeline.stages.io import iter_processed_document_texts
+from llm_lite.pipeline.stages.io import iter_processed_document_texts, packing_split
 from llm_lite.tokenizer.loading import load_tokenizer
 
 
@@ -32,13 +32,14 @@ class PackedDatasetStage:
         )
         if tokenizer.pad_token_id is None:
             raise ValueError("Packing requires a configured pad token.")
+        split = packing_split(registry=registry)
         tokenized_document_stream = (
             tokenizer.encode(
                 text=document_text,
                 add_bos=experiment_configuration.packing.add_bos,
                 add_eos=experiment_configuration.packing.add_eos,
             )
-            for document_text in iter_processed_document_texts(registry=registry)
+            for document_text in iter_processed_document_texts(registry=registry, split=split)
         )
         sequences = pack_token_sequences(
             tokenized_document_stream=tokenized_document_stream,

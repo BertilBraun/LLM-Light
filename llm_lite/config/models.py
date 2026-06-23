@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from enum import Enum
 from pathlib import Path
 from typing import Annotated, Literal
@@ -8,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class DatasetType(str, Enum):
     INLINE_TEXT = "inline_text"
     LOCAL_TEXT = "local_text"
+    HUGGINGFACE = "huggingface"
 
 
 class TokenizerType(str, Enum):
@@ -72,6 +75,24 @@ class LocalTextDatasetConfiguration(BaseModel):
     glob_patterns: tuple[str, ...]
 
 
+class HuggingFaceDatasetSplitConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    source_split: str
+    split: str
+    max_documents: int | None = Field(default=None, gt=0)
+
+
+class HuggingFaceDatasetConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    type: Literal[DatasetType.HUGGINGFACE]
+    name: str
+    text_column: str
+    streaming: bool
+    splits: tuple[HuggingFaceDatasetSplitConfiguration, ...]
+
+
 class CharacterTokenizerConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -110,7 +131,7 @@ class NormalizeUnicodeTransformConfiguration(BaseModel):
     form: str
 
     @model_validator(mode="after")
-    def require_supported_unicode_form(self) -> "NormalizeUnicodeTransformConfiguration":
+    def require_supported_unicode_form(self) -> NormalizeUnicodeTransformConfiguration:
         if self.form not in {"NFC", "NFD", "NFKC", "NFKD"}:
             raise ValueError("Unicode normalization form must be NFC, NFD, NFKC, or NFKD.")
         return self
@@ -151,7 +172,7 @@ class AssignSplitTransformConfiguration(BaseModel):
     test_probability: float = Field(ge=0.0, le=1.0)
 
     @model_validator(mode="after")
-    def require_probabilities_sum_to_one(self) -> "AssignSplitTransformConfiguration":
+    def require_probabilities_sum_to_one(self) -> AssignSplitTransformConfiguration:
         probability_sum = (
             self.train_probability + self.validation_probability + self.test_probability
         )
@@ -176,6 +197,7 @@ class PreprocessingConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     transforms: tuple[PreprocessingTransformConfiguration, ...]
+    output_shard_documents: int = Field(gt=0)
 
 
 class PackingConfiguration(BaseModel):
@@ -216,12 +238,19 @@ class DataLoaderConfiguration(BaseModel):
     prefetch_factor: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
-    def require_workers_for_worker_options(self) -> "DataLoaderConfiguration":
+    def require_workers_for_worker_options(self) -> DataLoaderConfiguration:
         if self.num_workers == 0 and self.persistent_workers:
             raise ValueError("persistent_workers requires num_workers greater than 0.")
         if self.num_workers == 0 and self.prefetch_factor is not None:
             raise ValueError("prefetch_factor requires num_workers greater than 0.")
         return self
+
+
+class TrainingEvaluationConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    interval_steps: int = Field(gt=0)
+    evaluators: EvaluationConfiguration
 
 
 class TrainingConfiguration(BaseModel):
@@ -236,6 +265,7 @@ class TrainingConfiguration(BaseModel):
     gradient_clip_norm: float = Field(gt=0.0)
     checkpoint_interval_steps: int = Field(gt=0)
     log_interval_steps: int = Field(gt=0)
+    evaluation: TrainingEvaluationConfiguration | None
 
 
 class PostTrainingConfiguration(BaseModel):
@@ -251,16 +281,26 @@ class ExactReproductionEvaluationConfiguration(BaseModel):
     expected_completion: str
 
 
+class PerplexityEvaluationConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    split: str
+    maximum_documents: int | None = Field(default=None, gt=0)
+
+
+class FixedPromptGenerationEvaluationConfiguration(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prompts: tuple[str, ...]
+    maximum_new_tokens: int = Field(gt=0)
+
+
 class EvaluationConfiguration(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     exact_reproduction: ExactReproductionEvaluationConfiguration | None = None
-
-    @model_validator(mode="after")
-    def require_at_least_one_evaluator(self) -> "EvaluationConfiguration":
-        if self.exact_reproduction is None:
-            raise ValueError("At least one evaluation block must be configured.")
-        return self
+    perplexity: PerplexityEvaluationConfiguration | None = None
+    fixed_prompt_generation: FixedPromptGenerationEvaluationConfiguration | None = None
 
 
 class InferenceConfiguration(BaseModel):
@@ -283,7 +323,9 @@ class ExperimentFile(BaseModel):
 
     experiment: ExperimentConfiguration
     dataset: Annotated[
-        InlineTextDatasetConfiguration | LocalTextDatasetConfiguration,
+        InlineTextDatasetConfiguration
+        | LocalTextDatasetConfiguration
+        | HuggingFaceDatasetConfiguration,
         Field(discriminator="type"),
     ]
     preprocessing: PreprocessingConfiguration

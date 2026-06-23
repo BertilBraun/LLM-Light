@@ -1,10 +1,14 @@
 import glob
 import hashlib
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
+
+from datasets import load_dataset
 
 from llm_lite.config.models import (
     ExperimentFile,
+    HuggingFaceDatasetConfiguration,
+    HuggingFaceDatasetSplitConfiguration,
     InlineTextDatasetConfiguration,
     LocalTextDatasetConfiguration,
 )
@@ -21,22 +25,20 @@ def iter_dataset_documents(experiment_configuration: ExperimentFile) -> Iterator
             yield from iter_local_text_documents(
                 dataset_configuration=experiment_configuration.dataset,
             )
+        case HuggingFaceDatasetConfiguration():
+            yield from iter_huggingface_documents(
+                dataset_configuration=experiment_configuration.dataset,
+            )
 
 
 def iter_inline_documents(
     dataset_configuration: InlineTextDatasetConfiguration,
 ) -> Iterator[Document]:
     for document_index, document_text in enumerate(dataset_configuration.documents):
-        text_bytes = document_text.encode("utf-8")
         yield Document(
             document_id=f"inline-{document_index:06d}",
             text=document_text,
-            metadata={
-                "source": "inline_text",
-                "index": document_index,
-                "byte_size": len(text_bytes),
-                "content_hash": _content_hash(content_bytes=text_bytes),
-            },
+            split=None,
         )
 
 
@@ -50,12 +52,17 @@ def iter_local_text_documents(
         yield Document(
             document_id=_document_id(path=normalized_path, content_hash=content_hash),
             text=content_bytes.decode("utf-8"),
-            metadata={
-                "source": "local_text",
-                "path": normalized_path,
-                "byte_size": len(content_bytes),
-                "content_hash": content_hash,
-            },
+            split=None,
+        )
+
+
+def iter_huggingface_documents(
+    dataset_configuration: HuggingFaceDatasetConfiguration,
+) -> Iterator[Document]:
+    for split_configuration in dataset_configuration.splits:
+        yield from _iter_huggingface_split_documents(
+            dataset_configuration=dataset_configuration,
+            split_configuration=split_configuration,
         )
 
 
@@ -98,3 +105,35 @@ def _content_hash(content_bytes: bytes) -> str:
 def _document_id(path: str, content_hash: str) -> str:
     identifier_hash = hashlib.sha256(f"{path}\n{content_hash}".encode()).hexdigest()
     return f"local-text-{identifier_hash[:24]}"
+
+
+def _iter_huggingface_split_documents(
+    dataset_configuration: HuggingFaceDatasetConfiguration,
+    split_configuration: HuggingFaceDatasetSplitConfiguration,
+) -> Iterator[Document]:
+    dataset = load_dataset(
+        path=dataset_configuration.name,
+        split=split_configuration.source_split,
+        streaming=dataset_configuration.streaming,
+    )
+    for row_index, row in enumerate(dataset):
+        if (
+            split_configuration.max_documents is not None
+            and row_index >= split_configuration.max_documents
+        ):
+            break
+        text = _record_text(row=row, text_column=dataset_configuration.text_column)
+        yield Document(
+            document_id=f"{split_configuration.split}-{row_index:08d}",
+            text=text,
+            split=split_configuration.split,
+        )
+
+
+def _record_text(row: Mapping[str, object], text_column: str) -> str:
+    text_value = row[text_column]
+    match text_value:
+        case str():
+            return text_value
+        case _:
+            raise ValueError("Hugging Face text column must contain strings.")

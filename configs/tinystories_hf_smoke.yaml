@@ -1,13 +1,20 @@
 experiment:
-  name: tinystories_local_text
+  name: tinystories_hf_smoke
   seed: 1337
-  output_dir: runs/tinystories_local_text
+  output_dir: runs/tinystories_hf_smoke
 
 dataset:
-  type: local_text
-  paths: []
-  glob_patterns:
-    - data/tinystories/**/*.txt
+  type: huggingface
+  name: roneneldan/TinyStories
+  text_column: text
+  streaming: true
+  splits:
+    - source_split: train
+      split: train
+      max_documents: 1000
+    - source_split: validation
+      split: validation
+      max_documents: 200
 
 tokenizer:
   type: byte_bpe
@@ -27,13 +34,9 @@ preprocessing:
     - type: max_length
       max_characters: 4096
     - type: exact_deduplication
-    - type: assign_split
-      train_probability: 0.98
-      validation_probability: 0.01
-      test_probability: 0.01
 
 packing:
-  context_length: 512
+  context_length: 128
   add_bos: true
   add_eos: true
   pack_documents: true
@@ -50,8 +53,8 @@ model:
 
 training:
   objective: causal_language_modeling
-  maximum_steps: 1000
-  batch_size_sequences: 8
+  maximum_steps: 100
+  batch_size_sequences: 4
   dataloader:
     num_workers: 0
     pin_memory: false
@@ -62,14 +65,14 @@ training:
     weight_decay: 0.1
   precision: fp32
   gradient_clip_norm: 1.0
-  checkpoint_interval_steps: 100
+  checkpoint_interval_steps: 50
   log_interval_steps: 10
   evaluation:
     interval_steps: 50
     evaluators:
       perplexity:
         split: validation
-        maximum_documents: 100
+        maximum_documents: 50
       fixed_prompt_generation:
         prompts:
           - "Once upon a time"
@@ -81,18 +84,18 @@ post_training:
 evaluation:
   perplexity:
     split: validation
-    maximum_documents: 1000
+    maximum_documents: 50
   fixed_prompt_generation:
     prompts:
       - "Once upon a time"
       - "The little girl found"
-    maximum_new_tokens: 120
+    maximum_new_tokens: 40
 
 inference:
   engine: naive
   precision: fp32
   quantization: none
-  maximum_new_tokens: 64
+  maximum_new_tokens: 80
 
 distributed:
   enabled: false

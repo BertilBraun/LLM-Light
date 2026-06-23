@@ -16,6 +16,7 @@ tokenizer:
   add_pad_token: true
 
 preprocessing:
+  output_shard_documents: 1000
   transforms:
     - type: normalize_unicode
       form: NFC
@@ -26,8 +27,8 @@ preprocessing:
       max_characters: 256
     - type: exact_deduplication
     - type: assign_split
-      train_probability: 0.9
-      validation_probability: 0.1
+      train_probability: 1.0
+      validation_probability: 0.0
       test_probability: 0.0
 
 packing:
@@ -62,6 +63,7 @@ training:
   gradient_clip_norm: 1.0
   checkpoint_interval_steps: 1
   log_interval_steps: 1
+  evaluation: null
 
 post_training:
   type: none

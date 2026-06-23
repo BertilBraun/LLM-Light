@@ -47,6 +47,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         training_configuration=experiment_configuration.training,
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
+        evaluation_callback=None,
     )
     second_result = train_model(
         model=model,
@@ -54,6 +55,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         training_configuration=experiment_configuration.training,
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
+        evaluation_callback=None,
     )
 
     assert first_result.final_step == experiment_configuration.training.maximum_steps

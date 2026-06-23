@@ -5,4 +5,7 @@ __pycache__/
 .venv/
 venv/
 runs/
+data/
+.cache/
+.huggingface/
 *.egg-info/

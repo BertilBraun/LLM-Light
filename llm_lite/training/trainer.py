@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
+from typing import Protocol
 
 import torch
 from torch import nn
@@ -20,6 +21,11 @@ class TrainingResult:
     final_loss: float
     checkpoint_path: Path
     resumed_from_step: int
+    evaluation_path: Path | None
+
+
+class TrainingEvaluationCallback(Protocol):
+    def __call__(self, step: int, model: nn.Module) -> Path: ...
 
 
 def train_model(
@@ -28,6 +34,7 @@ def train_model(
     training_configuration: TrainingConfiguration,
     artifact_directory: Path,
     seed: int,
+    evaluation_callback: TrainingEvaluationCallback | None,
 ) -> TrainingResult:
     optimizer = AdamW(
         model.parameters(),
@@ -50,6 +57,7 @@ def train_model(
     metrics_logger = TrainingMetricLogger(artifact_directory=artifact_directory)
     final_loss = float("inf")
     checkpoint_path = checkpoint_directory / "latest.pt"
+    evaluation_path: Path | None = None
     started_at_seconds = perf_counter()
     tokens_processed = 0
     model.train()
@@ -78,6 +86,15 @@ def train_model(
                         tokens_processed=tokens_processed,
                     ),
                 )
+            training_evaluation_configuration = training_configuration.evaluation
+            if (
+                training_evaluation_configuration is not None
+                and step % training_evaluation_configuration.interval_steps == 0
+            ):
+                if evaluation_callback is None:
+                    raise ValueError("Training evaluation requires an evaluation callback.")
+                evaluation_path = evaluation_callback(step=step, model=model)
+                model.train()
             if step % training_configuration.checkpoint_interval_steps == 0:
                 checkpoint_path = save_checkpoint(
                     checkpoint_directory=checkpoint_directory,
@@ -99,4 +116,5 @@ def train_model(
         final_loss=final_loss,
         checkpoint_path=checkpoint_path,
         resumed_from_step=start_step,
+        evaluation_path=evaluation_path,
     )

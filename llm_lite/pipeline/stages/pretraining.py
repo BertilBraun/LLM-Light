@@ -21,7 +21,11 @@ from llm_lite.pipeline.stages.base import BasePipelineStage
 from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
-from llm_lite.training.trainer import train_model, train_model_distributed
+from llm_lite.training.trainer import (
+    TrainingEvaluationCallback,
+    train_model,
+    train_model_distributed,
+)
 
 PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION = 2
 
@@ -43,7 +47,7 @@ class PretrainingStage(BasePipelineStage):
         return hash_json_value(
             value=_pretraining_reconstruction_contract(
                 experiment_configuration=experiment_configuration,
-            ).model_dump(mode="json"),
+            ).model_dump(mode='json'),
         )
 
     def run(
@@ -81,7 +85,7 @@ class PretrainingStage(BasePipelineStage):
                 seed=experiment_configuration.experiment.seed,
                 evaluation_callback=evaluation_callback,
                 model_configuration_hash=hash_json_value(
-                    value=experiment_configuration.model.model_dump(mode="json"),
+                    value=experiment_configuration.model.model_dump(mode='json'),
                 ),
                 objective_runner=CausalLanguageModelingObjectiveRunner(),
             )
@@ -96,36 +100,36 @@ class PretrainingStage(BasePipelineStage):
                 objective_runner=CausalLanguageModelingObjectiveRunner(),
             )
         files = {
-            "checkpoint": str(result.checkpoint_path.relative_to(artifact_directory)),
-            "metrics": "metrics.jsonl",
-            "tensorboard": "tensorboard",
+            'checkpoint': str(result.checkpoint_path.relative_to(artifact_directory)),
+            'metrics': 'metrics.jsonl',
+            'tensorboard': 'tensorboard',
         }
         if result.evaluation_path is not None:
-            files["training_evaluations"] = str(
+            files['training_evaluations'] = str(
                 result.evaluation_path.relative_to(artifact_directory),
             )
         return StageOutput(
             files=files,
             metrics={
-                "final_step": result.final_step,
-                "final_loss": result.final_loss,
-                "resumed_from_step": result.resumed_from_step,
-                "model_parameters": parameter_count,
-                "trainable_model_parameters": trainable_parameter_count,
-                "requested_maximum_steps": experiment_configuration.training.maximum_steps,
-                "distributed_world_size": experiment_configuration.distributed.world_size,
-                "distributed_strategy": experiment_configuration.distributed.strategy.value,
+                'final_step': result.final_step,
+                'final_loss': result.final_loss,
+                'resumed_from_step': result.resumed_from_step,
+                'model_parameters': parameter_count,
+                'trainable_model_parameters': trainable_parameter_count,
+                'requested_maximum_steps': experiment_configuration.training.maximum_steps,
+                'distributed_world_size': experiment_configuration.distributed.world_size,
+                'distributed_strategy': experiment_configuration.distributed.strategy.value,
             },
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         checkpoint_state = latest_checkpoint(
             checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / "checkpoints",
+            / 'checkpoints',
         )
         if checkpoint_state is not None:
-            return f"complete at step {checkpoint_state.step}, skip"
-        return "compatible, skip"
+            return f'complete at step {checkpoint_state.step}, skip'
+        return 'compatible, skip'
 
     def continuation_action(
         self,
@@ -134,13 +138,13 @@ class PretrainingStage(BasePipelineStage):
     ) -> str | None:
         checkpoint_state = latest_checkpoint(
             checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / "checkpoints",
+            / 'checkpoints',
         )
         if checkpoint_state is None:
-            return "resume-compatible, execute"
+            return 'resume-compatible, execute'
         maximum_steps = experiment_configuration.training.maximum_steps
         if checkpoint_state.step < maximum_steps:
-            return f"resume from step {checkpoint_state.step} to {maximum_steps}"
+            return f'resume from step {checkpoint_state.step} to {maximum_steps}'
         return None
 
 
@@ -160,11 +164,11 @@ def _training_evaluation_callback(
     registry: ArtifactRegistry,
     tokenizer: TextTokenizer,
     artifact_directory: Path,
-) -> Callable[[int, nn.Module], Path] | None:
+) -> TrainingEvaluationCallback | None:
     training_evaluation_configuration = experiment_configuration.training.evaluation
     if training_evaluation_configuration is None:
         return None
-    evaluation_path = artifact_directory / "training_evaluations.jsonl"
+    evaluation_path = artifact_directory / 'training_evaluations.jsonl'
 
     def run_training_evaluation(step: int, model: nn.Module) -> Path:
         evaluation_result = run_configured_evaluators(
@@ -175,17 +179,17 @@ def _training_evaluation_callback(
             inference_configuration=experiment_configuration.inference,
             packing_configuration=experiment_configuration.packing,
         )
-        with evaluation_path.open("a", encoding="utf-8") as evaluation_file:
+        with evaluation_path.open('a', encoding='utf-8') as evaluation_file:
             evaluation_file.write(
                 json.dumps(
                     {
-                        "step": step,
-                        "report": evaluation_result.report,
-                        "metrics": evaluation_result.metrics,
+                        'step': step,
+                        'report': evaluation_result.report,
+                        'metrics': evaluation_result.metrics,
                     },
                     sort_keys=True,
                 )
-                + "\n",
+                + '\n',
             )
         _print_training_evaluation(step=step, metrics=evaluation_result.metrics)
         return evaluation_path
@@ -206,9 +210,9 @@ def _print_training_evaluation(
     metrics: dict[str, int | float | str | bool],
 ) -> None:
     if not metrics:
-        print(f"[train-eval] step={step} no configured evaluator metrics", flush=True)
+        print(f'[train-eval] step={step} no configured evaluator metrics', flush=True)
         return
-    formatted_metrics = " ".join(
-        f"{metric_name}={metric_value}" for metric_name, metric_value in sorted(metrics.items())
+    formatted_metrics = ' '.join(
+        f'{metric_name}={metric_value}' for metric_name, metric_value in sorted(metrics.items())
     )
-    print(f"[train-eval] step={step} {formatted_metrics}", flush=True)
+    print(f'[train-eval] step={step} {formatted_metrics}', flush=True)

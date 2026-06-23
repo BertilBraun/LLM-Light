@@ -5,7 +5,7 @@ from llm_lite.config.models import (
     ExactReproductionEvaluationConfiguration,
     InferenceConfiguration,
 )
-from llm_lite.inference.naive import generate_greedy
+from llm_lite.inference.engine import generate_text
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -23,11 +23,11 @@ def evaluate_exact_reproduction(
     evaluation_configuration: ExactReproductionEvaluationConfiguration,
     inference_configuration: InferenceConfiguration,
 ) -> ExactReproductionResult:
-    generated_text = generate_greedy(
+    generated_text = generate_text(
         model=model,
         tokenizer=tokenizer,
         prompt=evaluation_configuration.prompt,
-        maximum_new_tokens=inference_configuration.maximum_new_tokens,
+        inference_configuration=inference_configuration,
     )
     expected_text = evaluation_configuration.prompt + evaluation_configuration.expected_completion
     return ExactReproductionResult(

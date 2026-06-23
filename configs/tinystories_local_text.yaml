@@ -77,9 +77,6 @@ training:
           - "Once upon a time"
         maximum_new_tokens: 80
 
-post_training:
-  type: none
-
 evaluation:
   perplexity:
     split: validation
@@ -91,10 +88,8 @@ evaluation:
     maximum_new_tokens: 120
 
 inference:
-  engine: naive
-  precision: fp32
-  quantization: none
+  decoding:
+    strategy: sample
+    temperature: 0.8
+    top_k: 40
   maximum_new_tokens: 64
-
-distributed:
-  enabled: false

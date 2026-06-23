@@ -42,76 +42,93 @@ class PostTrainingType(str, Enum):
 
 class InferenceEngine(str, Enum):
     NAIVE = "naive"
+    KV_CACHE = "kv_cache"
+
+
+class DecodingStrategy(str, Enum):
+    GREEDY = "greedy"
+    SAMPLE = "sample"
 
 
 class Precision(str, Enum):
     FP32 = "fp32"
+    FP16 = "fp16"
+    BF16 = "bf16"
 
 
 class QuantizationType(str, Enum):
     NONE = "none"
+    INT8_DYNAMIC = "int8_dynamic"
+    INT8_WEIGHT_ONLY = "int8_weight_only"
+    INT4_WEIGHT_ONLY = "int4_weight_only"
 
 
-class ExperimentConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class Configuration(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
+
+class GreedyDecodingConfiguration(Configuration):
+    strategy: Literal[DecodingStrategy.GREEDY]
+
+
+class SamplingDecodingConfiguration(Configuration):
+    strategy: Literal[DecodingStrategy.SAMPLE]
+    temperature: float = Field(default=1.0, gt=0.0)
+    top_k: int | None = Field(default=None, gt=0)
+
+
+DecodingConfiguration = Annotated[
+    GreedyDecodingConfiguration | SamplingDecodingConfiguration,
+    Field(discriminator="strategy"),
+]
+
+
+class ExperimentConfiguration(Configuration):
     name: str
-    seed: int
+    seed: int = 0
     output_dir: Path
 
 
-class InlineTextDatasetConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class InlineTextDatasetConfiguration(Configuration):
     type: Literal[DatasetType.INLINE_TEXT]
     documents: tuple[str, ...]
 
 
-class LocalTextDatasetConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class LocalTextDatasetConfiguration(Configuration):
     type: Literal[DatasetType.LOCAL_TEXT]
-    paths: tuple[Path, ...]
-    glob_patterns: tuple[str, ...]
+    paths: tuple[Path, ...] = ()
+    glob_patterns: tuple[str, ...] = ()
 
 
-class HuggingFaceDatasetSplitConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class HuggingFaceDatasetSplitConfiguration(Configuration):
     source_split: str
     split: str
     max_documents: int | None = Field(default=None, gt=0)
 
 
-class HuggingFaceDatasetConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class HuggingFaceDatasetConfiguration(Configuration):
     type: Literal[DatasetType.HUGGINGFACE]
     name: str
     text_column: str
-    streaming: bool
+    streaming: bool = True
     splits: tuple[HuggingFaceDatasetSplitConfiguration, ...]
 
 
-class CharacterTokenizerConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class CharacterTokenizerConfiguration(Configuration):
     type: Literal[TokenizerType.CHARACTER]
-    add_bos_token: bool
-    add_eos_token: bool
-    add_pad_token: bool
+    add_bos_token: bool = True
+    add_eos_token: bool = True
+    add_pad_token: bool = True
 
 
-class ByteBpeTokenizerConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ByteBpeTokenizerConfiguration(Configuration):
     type: Literal[TokenizerType.BYTE_BPE]
     vocabulary_size: int = Field(ge=256)
     max_training_documents: int | None = Field(gt=0)
     max_training_bytes: int | None = Field(gt=0)
-    add_bos_token: bool
-    add_eos_token: bool
-    add_pad_token: bool
+    add_bos_token: bool = True
+    add_eos_token: bool = True
+    add_pad_token: bool = True
 
     @model_validator(mode="after")
     def require_training_sample_bound(self) -> ByteBpeTokenizerConfiguration:
@@ -128,17 +145,13 @@ TokenizerConfiguration = Annotated[
 ]
 
 
-class NormalizeLineEndingsTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class NormalizeLineEndingsTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.NORMALIZE_LINE_ENDINGS]
 
 
-class NormalizeUnicodeTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class NormalizeUnicodeTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.NORMALIZE_UNICODE]
-    form: str
+    form: str = "NFC"
 
     @model_validator(mode="after")
     def require_supported_unicode_form(self) -> NormalizeUnicodeTransformConfiguration:
@@ -147,39 +160,29 @@ class NormalizeUnicodeTransformConfiguration(BaseModel):
         return self
 
 
-class LowerCaseTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class LowerCaseTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.LOWER_CASE]
 
 
-class MinLengthTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class MinLengthTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.MIN_LENGTH]
     min_characters: int = Field(ge=0)
 
 
-class MaxLengthTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class MaxLengthTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.MAX_LENGTH]
     max_characters: int = Field(gt=0)
 
 
-class ExactDeduplicationTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class ExactDeduplicationTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.EXACT_DEDUPLICATION]
 
 
-class AssignSplitTransformConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class AssignSplitTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.ASSIGN_SPLIT]
-    train_probability: float = Field(ge=0.0, le=1.0)
-    validation_probability: float = Field(ge=0.0, le=1.0)
-    test_probability: float = Field(ge=0.0, le=1.0)
+    train_probability: float = Field(default=0.98, ge=0.0, le=1.0)
+    validation_probability: float = Field(default=0.01, ge=0.0, le=1.0)
+    test_probability: float = Field(default=0.01, ge=0.0, le=1.0)
 
     @model_validator(mode="after")
     def require_probabilities_sum_to_one(self) -> AssignSplitTransformConfiguration:
@@ -203,48 +206,38 @@ PreprocessingTransformConfiguration = Annotated[
 ]
 
 
-class PreprocessingConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    transforms: tuple[PreprocessingTransformConfiguration, ...]
-    output_shard_documents: int = Field(gt=0)
+class PreprocessingConfiguration(Configuration):
+    transforms: tuple[PreprocessingTransformConfiguration, ...] = ()
+    output_shard_documents: int = Field(default=10000, gt=0)
 
 
-class PackingConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class PackingConfiguration(Configuration):
     context_length: int = Field(gt=1)
-    add_bos: bool
-    add_eos: bool
-    pack_documents: bool
-    maximum_shard_tokens: int = Field(gt=0)
+    add_bos: bool = True
+    add_eos: bool = True
+    pack_documents: bool = True
+    maximum_shard_tokens: int = Field(default=1000000, gt=0)
 
 
-class DenseGptConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class DenseGptConfiguration(Configuration):
     type: ModelType
     dimension: int = Field(gt=0)
     layers: int = Field(gt=0)
     attention_heads: int = Field(gt=0)
     feed_forward_dimension: int = Field(gt=0)
-    dropout: float = Field(ge=0.0, le=1.0)
-    tie_embeddings: bool
+    dropout: float = Field(default=0.0, ge=0.0, le=1.0)
+    tie_embeddings: bool = True
 
 
-class OptimizerConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    learning_rate: float = Field(gt=0.0)
-    weight_decay: float = Field(ge=0.0)
+class OptimizerConfiguration(Configuration):
+    learning_rate: float = Field(default=0.0003, gt=0.0)
+    weight_decay: float = Field(default=0.01, ge=0.0)
 
 
-class DataLoaderConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    num_workers: int = Field(ge=0)
-    pin_memory: bool
-    persistent_workers: bool
+class DataLoaderConfiguration(Configuration):
+    num_workers: int = Field(default=0, ge=0)
+    pin_memory: bool = False
+    persistent_workers: bool = False
     prefetch_factor: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
@@ -256,81 +249,64 @@ class DataLoaderConfiguration(BaseModel):
         return self
 
 
-class TrainingEvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+class TrainingEvaluationConfiguration(Configuration):
     interval_steps: int = Field(gt=0)
     evaluators: EvaluationConfiguration
 
 
-class TrainingConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    objective: TrainingObjective
+class TrainingConfiguration(Configuration):
+    objective: TrainingObjective = TrainingObjective.CAUSAL_LANGUAGE_MODELING
     maximum_steps: int = Field(gt=0)
     batch_size_sequences: int = Field(gt=0)
-    dataloader: DataLoaderConfiguration
-    optimizer: OptimizerConfiguration
-    precision: Precision
-    gradient_clip_norm: float = Field(gt=0.0)
-    checkpoint_interval_steps: int = Field(gt=0)
-    log_interval_steps: int = Field(gt=0)
-    evaluation: TrainingEvaluationConfiguration | None
+    dataloader: DataLoaderConfiguration = DataLoaderConfiguration()
+    optimizer: OptimizerConfiguration = OptimizerConfiguration()
+    precision: Precision = Precision.FP32
+    gradient_clip_norm: float = Field(default=1.0, gt=0.0)
+    checkpoint_interval_steps: int = Field(default=1000, gt=0)
+    log_interval_steps: int = Field(default=10, gt=0)
+    evaluation: TrainingEvaluationConfiguration | None = None
 
 
-class PostTrainingConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    type: PostTrainingType
+class PostTrainingConfiguration(Configuration):
+    type: PostTrainingType = PostTrainingType.NONE
 
 
-class ExactReproductionEvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+class ExactReproductionEvaluationConfiguration(Configuration):
     prompt: str
     expected_completion: str
 
 
-class PerplexityEvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+class PerplexityEvaluationConfiguration(Configuration):
     split: str
     maximum_documents: int | None = Field(default=None, gt=0)
 
 
-class FixedPromptGenerationEvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+class FixedPromptGenerationEvaluationConfiguration(Configuration):
     prompts: tuple[str, ...]
-    maximum_new_tokens: int = Field(gt=0)
+    maximum_new_tokens: int = Field(default=80, gt=0)
 
 
-class EvaluationConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
+class EvaluationConfiguration(Configuration):
     exact_reproduction: ExactReproductionEvaluationConfiguration | None = None
     perplexity: PerplexityEvaluationConfiguration | None = None
     fixed_prompt_generation: FixedPromptGenerationEvaluationConfiguration | None = None
 
 
-class InferenceConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    engine: InferenceEngine
-    precision: Precision
-    quantization: QuantizationType
-    maximum_new_tokens: int = Field(gt=0)
-
-
-class DistributedConfiguration(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
-    enabled: bool
+class InferenceConfiguration(Configuration):
+    engine: InferenceEngine = InferenceEngine.KV_CACHE
+    precision: Precision = Precision.FP32
+    quantization: QuantizationType = QuantizationType.NONE
+    decoding: DecodingConfiguration = GreedyDecodingConfiguration(
+        strategy=DecodingStrategy.GREEDY,
+    )
+    maximum_new_tokens: int = Field(default=80, gt=0)
 
 
-class ExperimentFile(BaseModel):
-    model_config = ConfigDict(frozen=True)
+class DistributedConfiguration(Configuration):
+    enabled: bool = False
 
+
+class ExperimentFile(Configuration):
     experiment: ExperimentConfiguration
     dataset: Annotated[
         InlineTextDatasetConfiguration
@@ -338,12 +314,12 @@ class ExperimentFile(BaseModel):
         | HuggingFaceDatasetConfiguration,
         Field(discriminator="type"),
     ]
-    preprocessing: PreprocessingConfiguration
+    preprocessing: PreprocessingConfiguration = PreprocessingConfiguration()
     tokenizer: TokenizerConfiguration
     packing: PackingConfiguration
     model: DenseGptConfiguration
     training: TrainingConfiguration
-    post_training: PostTrainingConfiguration
-    evaluation: EvaluationConfiguration
-    inference: InferenceConfiguration
-    distributed: DistributedConfiguration
+    post_training: PostTrainingConfiguration = PostTrainingConfiguration()
+    evaluation: EvaluationConfiguration = EvaluationConfiguration()
+    inference: InferenceConfiguration = InferenceConfiguration()
+    distributed: DistributedConfiguration = DistributedConfiguration()

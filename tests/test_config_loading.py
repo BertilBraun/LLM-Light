@@ -4,7 +4,15 @@ import pytest
 from pydantic import ValidationError
 
 from llm_lite.config.loading import load_experiment_configuration
-from llm_lite.config.models import DataLoaderConfiguration, EvaluationConfiguration
+from llm_lite.config.models import (
+    DataLoaderConfiguration,
+    DecodingStrategy,
+    EvaluationConfiguration,
+    InferenceConfiguration,
+    InferenceEngine,
+    Precision,
+    QuantizationType,
+)
 
 
 def test_load_verify_configuration() -> None:
@@ -53,6 +61,38 @@ def test_evaluation_configuration_rejects_unknown_evaluator() -> None:
         EvaluationConfiguration.model_validate(
             {"other_evaluation_type": {"parameters_for_that": "here"}},
         )
+
+
+def test_inference_configuration_accepts_kv_cache_engine() -> None:
+    inference_configuration = InferenceConfiguration.model_validate(
+        {
+            "engine": "kv_cache",
+            "precision": "fp32",
+            "quantization": "none",
+            "decoding": {
+                "strategy": "sample",
+                "temperature": 0.7,
+                "top_k": 5,
+            },
+            "maximum_new_tokens": 8,
+        },
+    )
+
+    assert inference_configuration.engine is InferenceEngine.KV_CACHE
+    assert inference_configuration.decoding.strategy is DecodingStrategy.SAMPLE
+
+
+def test_inference_configuration_defaults_common_runtime_options() -> None:
+    inference_configuration = InferenceConfiguration.model_validate(
+        {
+            "maximum_new_tokens": 8,
+        },
+    )
+
+    assert inference_configuration.engine is InferenceEngine.KV_CACHE
+    assert inference_configuration.precision is Precision.FP32
+    assert inference_configuration.quantization is QuantizationType.NONE
+    assert inference_configuration.decoding.strategy is DecodingStrategy.GREEDY
 
 
 def test_dataloader_configuration_rejects_worker_options_without_workers() -> None:

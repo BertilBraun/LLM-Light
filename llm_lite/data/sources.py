@@ -51,7 +51,7 @@ def iter_local_text_documents(
         normalized_path = _normalized_path(path=text_path)
         yield Document(
             document_id=_document_id(path=normalized_path, content_hash=content_hash),
-            text=content_bytes.decode("utf-8"),
+            text=text_path.read_text(encoding="utf-8"),
             split=None,
         )
 

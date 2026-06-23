@@ -65,19 +65,10 @@ training:
   log_interval_steps: 1
   evaluation: null
 
-post_training:
-  type: none
-
 evaluation:
   exact_reproduction:
     prompt: ""
     expected_completion: "hello world\n"
 
 inference:
-  engine: naive
-  precision: fp32
-  quantization: none
   maximum_new_tokens: 20
-
-distributed:
-  enabled: false

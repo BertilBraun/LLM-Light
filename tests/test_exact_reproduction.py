@@ -2,7 +2,9 @@ import torch
 from torch import nn
 
 from llm_lite.config.models import (
+    DecodingStrategy,
     ExactReproductionEvaluationConfiguration,
+    GreedyDecodingConfiguration,
     InferenceConfiguration,
     InferenceEngine,
     Precision,
@@ -51,6 +53,7 @@ def test_exact_reproduction_runs_generation_and_comparison() -> None:
             engine=InferenceEngine.NAIVE,
             precision=Precision.FP32,
             quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
             maximum_new_tokens=10,
         ),
     )

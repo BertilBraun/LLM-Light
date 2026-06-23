@@ -82,6 +82,7 @@ def run_configured_evaluators(
             model=model,
             tokenizer=tokenizer,
             evaluation_configuration=fixed_prompt_generation_configuration,
+            inference_configuration=inference_configuration,
         )
         report["fixed_prompt_generation"] = fixed_prompt_generation_result.model_dump()
         metrics["fixed_prompt_generation_samples"] = len(

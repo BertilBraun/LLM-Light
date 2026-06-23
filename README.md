@@ -7,8 +7,9 @@ configuration, local artifact manifests, ordered pipeline execution, inline text
 and local text data, Unicode and line-ending normalization, exact
 deduplication, split-sharded text artifacts, character and byte-level BPE
 tokenizers, tiny dense GPT pretraining, checkpoint resume, greedy inference,
-configurable exact-reproduction/perplexity/generation evaluation, and optional
-training-time evaluation.
+configurable naive or KV-cached greedy inference,
+exact-reproduction/perplexity/generation evaluation, and optional training-time
+evaluation.
 
 Current verification stage order:
 
@@ -39,7 +40,9 @@ Force recomputation from a stage and all downstream stages:
 
 ```bash
 python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --force
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --force pretraining
+python -m llm_lite.scripts.run_pipeline \
+  --config configs/verify_one_sentence.yaml \
+  --force pretraining
 ```
 
 Run tests:
@@ -67,6 +70,20 @@ python -m llm_lite.scripts.generate \
   --config configs/tinystories_hf_smoke.yaml \
   --prompt "Once upon a time" \
   --maximum-new-tokens 80
+```
+
+Generation defaults to KV-cached autoregressive decoding with `fp32` precision,
+no quantization, greedy token selection, and 80 new tokens. Set
+`inference.engine` to `naive` only when you want full-sequence reference
+decoding.
+
+```yaml
+inference:
+  decoding:
+    strategy: sample
+    temperature: 0.8
+    top_k: 40
+  maximum_new_tokens: 80
 ```
 
 ## Local Text Data
@@ -270,7 +287,9 @@ python -m pytest -q
 python -m ruff check .
 python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
 python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --dry-run
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --force pretraining
+python -m llm_lite.scripts.run_pipeline \
+  --config configs/verify_one_sentence.yaml \
+  --force pretraining
 ```
 
 Results:

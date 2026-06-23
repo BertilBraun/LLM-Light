@@ -2,7 +2,8 @@ import argparse
 from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
-from llm_lite.inference.naive import generate_greedy
+from llm_lite.config.models import InferenceConfiguration
+from llm_lite.inference.engine import generate_text
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
@@ -45,11 +46,17 @@ def main() -> int:
     )
     if checkpoint_step is None:
         raise ValueError("Generation requires a completed pretraining checkpoint.")
-    generated_text = generate_greedy(
+    generated_text = generate_text(
         model=model,
         tokenizer=tokenizer,
         prompt=arguments.prompt,
-        maximum_new_tokens=maximum_new_tokens,
+        inference_configuration=InferenceConfiguration(
+            engine=experiment_configuration.inference.engine,
+            precision=experiment_configuration.inference.precision,
+            quantization=experiment_configuration.inference.quantization,
+            decoding=experiment_configuration.inference.decoding,
+            maximum_new_tokens=maximum_new_tokens,
+        ),
     )
     print(generated_text)
     return 0

@@ -13,6 +13,7 @@ class StageName(str, Enum):
     TOKENIZER = "tokenizer"
     PACKED_DATASET = "packed_dataset"
     PRETRAINING = "pretraining"
+    POST_TRAINING = "post_training"
     EVALUATION = "evaluation"
 
 

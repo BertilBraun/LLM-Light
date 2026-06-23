@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from llm_lite.config.models import ExperimentFile
+from llm_lite.config.models import ExperimentFile, NoPostTrainingConfiguration
 from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.hashing import hash_json_value
@@ -14,7 +14,7 @@ from llm_lite.training.checkpoint import load_latest_checkpoint
 
 class EvaluationStage(BasePipelineStage):
     name: StageName = StageName.EVALUATION
-    parents: tuple[StageName, ...] = (StageName.PRETRAINING, StageName.TOKENIZER)
+    parents: tuple[StageName, ...] = (StageName.POST_TRAINING, StageName.TOKENIZER)
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str:
         return hash_json_value(
@@ -39,8 +39,10 @@ class EvaluationStage(BasePipelineStage):
             vocabulary_size=tokenizer.vocabulary_size,
         )
         checkpoint_step = load_latest_checkpoint(
-            checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / "checkpoints",
+            checkpoint_directory=_evaluation_checkpoint_directory(
+                experiment_configuration=experiment_configuration,
+                registry=registry,
+            ),
             model=model,
             optimizer=None,
         )
@@ -59,3 +61,14 @@ class EvaluationStage(BasePipelineStage):
             encoding="utf-8",
         )
         return StageOutput(files={"report": "report.json"}, metrics=evaluation_result.metrics)
+
+
+def _evaluation_checkpoint_directory(
+    experiment_configuration: ExperimentFile,
+    registry: ArtifactRegistry,
+) -> Path:
+    match experiment_configuration.post_training:
+        case NoPostTrainingConfiguration():
+            return registry.artifact_directory(StageName.PRETRAINING.value) / "checkpoints"
+        case _:
+            return registry.artifact_directory(StageName.POST_TRAINING.value) / "checkpoints"

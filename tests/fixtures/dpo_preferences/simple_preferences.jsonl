@@ -1,0 +1,1 @@
+{"task_id":"simple-choice","prompt":"a","chosen_completion":"x","rejected_completion":"y","chosen_score":2.0,"rejected_score":1.0,"score_margin":1.0,"chosen_sample_index":0,"rejected_sample_index":1}

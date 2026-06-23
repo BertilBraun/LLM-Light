@@ -9,6 +9,7 @@ def test_ordered_pipeline_stages_expose_names_and_dependencies() -> None:
         StageName.TOKENIZER,
         StageName.PACKED_DATASET,
         StageName.PRETRAINING,
+        StageName.POST_TRAINING,
         StageName.EVALUATION,
     )
     assert tuple(stage.name for stage in ORDERED_PIPELINE_STAGES) == ORDERED_STAGE_NAMES
@@ -21,3 +22,4 @@ def test_ordered_pipeline_stages_expose_names_and_dependencies() -> None:
     )
     assert ORDERED_PIPELINE_STAGES[4].parents == (StageName.PACKED_DATASET, StageName.TOKENIZER)
     assert ORDERED_PIPELINE_STAGES[5].parents == (StageName.PRETRAINING, StageName.TOKENIZER)
+    assert ORDERED_PIPELINE_STAGES[6].parents == (StageName.POST_TRAINING, StageName.TOKENIZER)

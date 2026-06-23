@@ -5,7 +5,7 @@ from llm_lite.config.models import (
     FixedPromptGenerationEvaluationConfiguration,
     InferenceConfiguration,
 )
-from llm_lite.inference.engine import generate_text
+from llm_lite.inference.engine import generate_batch
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -28,22 +28,25 @@ def evaluate_fixed_prompt_generation(
     evaluation_configuration: FixedPromptGenerationEvaluationConfiguration,
     inference_configuration: InferenceConfiguration,
 ) -> FixedPromptGenerationResult:
+    generation_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=evaluation_configuration.prompts,
+        inference_configuration=InferenceConfiguration(
+            engine=inference_configuration.engine,
+            precision=inference_configuration.precision,
+            quantization=inference_configuration.quantization,
+            decoding=inference_configuration.decoding,
+            maximum_new_tokens=evaluation_configuration.maximum_new_tokens,
+            batch_size=inference_configuration.batch_size,
+            stop_sequences=inference_configuration.stop_sequences,
+        ),
+    )
     samples = tuple(
         FixedPromptGenerationSample(
-            prompt=prompt,
-            generated_text=generate_text(
-                model=model,
-                tokenizer=tokenizer,
-                prompt=prompt,
-                inference_configuration=InferenceConfiguration(
-                    engine=inference_configuration.engine,
-                    precision=inference_configuration.precision,
-                    quantization=inference_configuration.quantization,
-                    decoding=inference_configuration.decoding,
-                    maximum_new_tokens=evaluation_configuration.maximum_new_tokens,
-                ),
-            ),
+            prompt=generation_result.prompt,
+            generated_text=generation_result.full_text,
         )
-        for prompt in evaluation_configuration.prompts
+        for generation_result in generation_results
     )
     return FixedPromptGenerationResult(samples=samples)

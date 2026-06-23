@@ -1,9 +1,16 @@
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
 import pytest
 import torch
+from torch import nn
 
 from llm_lite.config.models import (
     DecodingStrategy,
     DenseGptConfiguration,
+    GenerationStopReason,
     GreedyDecodingConfiguration,
     InferenceConfiguration,
     InferenceEngine,
@@ -12,8 +19,15 @@ from llm_lite.config.models import (
     QuantizationType,
     SamplingDecodingConfiguration,
 )
+from llm_lite.inference.candidates import (
+    CandidateGenerationResult,
+    CandidatePrompt,
+    GeneratedCandidateRecord,
+    generate_candidates,
+    write_candidate_jsonl,
+)
 from llm_lite.inference.decoding import select_next_token_id
-from llm_lite.inference.engine import generate_text
+from llm_lite.inference.engine import generate_batch, generate_text
 from llm_lite.inference.kv_cache import generate_greedy as generate_greedy_with_cache
 from llm_lite.inference.naive import generate_greedy as generate_greedy_naively
 from llm_lite.inference.runtime import prepare_model_for_inference
@@ -146,6 +160,258 @@ def test_generate_text_samples_with_configured_decoding() -> None:
     assert isinstance(generated_text, str)
 
 
+def test_batched_greedy_generation_matches_single_prompt_generation() -> None:
+    torch.manual_seed(23)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+    inference_configuration = InferenceConfiguration(
+        engine=InferenceEngine.NAIVE,
+        precision=Precision.FP32,
+        quantization=QuantizationType.NONE,
+        decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+        maximum_new_tokens=4,
+        batch_size=2,
+    )
+
+    batch_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a", "b"),
+        inference_configuration=inference_configuration,
+    )
+
+    assert tuple(result.full_text for result in batch_results) == tuple(
+        generate_text(
+            model=model,
+            tokenizer=tokenizer,
+            prompt=prompt,
+            inference_configuration=inference_configuration,
+        )
+        for prompt in ("a", "b")
+    )
+
+
+def test_batched_sampling_returns_output_contract() -> None:
+    torch.manual_seed(29)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+    with torch.no_grad():
+        model.output_projection.weight.zero_()
+
+    batch_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a", "b", "c"),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.NAIVE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=SamplingDecodingConfiguration(
+                strategy=DecodingStrategy.SAMPLE,
+                temperature=1.0,
+                top_k=None,
+            ),
+            maximum_new_tokens=2,
+            batch_size=3,
+        ),
+    )
+
+    assert len(batch_results) == 3
+    assert all(result.prompt_length > 0 for result in batch_results)
+    assert all(result.generated_token_count <= 2 for result in batch_results)
+
+
+def test_variable_length_prompt_batching_is_supported() -> None:
+    torch.manual_seed(31)
+    tokenizer = train_character_tokenizer(
+        texts=["abcd"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    batch_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a", "abc"),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=3,
+            batch_size=2,
+        ),
+    )
+
+    assert len(batch_results) == 2
+    assert batch_results[0].prompt_length != batch_results[1].prompt_length
+    assert all(isinstance(result.full_text, str) for result in batch_results)
+
+
+def test_batched_kv_cache_generation_matches_naive_generation() -> None:
+    torch.manual_seed(37)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    naive_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a", "b"),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.NAIVE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=4,
+            batch_size=2,
+        ),
+    )
+    cached_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a", "b"),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=4,
+            batch_size=2,
+        ),
+    )
+
+    assert tuple(result.full_text for result in cached_results) == tuple(
+        result.full_text for result in naive_results
+    )
+
+
+def test_stop_sequences_end_batched_generation() -> None:
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = StepTokenModel(
+        vocabulary_size=tokenizer.vocabulary_size,
+        token_ids=(
+            tokenizer.encode(text="b", add_bos=False, add_eos=False)[0],
+            tokenizer.encode(text="c", add_bos=False, add_eos=False)[0],
+        ),
+    )
+
+    batch_results = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a",),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.NAIVE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=5,
+            batch_size=1,
+            stop_sequences=("bc",),
+        ),
+    )
+
+    assert batch_results[0].generated_text == ""
+    assert batch_results[0].stop_reason is GenerationStopReason.STOP_SEQUENCE
+
+
+def test_inference_metrics_are_recorded() -> None:
+    torch.manual_seed(41)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    generation_result = generate_batch(
+        model=model,
+        tokenizer=tokenizer,
+        prompts=("a",),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=2,
+            batch_size=1,
+        ),
+    )[0]
+
+    assert generation_result.timing.total_seconds >= 0.0
+    assert generation_result.throughput.tokens_per_second >= 0.0
+    assert generation_result.throughput.sequences_per_second >= 0.0
+
+
+def test_candidate_generation_writes_jsonl_artifact(tmp_path) -> None:
+    torch.manual_seed(43)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+    candidate_generation_result = generate_candidates(
+        model=model,
+        tokenizer=tokenizer,
+        candidate_prompts=(
+            CandidatePrompt(task_id="task-1", prompt="a"),
+            CandidatePrompt(task_id="task-2", prompt="b"),
+        ),
+        samples_per_prompt=2,
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.NAIVE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=2,
+            batch_size=2,
+        ),
+    )
+    output_path = tmp_path / "candidates.jsonl"
+
+    write_candidate_jsonl(
+        candidate_generation_result=candidate_generation_result,
+        output_path=output_path,
+    )
+
+    lines = output_path.read_text(encoding="utf-8").splitlines()
+    parsed_result = CandidateGenerationResult(
+        candidates=tuple(
+            GeneratedCandidateRecord.model_validate_json(line)
+            for line in lines
+        ),
+    )
+    first_record = json.loads(lines[0])
+    assert len(parsed_result.candidates) == 4
+    assert first_record["task_id"] == "task-1"
+    assert first_record["sample_index"] == 0
+    assert first_record["decoding"]["strategy"] == "greedy"
+
+
 def test_generate_text_applies_configured_precision() -> None:
     torch.manual_seed(19)
     tokenizer = train_character_tokenizer(
@@ -257,3 +523,26 @@ def _build_model(vocabulary_size: int) -> DenseGpt:
     )
     model.eval()
     return model
+
+
+class StepTokenModel(nn.Module):
+    def __init__(self, vocabulary_size: int, token_ids: tuple[int, ...]) -> None:
+        super().__init__()
+        self.vocabulary_size = vocabulary_size
+        self.token_ids = token_ids
+
+    def forward(self, token_ids: torch.Tensor) -> FakeModelOutput:
+        batch_size, sequence_length = token_ids.shape
+        logits = torch.full(
+            (batch_size, sequence_length, self.vocabulary_size),
+            -1000.0,
+        )
+        generated_index = max(0, sequence_length - 2)
+        selected_token_id = self.token_ids[min(generated_index, len(self.token_ids) - 1)]
+        logits[:, -1, selected_token_id] = 1000.0
+        return FakeModelOutput(logits=logits)
+
+
+@dataclass(frozen=True)
+class FakeModelOutput:
+    logits: torch.Tensor

@@ -75,12 +75,12 @@ distributed:
   enabled: true
   backend: gloo
   strategy: data_parallel
-  world_size: 4
+  world_size: 2
   simulated_nodes:
-    count: 2
+    count: 1
     processes_per_node: 2
   parallelism:
-    data: 4
+    data: 2
   checkpoint:
     type: sharded
     save_rank_local_state: true

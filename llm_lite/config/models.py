@@ -63,6 +63,12 @@ class QuantizationType(str, Enum):
     INT4_WEIGHT_ONLY = "int4_weight_only"
 
 
+class GenerationStopReason(str, Enum):
+    MAXIMUM_NEW_TOKENS = "maximum_new_tokens"
+    EOS_TOKEN = "eos_token"
+    STOP_SEQUENCE = "stop_sequence"
+
+
 class DistributedBackend(str, Enum):
     GLOO = "gloo"
     NCCL = "nccl"
@@ -328,6 +334,8 @@ class InferenceConfiguration(Configuration):
         strategy=DecodingStrategy.GREEDY,
     )
     maximum_new_tokens: int = Field(default=80, gt=0)
+    batch_size: int = Field(default=1, gt=0)
+    stop_sequences: tuple[str, ...] = ()
 
 
 class SimulatedNodesConfiguration(Configuration):

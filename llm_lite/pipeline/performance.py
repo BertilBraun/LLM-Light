@@ -92,7 +92,7 @@ class PipelinePerformanceLogger:
                 metrics=metrics,
             ),
         )
-        self._write_tensorboard_scalars(
+        self._write_tensorboard_text(
             timing=timing,
             worker_count=worker_count,
             metrics=metrics,
@@ -107,35 +107,21 @@ class PipelinePerformanceLogger:
     def close(self) -> None:
         self.summary_writer.close()
 
-    def _write_tensorboard_scalars(
+    def _write_tensorboard_text(
         self,
         timing: StagePerformanceTiming,
         worker_count: int,
         metrics: dict[str, int | float | str | bool],
     ) -> None:
-        self.summary_writer.add_scalar(
-            f"pipeline/{timing.stage_name}/duration_seconds",
-            timing.duration_seconds,
+        self.summary_writer.add_text(
+            f"pipeline/{timing.stage_name}",
+            _stage_summary_text(
+                timing=timing,
+                worker_count=worker_count,
+                metrics=metrics,
+            ),
             self.stage_index,
         )
-        self.summary_writer.add_scalar(
-            f"pipeline/{timing.stage_name}/workers",
-            worker_count,
-            self.stage_index,
-        )
-        for metric_name, metric_value in sorted(metrics.items()):
-            match metric_value:
-                case bool():
-                    scalar_value = float(metric_value)
-                case int() | float():
-                    scalar_value = metric_value
-                case _:
-                    continue
-            self.summary_writer.add_scalar(
-                f"pipeline/{timing.stage_name}/{metric_name}",
-                scalar_value,
-                self.stage_index,
-            )
         self.summary_writer.flush()
 
 
@@ -146,6 +132,35 @@ def _worker_count(metrics: dict[str, int | float | str | bool]) -> int:
             return worker_count_metric
         case _:
             return 1
+
+
+def _stage_summary_text(
+    timing: StagePerformanceTiming,
+    worker_count: int,
+    metrics: dict[str, int | float | str | bool],
+) -> str:
+    rows = [
+        ("started_at", timing.started_at),
+        ("ended_at", timing.ended_at),
+        ("duration_seconds", f"{timing.duration_seconds:.6f}"),
+        ("worker_count", str(worker_count)),
+    ]
+    rows.extend(
+        (metric_name, _format_metric_value(metric_value))
+        for metric_name, metric_value in sorted(metrics.items())
+    )
+    row_text = "\n".join(f"| {name} | {value} |" for name, value in rows)
+    return f"| metric | value |\n| --- | --- |\n{row_text}"
+
+
+def _format_metric_value(metric_value: int | float | str | bool) -> str:
+    match metric_value:
+        case bool():
+            return str(metric_value).lower()
+        case float():
+            return f"{metric_value:.6g}"
+        case _:
+            return str(metric_value)
 
 
 def _utc_now() -> str:

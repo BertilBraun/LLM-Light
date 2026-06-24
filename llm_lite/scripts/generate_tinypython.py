@@ -501,10 +501,6 @@ def write_jsonl_record(path: Path, record: dict[str, Any]) -> None:
         handle.write("\n")
 
 
-def log_progress(message: str) -> None:
-    print(message, flush=True)
-
-
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", required=True)
@@ -547,27 +543,18 @@ def main() -> int:
             for sample_index in range(args.samples_per_seed)
         )
     ]
-    pending_attempts = sum(
-        1
-        for seed in pending
-        for sample_index in range(args.samples_per_seed)
-        if (seed.seed_id, sample_index) not in completed
-    )
 
-    log_progress(f"model={args.model}")
-    log_progress(
+    print(f"model={args.model}")
+    print(
         f"total_seeds={len(seeds):,} completed_attempts={len(completed):,} "
-        f"pending_seeds={len(pending):,} pending_attempts={pending_attempts:,}"
+        f"pending_seeds={len(pending):,}"
     )
     if not pending:
         return 0
 
-    log_progress("loading dependencies")
-    from tqdm import tqdm
     from transformers import AutoTokenizer
     from vllm import LLM, SamplingParams
 
-    log_progress("loading tokenizer")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=args.trust_remote_code)
     if tokenizer.chat_template is None:
         raise RuntimeError("The selected model tokenizer has no chat template.")
@@ -583,9 +570,7 @@ def main() -> int:
     }
     if args.quantization != "auto":
         llm_args["quantization"] = args.quantization
-    log_progress("loading vLLM model")
     llm = LLM(**llm_args)
-    log_progress("model loaded; starting generation")
 
     sampling = SamplingParams(
         n=args.samples_per_seed,
@@ -604,91 +589,71 @@ def main() -> int:
     generated_seeds = 0
     valid_count = 0
     invalid_counts: Counter[str] = Counter()
-    completed_new_attempts = 0
 
-    with tqdm(total=pending_attempts, desc="tinypython attempts", unit="sample") as progress:
-        for batch_no, batch in enumerate(batches(pending, args.batch_size), 1):
-            log_progress(
-                f"batch={batch_no} preparing_prompts seeds={len(batch):,} "
-                f"samples_per_seed={args.samples_per_seed}"
+    for batch_no, batch in enumerate(batches(pending, args.batch_size), 1):
+        prompts = [
+            tokenizer.apply_chat_template(
+                [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt(seed)},
+                ],
+                tokenize=False,
+                add_generation_prompt=True,
             )
-            prompts = [
-                tokenizer.apply_chat_template(
-                    [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt(seed)},
-                    ],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-                for seed in batch
-            ]
-            log_progress(f"batch={batch_no} generating")
-            outputs = llm.generate(prompts, sampling, use_tqdm=True)
+            for seed in batch
+        ]
+        outputs = llm.generate(prompts, sampling, use_tqdm=True)
 
-            for seed, output in zip(batch, outputs, strict=True):
-                for sample_index, completion in enumerate(output.outputs):
-                    if (seed.seed_id, sample_index) in completed:
-                        continue
-                    generation = completion.text.strip()
-                    finish_reason = completion.finish_reason
-                    if finish_reason != "stop":
-                        rejection_reason = "finish_reason_not_stop"
+        for seed, output in zip(batch, outputs, strict=True):
+            for sample_index, completion in enumerate(output.outputs):
+                if (seed.seed_id, sample_index) in completed:
+                    continue
+                generation = completion.text.strip()
+                finish_reason = completion.finish_reason
+                if finish_reason != "stop":
+                    rejection_reason = "finish_reason_not_stop"
+                else:
+                    try:
+                        parsed = parse_generation(generation)
+                    except ValueError as error:
+                        rejection_reason = str(error)
                     else:
-                        try:
-                            parsed = parse_generation(generation)
-                        except ValueError as error:
-                            rejection_reason = str(error)
-                        else:
-                            write_jsonl_record(
-                                args.output,
-                                build_valid_record(
-                                    model=args.model,
-                                    seed=seed,
-                                    sample_index=sample_index,
-                                    parsed=parsed,
-                                ),
-                            )
-                            valid_count += 1
-                            completed_new_attempts += 1
-                            progress.update(1)
-                            progress.set_postfix(
-                                valid=valid_count,
-                                invalid=sum(invalid_counts.values()),
-                            )
-                            continue
+                        write_jsonl_record(
+                            args.output,
+                            build_valid_record(
+                                model=args.model,
+                                seed=seed,
+                                sample_index=sample_index,
+                                parsed=parsed,
+                            ),
+                        )
+                        valid_count += 1
+                        continue
 
-                    invalid_counts[rejection_reason] += 1
-                    write_jsonl_record(
-                        invalid_path,
-                        build_invalid_record(
-                            model=args.model,
-                            seed=seed,
-                            sample_index=sample_index,
-                            generation=generation,
-                            finish_reason=finish_reason,
-                            rejection_reason=rejection_reason,
-                        ),
-                    )
-                    completed_new_attempts += 1
-                    progress.update(1)
-                    progress.set_postfix(
-                        valid=valid_count,
-                        invalid=sum(invalid_counts.values()),
-                    )
+                invalid_counts[rejection_reason] += 1
+                write_jsonl_record(
+                    invalid_path,
+                    build_invalid_record(
+                        model=args.model,
+                        seed=seed,
+                        sample_index=sample_index,
+                        generation=generation,
+                        finish_reason=finish_reason,
+                        rejection_reason=rejection_reason,
+                    ),
+                )
 
-            generated_seeds += len(batch)
-            elapsed = time.perf_counter() - started
-            invalid_total = sum(invalid_counts.values())
-            log_progress(
-                f"batch={batch_no} seeds={generated_seeds:,}/{len(pending):,} "
-                f"attempts={completed_new_attempts:,}/{pending_attempts:,} "
-                f"valid={valid_count:,} invalid={invalid_total:,} "
-                f"rate={completed_new_attempts / max(elapsed, 1e-9):.2f} samples/s"
-            )
+        generated_seeds += len(batch)
+        elapsed = time.perf_counter() - started
+        invalid_total = sum(invalid_counts.values())
+        print(
+            f"batch={batch_no} seeds={generated_seeds:,}/{len(pending):,} "
+            f"valid={valid_count:,} invalid={invalid_total:,} "
+            f"rate={generated_seeds / max(elapsed, 1e-9):.2f} seeds/s"
+        )
 
     if invalid_counts:
-        log_progress("invalid_reasons=" + json.dumps(dict(invalid_counts), sort_keys=True))
+        print("invalid_reasons=" + json.dumps(dict(invalid_counts), sort_keys=True))
     return 0
 
 

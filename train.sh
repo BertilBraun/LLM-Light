@@ -71,12 +71,32 @@ if actual_device_count < expected_device_count:
     )
 PY
 
-echo "Reviewing pipeline stages..."
+echo "Reviewing data-preparation pipeline stages..."
 uv run python -m llm_lite.scripts.run_pipeline \
   --config "$CONFIG_PATH" \
+  --to packed_dataset \
+  --dry-run
+
+echo "Preparing dataset, tokenizer, and packed sequences once..."
+uv run python -m llm_lite.scripts.run_pipeline \
+  --config "$CONFIG_PATH" \
+  --to packed_dataset
+
+echo "Reviewing distributed pretraining stage..."
+uv run python -m llm_lite.scripts.run_pipeline \
+  --config "$CONFIG_PATH" \
+  --from pretraining \
+  --to pretraining \
   --dry-run
 
 echo "Starting TinyStories MoE distributed training..."
 CUDA_VISIBLE_DEVICES="$GPU_IDS" uv run torchrun --standalone --nproc_per_node="$GPU_COUNT" \
   -m llm_lite.scripts.run_pipeline \
+  --from pretraining \
+  --to pretraining \
   --config "$CONFIG_PATH"
+
+echo "Running post-training and final evaluation once..."
+uv run python -m llm_lite.scripts.run_pipeline \
+  --config "$CONFIG_PATH" \
+  --from post_training

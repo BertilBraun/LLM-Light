@@ -1,4 +1,5 @@
 import argparse
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,23 +27,41 @@ class StageReview:
 
 
 def run_pipeline(
-    configuration_path: Path, dry_run: bool, force_stages: tuple[StageName, ...]
+    configuration_path: Path,
+    dry_run: bool,
+    force_stages: tuple[StageName, ...],
+    from_stage: StageName | None = None,
+    to_stage: StageName | None = None,
 ) -> int:
     experiment_configuration = load_experiment_configuration(configuration_path=configuration_path)
     seed_everything(seed=experiment_configuration.experiment.seed)
     registry = ArtifactRegistry(run_directory=experiment_configuration.experiment.output_dir)
+    selected_stages = _selected_stages(
+        stages=ORDERED_PIPELINE_STAGES,
+        from_stage=from_stage,
+        to_stage=to_stage,
+    )
+    distributed_rank = _environment_rank()
+    if distributed_rank is not None and distributed_rank != 0:
+        return _run_distributed_worker_stage(
+            experiment_configuration=experiment_configuration,
+            registry=registry,
+            selected_stages=selected_stages,
+            dry_run=dry_run,
+            rank=distributed_rank,
+        )
     event_logger = PipelineEventLogger(run_directory=experiment_configuration.experiment.output_dir)
     performance_logger = PipelinePerformanceLogger(
         run_directory=experiment_configuration.experiment.output_dir,
     )
     force_stage_names = _expanded_force_stages(
-        stages=ORDERED_PIPELINE_STAGES,
+        stages=selected_stages,
         force_stages=force_stages,
     )
     review = _review_pipeline(
         experiment_configuration=experiment_configuration,
         registry=registry,
-        stages=ORDERED_PIPELINE_STAGES,
+        stages=selected_stages,
         force_stage_names=force_stage_names,
     )
     _print_review(review=review)
@@ -63,7 +82,7 @@ def run_pipeline(
             registry=registry,
             event_logger=event_logger,
             performance_logger=performance_logger,
-            stages=ORDERED_PIPELINE_STAGES,
+            stages=selected_stages,
             force_stage_names=force_stage_names,
         )
     finally:
@@ -75,6 +94,16 @@ def build_argument_parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--config", required=True, type=Path)
     argument_parser.add_argument("--dry-run", action="store_true")
+    argument_parser.add_argument(
+        "--from",
+        dest="from_stage",
+        choices=[stage_name.value for stage_name in ORDERED_STAGE_NAMES],
+    )
+    argument_parser.add_argument(
+        "--to",
+        dest="to_stage",
+        choices=[stage_name.value for stage_name in ORDERED_STAGE_NAMES],
+    )
     argument_parser.add_argument(
         "--force",
         action="append",
@@ -94,7 +123,61 @@ def main() -> int:
         configuration_path=arguments.config,
         dry_run=arguments.dry_run,
         force_stages=force_stages,
+        from_stage=None if arguments.from_stage is None else StageName(arguments.from_stage),
+        to_stage=None if arguments.to_stage is None else StageName(arguments.to_stage),
     )
+
+
+def _selected_stages(
+    stages: tuple[PipelineStage, ...],
+    from_stage: StageName | None,
+    to_stage: StageName | None,
+) -> tuple[PipelineStage, ...]:
+    ordered_stage_names = tuple(stage.name for stage in stages)
+    start_index = 0 if from_stage is None else ordered_stage_names.index(from_stage)
+    stop_index = (
+        len(stages) - 1
+        if to_stage is None
+        else ordered_stage_names.index(to_stage)
+    )
+    if start_index > stop_index:
+        raise ValueError("--from stage must not come after --to stage.")
+    return stages[start_index : stop_index + 1]
+
+
+def _environment_rank() -> int | None:
+    rank = os.environ.get("RANK")
+    if rank is None:
+        return None
+    return int(rank)
+
+
+def _run_distributed_worker_stage(
+    experiment_configuration: ExperimentFile,
+    registry: ArtifactRegistry,
+    selected_stages: tuple[PipelineStage, ...],
+    dry_run: bool,
+    rank: int,
+) -> int:
+    if dry_run:
+        return 0
+    if not experiment_configuration.distributed.enabled:
+        raise ValueError("RANK is set, but distributed training is disabled.")
+    pretraining_stage = next(
+        (stage for stage in selected_stages if stage.name is StageName.PRETRAINING),
+        None,
+    )
+    if pretraining_stage is None:
+        return 0
+    artifact_directory = registry.artifacts_directory / StageName.PRETRAINING.value
+    artifact_directory.mkdir(parents=True, exist_ok=True)
+    print(f"[rank {rank}] entering distributed pretraining worker", flush=True)
+    pretraining_stage.run(
+        experiment_configuration=experiment_configuration,
+        registry=registry,
+        artifact_directory=artifact_directory,
+    )
+    return 0
 
 
 def _review_pipeline(

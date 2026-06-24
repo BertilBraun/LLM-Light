@@ -46,7 +46,12 @@ class MoeGpt(CachedAutoregressiveModel):
             self.token_embedding(token_ids) + self.position_embedding(positions)[None, :, :]
         )
         causal_mask = torch.triu(
-            torch.full((sequence_length, sequence_length), float("-inf"), device=token_ids.device),
+            torch.full(
+                (sequence_length, sequence_length),
+                float("-inf"),
+                device=token_ids.device,
+                dtype=hidden_states.dtype,
+            ),
             diagonal=1,
         )
         auxiliary_losses: list[torch.Tensor] = []

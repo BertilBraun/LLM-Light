@@ -50,6 +50,18 @@ def test_moe_forward_output_shape_and_auxiliary_loss() -> None:
     assert torch.isfinite(model_output.auxiliary_loss)
 
 
+def test_dense_and_moe_forward_support_bfloat16_attention_mask() -> None:
+    token_ids = torch.tensor([[1, 2, 3, 4]], dtype=torch.long)
+    dense_model = DenseGpt(model_configuration=_dense_configuration(), vocabulary_size=19)
+    moe_model = MoeGpt(model_configuration=_moe_configuration(), vocabulary_size=19)
+
+    dense_output = dense_model.bfloat16()(token_ids)
+    moe_output = moe_model.bfloat16()(token_ids)
+
+    assert dense_output.logits.dtype is torch.bfloat16
+    assert moe_output.logits.dtype is torch.bfloat16
+
+
 def test_moe_parameter_summary_reports_active_parameters() -> None:
     model = MoeGpt(model_configuration=_moe_configuration(), vocabulary_size=19)
 

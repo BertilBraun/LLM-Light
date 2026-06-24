@@ -81,6 +81,71 @@ def test_byte_bpe_tokenizer_save_load_roundtrip(tmp_path: Path) -> None:
     )
 
 
+def test_byte_bpe_encode_applies_ranked_merges() -> None:
+    tokenizer = ByteBpeTokenizer(
+        token_to_id={"<eos>": 0},
+        byte_token_to_id={
+            (97,): 1,
+            (98,): 2,
+            (120,): 3,
+            (97, 98): 4,
+            (97, 98, 97, 98): 5,
+            (120, 120): 6,
+        },
+        merge_rules=(
+            ((97,), (98,)),
+            ((120,), (120,)),
+            ((97, 98), (97, 98)),
+        ),
+        bos_token=None,
+        eos_token="<eos>",
+        pad_token=None,
+    )
+
+    token_ids = tokenizer.encode(text="abab", add_bos=False, add_eos=True)
+
+    assert token_ids == [5, 0]
+
+
+def test_byte_bpe_encode_matches_tokenizers_bpe_for_same_ascii_vocabulary() -> None:
+    tokenizers = pytest.importorskip("tokenizers")
+    bpe_model = pytest.importorskip("tokenizers.models")
+    texts = [
+        "abababab xxxxx abba",
+        "the quick brown fox jumps over the lazy dog",
+        "banana bandana abracadabra",
+    ]
+    training_result = train_byte_bpe_tokenizer(
+        texts=texts,
+        vocabulary_size=320,
+        max_training_documents=len(texts),
+        max_training_bytes=None,
+        add_bos_token=False,
+        add_eos_token=False,
+        add_pad_token=False,
+        workers=1,
+    )
+    tokenizer = training_result.tokenizer
+    official_tokenizer = tokenizers.Tokenizer(
+        bpe_model.BPE(
+            vocab={
+                _byte_token_symbol(byte_token): token_id
+                for byte_token, token_id in tokenizer.byte_token_to_id.items()
+            },
+            merges=[
+                (_byte_token_symbol(left_token), _byte_token_symbol(right_token))
+                for left_token, right_token in tokenizer.merge_rules
+            ],
+            unk_token=None,
+        ),
+    )
+
+    for text in texts + ["abab banana dog", "xxxx abracadabra abba"]:
+        assert tokenizer.encode(text=text, add_bos=False, add_eos=False) == list(
+            official_tokenizer.encode(text, add_special_tokens=False).ids,
+        )
+
+
 def test_byte_bpe_decode_tolerates_invalid_generated_bytes() -> None:
     training_result = train_byte_bpe_tokenizer(
         texts=["valid text"],
@@ -151,3 +216,7 @@ def test_byte_bpe_training_respects_byte_bound() -> None:
 
     assert training_result.training_document_count == 2
     assert training_result.training_bytes == 8
+
+
+def _byte_token_symbol(byte_token: tuple[int, ...]) -> str:
+    return bytes(byte_token).decode("latin-1")

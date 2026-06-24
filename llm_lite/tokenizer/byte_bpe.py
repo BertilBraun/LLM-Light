@@ -94,6 +94,9 @@ class ByteBpeTokenizer:
             token_id: byte_token for byte_token, token_id in byte_token_to_id.items()
         }
         self.merge_rules = merge_rules
+        self.merge_rule_to_rank = {
+            merge_rule: rank for rank, merge_rule in enumerate(merge_rules)
+        }
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.pad_token = pad_token
@@ -126,8 +129,10 @@ class ByteBpeTokenizer:
 
     def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]:
         byte_tokens = _byte_tokens(text=text)
-        for merge_rule in self.merge_rules:
-            byte_tokens = _merge_pair(byte_tokens=byte_tokens, merge_rule=merge_rule)
+        byte_tokens = _apply_ranked_merge_rules(
+            byte_tokens=byte_tokens,
+            merge_rule_to_rank=self.merge_rule_to_rank,
+        )
         token_ids: list[int] = []
         if add_bos:
             token_ids.append(self.bos_token_id)
@@ -757,6 +762,37 @@ def _pair_counts(corpus: list[list[ByteToken]]) -> Counter[BytePair]:
 
 def _best_pair(pair_counts: Counter[BytePair]) -> BytePair:
     return min(pair_counts, key=lambda pair: (-pair_counts[pair], pair[0], pair[1]))
+
+
+def _apply_ranked_merge_rules(
+    byte_tokens: list[ByteToken],
+    merge_rule_to_rank: dict[BytePair, int],
+) -> list[ByteToken]:
+    if len(byte_tokens) < 2 or not merge_rule_to_rank:
+        return byte_tokens
+    while True:
+        best_pair = _best_ranked_pair(
+            byte_tokens=byte_tokens,
+            merge_rule_to_rank=merge_rule_to_rank,
+        )
+        if best_pair is None:
+            return byte_tokens
+        byte_tokens = _merge_pair(byte_tokens=byte_tokens, merge_rule=best_pair)
+
+
+def _best_ranked_pair(
+    byte_tokens: list[ByteToken],
+    merge_rule_to_rank: dict[BytePair, int],
+) -> BytePair | None:
+    best_pair: BytePair | None = None
+    best_rank: int | None = None
+    for token_index in range(len(byte_tokens) - 1):
+        pair = (byte_tokens[token_index], byte_tokens[token_index + 1])
+        rank = merge_rule_to_rank.get(pair)
+        if rank is not None and (best_rank is None or rank < best_rank):
+            best_pair = pair
+            best_rank = rank
+    return best_pair
 
 
 def _merge_pair(byte_tokens: list[ByteToken], merge_rule: BytePair) -> list[ByteToken]:

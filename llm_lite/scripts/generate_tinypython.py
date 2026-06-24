@@ -508,7 +508,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--invalid-output", type=Path)
     parser.add_argument("--num-seeds", type=int, default=10_000)
     parser.add_argument("--samples-per-seed", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-p", type=float, default=0.95)

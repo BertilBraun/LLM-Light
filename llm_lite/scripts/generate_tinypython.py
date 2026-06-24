@@ -37,6 +37,10 @@ Requirements:
   statements. If a type name appears in an annotation, assume it is already
   available or use built-in generic forms such as list[int], dict[str, int],
   tuple[int, ...], and int | None.
+- If a standard-library helper would normally require an import, assume it is
+  already available by name. This includes typing names and common modules or
+  helpers from collections, functools, itertools, math, operator, and statistics.
+  Still do not emit any import statement.
 - The task description must fully specify what the function computes.
 - Respect every semantic field in the supplied seed.
 - Use meaningful function, argument, and local-variable names.

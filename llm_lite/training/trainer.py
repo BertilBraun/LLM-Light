@@ -8,8 +8,9 @@ from torch import nn
 from torch.optim import AdamW, Optimizer
 from torch.utils.data import Dataset, IterableDataset
 
-from llm_lite.config.models import DistributedConfiguration, TrainingConfiguration
+from llm_lite.config.models import DistributedConfiguration, Precision, TrainingConfiguration
 from llm_lite.model.router_usage import collect_router_usage_summaries, reset_router_usage
+from llm_lite.pipeline.progress import console_log
 from llm_lite.training.checkpoint import (
     finalize_sharded_checkpoint,
     load_latest_checkpoint,
@@ -51,6 +52,13 @@ def train_model(
     evaluation_callback: TrainingEvaluationCallback | None,
     objective_runner: TrainingObjectiveRunner,
 ) -> TrainingResult:
+    device = _single_process_training_device()
+    _apply_training_precision(model=model, precision=training_configuration.precision)
+    model = model.to(device)
+    console_log(
+        "[train] single_process_device "
+        f"device={device} precision={training_configuration.precision.value}"
+    )
     optimizer = AdamW(
         model.parameters(),
         lr=training_configuration.optimizer.learning_rate,
@@ -85,7 +93,7 @@ def train_model(
             token_batch = data_iterator.next_batch()
             prepared_batch = objective_runner.prepare_batch(
                 batch=token_batch,
-                device=_model_device(model=model),
+                device=device,
             )
             optimizer.zero_grad(set_to_none=True)
             loss = objective_runner.loss(model=model, batch=prepared_batch)
@@ -191,9 +199,16 @@ def _train_model_distributed_initialized(
     model_configuration_hash: str,
     objective_runner: TrainingObjectiveRunner,
 ) -> TrainingResult:
+    _apply_training_precision(model=model, precision=training_configuration.precision)
     model = prepare_model_for_distributed_training(
         model=model,
         distributed_runtime=distributed_runtime,
+    )
+    console_log(
+        "[train] distributed_device "
+        f"rank={distributed_runtime.rank} "
+        f"device={distributed_runtime.device} "
+        f"precision={training_configuration.precision.value}"
     )
     optimizer = AdamW(
         model.parameters(),
@@ -382,8 +397,20 @@ def _apply_current_optimizer_configuration(
         parameter_group["weight_decay"] = training_configuration.optimizer.weight_decay
 
 
-def _model_device(model: nn.Module) -> torch.device:
-    return next(model.parameters()).device
+def _single_process_training_device() -> torch.device:
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def _apply_training_precision(model: nn.Module, precision: Precision) -> None:
+    match precision:
+        case Precision.FP32:
+            model.float()
+        case Precision.FP16:
+            model.half()
+        case Precision.BF16:
+            model.bfloat16()
 
 
 def _batch_token_count(batch: TrainingBatch) -> int:

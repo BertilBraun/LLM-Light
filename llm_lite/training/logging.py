@@ -48,14 +48,23 @@ class TrainingMetricLogger:
     def write(self, metric_record: TrainingMetricRecord) -> None:
         with self.metrics_path.open("a", encoding="utf-8") as metrics_file:
             metrics_file.write(metric_record.model_dump_json() + "\n")
-        console_log(
+        message = (
             "[train] "
             f"step={metric_record.step} "
             f"loss={metric_record.loss:.6f} "
             f"learning_rate={metric_record.learning_rate:.6g} "
             f"gradient_norm={metric_record.gradient_norm:.4f} "
-            f"tokens_per_second={metric_record.tokens_per_second:.2f}",
         )
+        if metric_record.distributed_world_size is None:
+            message += f"tokens_per_second={metric_record.tokens_per_second:.2f}"
+        else:
+            message += (
+                f"rank_tokens_per_second={metric_record.tokens_per_second:.2f} "
+                f"global_tokens_per_second="
+                f"{metric_record.distributed_global_tokens_per_second or 0.0:.2f} "
+                f"world_size={metric_record.distributed_world_size}"
+            )
+        console_log(message)
         self.summary_writer.add_scalar(
             TrainingScalar.LOSS.value,
             metric_record.loss,

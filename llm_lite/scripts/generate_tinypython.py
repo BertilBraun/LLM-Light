@@ -114,6 +114,7 @@ OUTPUT_PATTERN = re.compile(
 @dataclass(frozen=True)
 class TaskSeed:
     seed_id: int
+    task_family: str
     input_kind: str
     operation: str
     condition: str
@@ -123,6 +124,7 @@ class TaskSeed:
     extra_constraint: str
     description_style: str
     naming_style: str
+    operation_tags: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -148,6 +150,8 @@ NAMING_STYLES = [
 
 FAMILIES = [
     {
+        "name": "integer_list_atomic",
+        "tags": ("list", "integer", "atomic"),
         "input": "a list of integers",
         "operations": {
             "count matching elements": "an integer",
@@ -206,6 +210,8 @@ FAMILIES = [
         ],
     },
     {
+        "name": "string_list_atomic",
+        "tags": ("list", "string", "atomic"),
         "input": "a list of strings",
         "operations": {
             "count matching strings": "an integer",
@@ -262,6 +268,8 @@ FAMILIES = [
         ],
     },
     {
+        "name": "string_atomic",
+        "tags": ("string", "character", "atomic"),
         "input": "a string",
         "operations": {
             "count matching characters": "an integer",
@@ -310,6 +318,8 @@ FAMILIES = [
         ],
     },
     {
+        "name": "integer_mapping_atomic",
+        "tags": ("dict", "integer", "atomic"),
         "input": "a dictionary from strings to integers",
         "operations": {
             "select matching entries": "a dictionary from strings to integers",
@@ -362,6 +372,8 @@ FAMILIES = [
         ],
     },
     {
+        "name": "two_integer_lists_atomic",
+        "tags": ("list", "integer", "two-input", "atomic"),
         "input": "two lists of integers",
         "operations": {
             "compute elementwise sums": "a list of integers",
@@ -405,6 +417,228 @@ FAMILIES = [
             "keep duplicate values only when requested",
         ],
     },
+    {
+        "name": "compositional_list_transform",
+        "tags": ("list", "string", "composition", "filter-map"),
+        "input": "a list of strings",
+        "operations": {
+            "filter selected strings, then uppercase and reverse each kept string": (
+                "a list of strings"
+            ),
+            "strip whitespace, drop empty results, then lowercase the remaining strings": (
+                "a list of strings"
+            ),
+            "keep strings matching a predicate, normalize spacing, then sort by length": (
+                "a list of strings"
+            ),
+            "remove duplicates after case normalization while preserving first occurrence": (
+                "a list of strings"
+            ),
+            "return cleaned strings paired with their original indexes": (
+                "a list of tuples containing an integer and a string"
+            ),
+        },
+        "conditions": [
+            "nonempty after stripping whitespace",
+            "contains a substring parameter after case normalization",
+            "starts with a prefix parameter ignoring surrounding whitespace",
+            "has length inside an inclusive lower and upper bound after stripping",
+            "contains at least one alphabetic character and no digits",
+            "matches when lowercased value is not already present",
+        ],
+        "edges": [
+            "handle empty and singleton inputs naturally",
+            "preserve duplicate transformed values unless the operation removes duplicates",
+            "preserve first-occurrence order where possible",
+            "return an empty list when no strings match",
+            "ignore strings that become empty after normalization",
+        ],
+        "styles": [
+            "use an explicit loop with two or three clear steps",
+            "use helper local variables for each transformation stage",
+            "use a comprehension only for the final simple projection",
+            "build the result incrementally",
+        ],
+        "extras": [
+            "do not mutate the input list",
+            "use no imports",
+            "avoid clever one-line implementations",
+            "make string normalization explicit",
+        ],
+    },
+    {
+        "name": "grouped_aggregation",
+        "tags": ("dict", "list", "aggregation", "grouping"),
+        "input": "a list of dictionaries with string keys and simple values",
+        "operations": {
+            "group records by a string field and count records in each group": (
+                "a dictionary from strings to integers"
+            ),
+            "group records by a category field and sum an integer amount field": (
+                "a dictionary from strings to integers"
+            ),
+            "group records by a string field and collect selected values into lists": (
+                "a dictionary from strings to lists of strings"
+            ),
+            "find the largest integer value for each group": (
+                "a dictionary from strings to integers"
+            ),
+            "return groups whose aggregate count or sum crosses a threshold": (
+                "a dictionary from strings to integers"
+            ),
+        },
+        "conditions": [
+            "ignore records missing the required group key",
+            "ignore records whose amount value is not an integer",
+            "use a default group name parameter when the group value is empty",
+            "include only records whose enabled field is true",
+            "include only records whose score is nonnegative",
+        ],
+        "edges": [
+            "handle an empty list naturally",
+            "handle singleton groups",
+            "preserve first-seen group insertion order",
+            "keep negative numbers when the operation allows them",
+            "return an empty dictionary when no records contribute",
+        ],
+        "styles": [
+            "use an explicit loop over records",
+            "use dictionary get for accumulator updates",
+            "use setdefault when collecting grouped lists",
+            "use clear local variable names for extracted fields",
+        ],
+        "extras": [
+            "do not mutate input dictionaries",
+            "use no imports",
+            "avoid relying on sorted order unless requested",
+        ],
+    },
+    {
+        "name": "nested_data_transform",
+        "tags": ("dict", "list", "nested", "optional"),
+        "input": "a nested dictionary or list structure using built-in Python values",
+        "operations": {
+            "extract nested values from records and return only valid values": (
+                "a list of strings"
+            ),
+            "flatten lists stored under dictionary keys while skipping missing keys": (
+                "a list of integers"
+            ),
+            "build a dictionary mapping ids to cleaned nested names": (
+                "a dictionary from integers to strings"
+            ),
+            "return the first record whose nested field satisfies the predicate": (
+                "a dictionary or None"
+            ),
+            "summarize nested item counts per outer key": (
+                "a dictionary from strings to integers"
+            ),
+        },
+        "conditions": [
+            "nested value exists and is not None",
+            "nested list is nonempty",
+            "nested string is nonempty after stripping",
+            "nested integer is greater than a threshold parameter",
+            "nested tag list contains a target tag parameter",
+        ],
+        "edges": [
+            "handle empty outer containers naturally",
+            "skip malformed nested entries instead of failing",
+            "return None when no nested match exists",
+            "preserve outer input order",
+            "keep duplicate nested values",
+        ],
+        "styles": [
+            "use explicit isinstance checks where needed",
+            "use nested loops when the data shape requires them",
+            "use early return for first-match operations",
+            "use local variables for intermediate nested values",
+        ],
+        "extras": [
+            "do not mutate nested input structures",
+            "use no imports",
+            "avoid classes and helper functions",
+        ],
+    },
+    {
+        "name": "multi_condition_predicate",
+        "tags": ("predicate", "multi-condition", "optional", "edge-case"),
+        "input": "a list of integers or strings plus one or two threshold parameters",
+        "operations": {
+            "return the first value satisfying two conditions": "an integer or None",
+            "return whether every value satisfies a compound condition": "a boolean",
+            "partition values into accepted and rejected groups": "a tuple of two lists",
+            "count values satisfying at least two of three conditions": "an integer",
+            "return accepted values after applying a simple transformation": "a list",
+        },
+        "conditions": [
+            "value is positive and inside an inclusive lower and upper bound",
+            "value is even and not equal to an excluded parameter",
+            "string is nonempty after stripping and contains no whitespace",
+            "string starts with a prefix parameter and has length at most a limit parameter",
+            "index is odd and value is not a duplicate of a previous value",
+        ],
+        "edges": [
+            "handle empty, singleton, negative, and duplicate inputs",
+            "return None when no value passes all required conditions",
+            "keep original order in both partition groups",
+            "return true for an empty input only when that follows Python all semantics",
+            "return zero when no values satisfy the count condition",
+        ],
+        "styles": [
+            "use readable boolean helper variables inside the loop",
+            "use an explicit loop",
+            "use early return when appropriate",
+            "build outputs incrementally",
+        ],
+        "extras": [
+            "do not mutate inputs",
+            "use no imports",
+            "avoid nested conditional expressions",
+        ],
+    },
+    {
+        "name": "small_algorithm",
+        "tags": ("algorithm", "list", "string", "multi-step"),
+        "input": "a short list or string plus simple scalar parameters",
+        "operations": {
+            "compute running totals after filtering invalid values": "a list of integers",
+            "return the longest increasing contiguous run": "a list of integers",
+            "collapse adjacent duplicate values, then count remaining values": "an integer",
+            "rotate a list by a nonnegative offset and then drop repeated values": "a list",
+            "normalize words, remove stop words, then count frequencies": (
+                "a dictionary from strings to integers"
+            ),
+            "scan characters and return balanced bracket depth after validation": (
+                "an integer or None"
+            ),
+        },
+        "conditions": [
+            "ignore negative numbers",
+            "treat duplicate values as adjacent only when consecutive",
+            "use modulo behavior for offsets larger than the list length",
+            "ignore empty words after stripping punctuation-like edge characters",
+            "return None when validation fails before completing the scan",
+        ],
+        "edges": [
+            "handle empty and singleton inputs naturally",
+            "handle negative numbers and duplicates explicitly",
+            "return an empty list when no values remain",
+            "return zero for empty valid depth computations",
+            "preserve stable first-occurrence order after transformations",
+        ],
+        "styles": [
+            "use two to four straightforward processing steps",
+            "use explicit loops and local accumulators",
+            "avoid clever slicing when a loop is clearer",
+            "use helper local variables for each stage",
+        ],
+        "extras": [
+            "do not mutate inputs",
+            "use no imports",
+            "avoid recursion",
+        ],
+    },
 ]
 
 
@@ -425,8 +659,6 @@ def compatible(seed: TaskSeed) -> bool:
         or seed.operation.startswith("check")
     ):
         return False
-    if "duplicate" in seed.condition and "duplicate" not in seed.operation:
-        return False
     return True
 
 
@@ -445,6 +677,7 @@ def compatible_seed_candidates() -> list[TaskSeed]:
             ):
                 item = TaskSeed(
                     seed_id=seed_id,
+                    task_family=family["name"],
                     input_kind=family["input"],
                     operation=operation,
                     condition=condition,
@@ -454,6 +687,7 @@ def compatible_seed_candidates() -> list[TaskSeed]:
                     extra_constraint=extra,
                     description_style=description_style,
                     naming_style=naming_style,
+                    operation_tags=tuple(family["tags"]),
                 )
                 if compatible(item):
                     candidates.append(item)
@@ -492,6 +726,7 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
     return [
         TaskSeed(
             seed_id=i,
+            task_family=item.task_family,
             input_kind=item.input_kind,
             operation=item.operation,
             condition=item.condition,
@@ -501,6 +736,7 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
             extra_constraint=item.extra_constraint,
             description_style=item.description_style,
             naming_style=item.naming_style,
+            operation_tags=item.operation_tags,
         )
         for i, item in enumerate(chosen)
     ]
@@ -510,6 +746,8 @@ def user_prompt(seed: TaskSeed) -> str:
     return f"""Create one training example from this semantic seed.
 
 Input: {seed.input_kind}
+Task family: {seed.task_family}
+Operation tags: {", ".join(seed.operation_tags)}
 Operation: {seed.operation}
 Condition or relation: {seed.condition}
 Required output: {seed.output_kind}
@@ -619,9 +857,21 @@ def build_valid_record(
         "model": model,
         "seed": asdict(seed),
         "sample_index": sample_index,
+        "task_family": seed.task_family,
+        "operation_tags": list(seed.operation_tags),
+        "signature": _function_signature_line(code=parsed.code),
+        "normalized_description": _normalize_description(parsed.task_description),
         "task_description": parsed.task_description,
         "code": parsed.code,
     }
+
+
+def _function_signature_line(code: str) -> str:
+    return code.strip().splitlines()[0].strip()
+
+
+def _normalize_description(task_description: str) -> str:
+    return " ".join(task_description.casefold().split())
 
 
 def build_invalid_record(

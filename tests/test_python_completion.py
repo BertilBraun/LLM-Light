@@ -249,7 +249,7 @@ def test_evaluator_runs_signature_prefix_records(
                 inference_configuration=inference_configuration,
             ),
         )
-        return prompt + "    return sum(1 for value in values if value > 0)\n"
+        return prompt + "    return [value.upper()[::-1] for value in values if value]\n"
 
     monkeypatch.setattr(python_completion, "generate_text", generate_completion)
 
@@ -273,9 +273,11 @@ def test_evaluator_runs_signature_prefix_records(
     )
 
     assert len(captured_calls) == 1
-    assert captured_calls[0].prompt == "def count_positive(values: list[int]) -> int:\n"
+    assert captured_calls[0].prompt == (
+        "def uppercase_reversed_nonempty(values: list[str]) -> list[str]:\n"
+    )
     assert result.tasks[0].generated_completion == (
-        "    return sum(1 for value in values if value > 0)\n"
+        "    return [value.upper()[::-1] for value in values if value]\n"
     )
     assert result.parsed_tasks == 1
     assert result.executed_tasks == 1

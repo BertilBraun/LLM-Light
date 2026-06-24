@@ -57,7 +57,7 @@ training:
   objective: causal_language_modeling
   causal_language_modeling:
     auxiliary_loss_weight: 0.01
-  maximum_steps: 10000
+  maximum_steps: 2150
   batch_size_sequences: 64
   dataloader:
     num_workers: 4
@@ -69,10 +69,10 @@ training:
     weight_decay: 0.1
   precision: bf16
   gradient_clip_norm: 1.0
-  checkpoint_interval_steps: 1000
+  checkpoint_interval_steps: 500
   log_interval_steps: 20
   evaluation:
-    interval_steps: 1000
+    interval_steps: 500
     evaluators:
       perplexity:
         split: validation
@@ -92,10 +92,10 @@ evaluation:
     maximum_documents: 1000
   fixed_prompt_generation:
     prompts:
-      - "Return the number of positive integers in values."
-      - "Return a new list containing strings that start with prefix."
-      - "Return a dictionary mapping each word to the number of times it occurs."
-      - "Return the first integer in values that is divisible by divisor. Return None if no such integer exists."
+      - "def uppercase_reversed_nonempty(values: list[str]) -> list[str]:\n"
+      - "def sum_enabled_amounts_by_category(records: list[dict[str, object]]) -> dict[str, int]:\n"
+      - "def first_even_in_range(values: list[int], lower: int, upper: int) -> int | None:\n"
+      - "def normalize_word_counts(words: list[str], stop_words: list[str]) -> dict[str, int]:\n"
     maximum_new_tokens: 160
   python_completion:
     tasks_path: tests/fixtures/tinypython_completion/tasks.jsonl

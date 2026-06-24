@@ -5,6 +5,7 @@ import pytest
 
 from llm_lite.scripts.generate_tinypython import (
     build_argument_parser,
+    build_valid_record,
     completed_seed_attempts,
     generate_seeds,
     invalid_output_path,
@@ -21,6 +22,8 @@ def test_generate_seeds_assigns_stable_requested_ids() -> None:
     assert len({seed.input_kind for seed in seeds}) >= 1
     assert all(seed.description_style for seed in seeds)
     assert all(seed.naming_style for seed in seeds)
+    assert all(seed.task_family for seed in seeds)
+    assert all(seed.operation_tags for seed in seeds)
 
 
 def test_unique_seed_space_supports_main_generation_run() -> None:
@@ -58,6 +61,39 @@ def count_positive(values: list[int]) -> int:
 
     assert parsed.task_description == "Return the number of positive integers in values."
     assert parsed.code.startswith("def count_positive")
+
+
+def test_build_valid_record_adds_metadata() -> None:
+    seed = generate_seeds(count=1, rng_seed=123)[0]
+    parsed = parse_generation(
+        """
+<task>
+Return the number of positive integers in values.
+</task>
+<code>
+def count_positive(values: list[int]) -> int:
+    count = 0
+    for value in values:
+        if value > 0:
+            count += 1
+    return count
+</code>
+""",
+    )
+
+    record = build_valid_record(
+        model="teacher",
+        seed=seed,
+        sample_index=0,
+        parsed=parsed,
+    )
+
+    assert record["task_family"] == seed.task_family
+    assert record["operation_tags"] == list(seed.operation_tags)
+    assert record["signature"] == "def count_positive(values: list[int]) -> int:"
+    assert record["normalized_description"] == (
+        "return the number of positive integers in values."
+    )
 
 
 def test_parse_generation_strips_top_level_imports() -> None:

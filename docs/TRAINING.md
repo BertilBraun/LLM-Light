@@ -336,7 +336,7 @@ CUDA_VISIBLE_DEVICES=0 python -m llm_lite.scripts.generate_tinypython \
   --model TEACHER_A \
   --num-seeds 10000 \
   --samples-per-seed 2 \
-  --batch-size 256 \
+  --batch-size 512 \
   --output data/teacher_a.jsonl
 ```
 
@@ -345,7 +345,7 @@ CUDA_VISIBLE_DEVICES=1 python -m llm_lite.scripts.generate_tinypython \
   --model TEACHER_B \
   --num-seeds 10000 \
   --samples-per-seed 2 \
-  --batch-size 256 \
+  --batch-size 512 \
   --output data/teacher_b.jsonl
 ```
 
@@ -462,13 +462,13 @@ The script now defaults to a moderate submission batch.
 Recommended pilot value:
 
 ```text
-batch size: 256
+batch size: 512
 ```
 
 Possible later values:
 
 ```text
-128, 256, or 512
+256, 512, or 1024
 ```
 
 This argument controls how many prompts are submitted to one `llm.generate` call. It does not imply that every request is decoded simultaneously.
@@ -481,7 +481,7 @@ vLLM internally schedules active sequences according to:
 * generation length;
 * scheduler configuration.
 
-Start with 256 for 7B-class teacher models on 24 GB GPUs. Lower it to 128 if the model runs out of KV-cache memory, or increase to 512 only after confirming that GPU memory and scheduler behavior remain healthy.
+Start with 512 for 7B-class teacher models on 24 GB GPUs when the pilot shows stable memory and good scheduler behavior. Lower it to 256 if the model runs out of KV-cache memory, or try 1024 only after confirming that end-to-end throughput improves.
 
 ---
 
@@ -660,7 +660,7 @@ A clean initial configuration is:
 dtype: bfloat16
 quantization: auto
 one model per GPU
-batch size: 256
+batch size: 512
 prefix caching: enabled
 ```
 

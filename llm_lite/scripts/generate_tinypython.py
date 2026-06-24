@@ -33,6 +33,10 @@ Requirements:
 - Add type annotations to every parameter and the return value.
 - Use only built-in Python types and operations unless the seed explicitly allows
   a standard-library module.
+- Do not import anything. Do not emit import statements or from-import
+  statements. If a type name appears in an annotation, assume it is already
+  available or use built-in generic forms such as list[int], dict[str, int],
+  tuple[int, ...], and int | None.
 - The task description must fully specify what the function computes.
 - Respect every semantic field in the supplied seed.
 - Use meaningful function, argument, and local-variable names.
@@ -508,7 +512,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--invalid-output", type=Path)
     parser.add_argument("--num-seeds", type=int, default=10_000)
     parser.add_argument("--samples-per-seed", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=256)
+    parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top-p", type=float, default=0.95)

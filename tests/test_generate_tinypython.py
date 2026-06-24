@@ -60,6 +60,18 @@ def value() -> int:
         ),
         (
             """
+<task>Return item counts.</task>
+<code>
+from collections import Counter
+
+def count_items(items: list[str]) -> dict[str, int]:
+    return dict(Counter(items))
+</code>
+""",
+            "not_exactly_one_top_level_function",
+        ),
+        (
+            """
 <task>Return the first value.</task>
 <code>
 def first(values):
@@ -94,7 +106,7 @@ def test_defaults_match_training_plan() -> None:
     parser = build_argument_parser()
     arguments = parser.parse_args(["--model", "teacher", "--output", "teacher.jsonl"])
 
-    assert arguments.batch_size == 256
+    assert arguments.batch_size == 512
     assert arguments.max_tokens == 512
     assert arguments.dtype == "bfloat16"
 

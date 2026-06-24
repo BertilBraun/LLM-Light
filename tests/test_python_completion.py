@@ -26,6 +26,7 @@ from llm_lite.evaluation.python_completion import (
     load_python_completion_tasks,
     parse_python_source,
     run_python_source_in_subprocess,
+    source_from_completion,
     truncate_at_stop_sequence,
 )
 from llm_lite.evaluation.runner import run_configured_evaluators
@@ -98,6 +99,43 @@ def test_completion_from_generated_text_strips_full_prompt_echo() -> None:
     )
 
     assert completion == "def answer() -> int:\n    return 1\n"
+
+
+def test_source_from_completion_appends_generated_body_to_signature_prefix() -> None:
+    task = PythonCompletionTaskRecord(
+        task_id="reverse_uppercase_strings",
+        prompt="def reverse_uppercase_strings(strings: list[str]) -> list[str]:\n",
+        checks=("reverse_uppercase_strings(['ab']) == ['BA']",),
+    )
+
+    source = source_from_completion(
+        task=task,
+        generated_completion="    return [value.upper()[::-1] for value in strings]\n",
+    )
+
+    assert source == (
+        "def reverse_uppercase_strings(strings: list[str]) -> list[str]:\n"
+        "    return [value.upper()[::-1] for value in strings]\n"
+    )
+
+
+def test_task_description_records_keep_full_function_generation_prompt() -> None:
+    task = PythonCompletionTaskRecord(
+        task_id="count_positive",
+        task_description="Define a function named count_positive that returns positives.",
+        checks=("count_positive([1, -1]) == 1",),
+    )
+
+    assert task.inference_prompt == (
+        "Define a function named count_positive that returns positives.\n\n"
+    )
+    assert (
+        source_from_completion(
+            task=task,
+            generated_completion="def count_positive(values: list[int]) -> int:\n    return 1\n",
+        )
+        == "def count_positive(values: list[int]) -> int:\n    return 1\n"
+    )
 
 
 def test_parse_python_source_reports_success_and_failure() -> None:
@@ -194,7 +232,7 @@ def test_evaluator_uses_generate_text_with_configured_inference_settings(
     assert result.pass_rate == 1.0
 
 
-def test_evaluator_runs_task_description_to_function_records(
+def test_evaluator_runs_signature_prefix_records(
     monkeypatch: MonkeyPatch,
 ) -> None:
     captured_calls: list[CapturedGenerationCall] = []
@@ -211,11 +249,7 @@ def test_evaluator_runs_task_description_to_function_records(
                 inference_configuration=inference_configuration,
             ),
         )
-        return (
-            prompt
-            + "def count_positive(values: list[int]) -> int:\n"
-            + "    return sum(1 for value in values if value > 0)\n"
-        )
+        return prompt + "    return sum(1 for value in values if value > 0)\n"
 
     monkeypatch.setattr(python_completion, "generate_text", generate_completion)
 
@@ -239,8 +273,10 @@ def test_evaluator_runs_task_description_to_function_records(
     )
 
     assert len(captured_calls) == 1
-    assert captured_calls[0].prompt.endswith("\n\n")
-    assert captured_calls[0].prompt.startswith("Define a function named count_positive")
+    assert captured_calls[0].prompt == "def count_positive(values: list[int]) -> int:\n"
+    assert result.tasks[0].generated_completion == (
+        "    return sum(1 for value in values if value > 0)\n"
+    )
     assert result.parsed_tasks == 1
     assert result.executed_tasks == 1
     assert result.passed_checks == 4

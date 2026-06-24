@@ -2027,16 +2027,96 @@ Deliverables:
 * active-versus-total parameter reporting
 * optional expert-parallel experiment
 
-### TODO plan out actual training run
+### Actual MoE training run plan
 
-* What task? Python completion probably
-* MoE model (~2M active parameters, ~14M total parameters)
-* Model size (~14M)
-* Hardware rental (4x gpu?)
-* Training parameters
-* Posttraining? Active RL? Is that sensible?? The model will probably not be good enough to do that yet.
-* What evaluation afterwards? Only the python eval?
-* Where and what to document? Final trained checkpoint commited to repo. Including logs, config, metrics, eval results, tensorboard plots, training time / performance metrics etc.
+The first real MoE run should be a Python prefix-completion base model rather than a
+story model. Python gives a clearer task-specific evaluation surface through syntax
+checks, execution checks, and fixed prefix-completion prompts.
+
+Reference configuration:
+
+```text
+configs/python_moe_14m.yaml
+```
+
+Run objective:
+
+* Train a small top-1 MoE decoder on local Python source files.
+* Target roughly 14M total parameters and roughly 2M active transformer parameters per token.
+* Validate that MoE training, checkpointing, KV-cache inference, perplexity, and Python completion evaluation work together in one artifact-producing run.
+* Produce a baseline artifact set for later dense-versus-MoE and post-training comparisons.
+
+Dataset:
+
+* Use local Python files under `data/python/**/*.py`.
+* Keep file boundaries by packing each source file independently into 512-token chunks.
+* Exclude vendored, generated, minified, cache, virtualenv, and build-output files before placing data under `data/python/`.
+* Record corpus provenance in a run note: source repositories, collection date, approximate file count, and filtering rules.
+
+Model:
+
+* Architecture: `moe_gpt`.
+* Dimension: 208.
+* Layers: 4.
+* Attention heads: 8.
+* Experts: 8.
+* Expert hidden dimension: 832.
+* Router: top-1.
+* Auxiliary router loss weight: 0.01.
+* Vocabulary: 8192-token byte-level BPE.
+
+Training:
+
+* Start with the single-process config in `configs/python_moe_14m.yaml`.
+* Use BF16 on GPU where supported.
+* Train for 50,000 optimizer steps.
+* Batch size: 32 sequences of 513 tokens.
+* Checkpoint every 1,000 steps.
+* Run validation perplexity and a 10-task Python completion subset every 1,000 steps.
+* If one GPU is too slow, create a DDP variant of the same config and launch with `torchrun`; do not introduce expert parallelism yet.
+
+Launch:
+
+```bash
+python -m llm_lite.scripts.run_pipeline \
+  --config configs/python_moe_14m.yaml
+```
+
+Post-training:
+
+* Do not include DPO or active RL in the first real MoE run.
+* The base model is unlikely to be strong enough for useful generated-feedback training before the corpus, tokenizer, and base pretraining quality are understood.
+* After a successful base run, use the Python completion evaluator to decide whether SFT/DPO data generation is worth pursuing.
+
+Evaluation:
+
+* Validation perplexity on the held-out split.
+* Python completion parse rate, execution rate, passed checks, total checks, and pass rate.
+* Greedy KV-cache generation samples for a small fixed prompt set.
+* Training throughput, checkpoint duration, checkpoint size, and total wall-clock time.
+* Later comparison against a dense model with similar active compute.
+
+Artifacts to preserve:
+
+* `resolved_config.json`.
+* All artifact manifests.
+* `metrics.jsonl`.
+* TensorBoard event files.
+* Final checkpoint and latest checkpoint pointer.
+* Final evaluation report.
+* A short markdown run report containing hardware, launch command, duration, key metrics, sample completions, and known issues.
+
+Do not commit large checkpoints or full TensorBoard logs to the source repository by default.
+Commit the config and summarized run report; store large artifacts in the run directory or an external artifact store.
+
+Open items before declaring the run a final showcase:
+
+* Router utilization metrics are not yet logged.
+* Active-versus-total parameter reporting is not yet explicit in stage metrics.
+* Dense-versus-MoE comparison config is still needed.
+* The Python source pipeline is still generic local-text ingestion rather than Python-aware filtering.
+* `packing.pack_documents` is currently configuration surface only; current packing preserves document boundaries, which is acceptable for Python but should be corrected or renamed before relying on cross-document packing.
+* The Python completion benchmark is useful as a smoke/evaluation harness but is still small and synthetic.
 
 ---
 

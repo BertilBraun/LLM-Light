@@ -49,6 +49,34 @@ The exact smallest useful TinyStories configuration should be selected after rev
 
 The TinyStories run should be intentionally limited and inexpensive. Its role is to prove that the pipeline works before introducing the harder Python dataset.
 
+### Validation result: 2026-06-24 TinyStories MoE run
+
+The first full TinyStories MoE validation run completed successfully on two RTX 4090 GPUs in under one hour.
+
+Configuration:
+
+* `configs/tinystories_moe_full.yaml`;
+* 4,096-token Rust byte-BPE tokenizer;
+* 6-layer top-1 MoE decoder;
+* 4 experts;
+* approximately 9.0M total parameters;
+* approximately 3.7M active parameters;
+* 256-token context length;
+* 50,000 training steps;
+* data-parallel world size 2.
+
+Observed result:
+
+* training loss fell smoothly from roughly 15 to the low 2.x range;
+* final logged training loss was 2.40625;
+* validation perplexity during training at step 50,000 was 6.1347;
+* final evaluation perplexity was 6.8403 over 500 validation documents;
+* final evaluation loss was 1.9228;
+* throughput was approximately 487k global tokens/s, or 243k tokens/s per GPU rank;
+* generated samples showed clear TinyStories structure, dialogue, simple characters, and story-like continuation.
+
+This is sufficient evidence that the current tokenizer, data pipeline, MoE training path, distributed execution, checkpointing, evaluation, and inference path work together. The visible remaining quality issues are normal for a small one-hour validation run: repetition, local grammar errors, semantic drift, and one replacement character (`�`) in a generated sample. The replacement character should be tracked as a tokenizer or decode-path issue before Python training, but it does not block moving to the TinyPython synthetic-data pilot.
+
 ---
 
 ## 3. Final Python task definition
@@ -891,3 +919,55 @@ The core assumptions are:
 
 The immediate next artifact is a 500-seed TinyPython pilot generated with
 `python -m llm_lite.scripts.generate_tinypython`.
+
+---
+
+## 23. Downloadable run artifacts
+
+A complete run directory is not the right default download artifact for rented GPU instances. It contains raw dataset shards, processed documents, packed sequence shards, TensorBoard files, and every checkpoint interval. For TinyStories-scale runs this can easily become many GB, even when the only useful long-term artifact is the final model state plus the small metadata needed to interpret it.
+
+Use the compact bundle exporter for run downloads:
+
+```bash
+python -m llm_lite.scripts.export_run_bundle \
+  --run-dir runs/tinystories_moe_full \
+  --output tinystories_moe_full_bundle.zip
+```
+
+The default bundle includes:
+
+* `resolved_config.json`;
+* `pipeline.jsonl`;
+* `performance.jsonl`, when present;
+* tokenizer manifest and tokenizer files;
+* pretraining manifest;
+* pretraining metrics and training-evaluation logs;
+* final evaluation manifest and report;
+* the latest pretraining checkpoint only;
+* `bundle_manifest.json`, which lists the included files.
+
+The default bundle excludes:
+
+* raw dataset shards;
+* processed dataset shards;
+* packed training shards;
+* older checkpoint intervals;
+* TensorBoard event files.
+
+Optional flags:
+
+```bash
+python -m llm_lite.scripts.export_run_bundle \
+  --run-dir runs/tinystories_moe_full \
+  --output tinystories_moe_full_full_checkpoints.zip \
+  --include-all-checkpoints
+```
+
+```bash
+python -m llm_lite.scripts.export_run_bundle \
+  --run-dir runs/tinystories_moe_full \
+  --output tinystories_moe_full_with_tensorboard.zip \
+  --include-tensorboard
+```
+
+For normal experiment archiving, keep the default compact bundle and delete or ignore the full run directory after confirming that the bundle contains the latest checkpoint, tokenizer, config, metrics, and evaluation report.

@@ -122,6 +122,7 @@ class TaskSeed:
     edge_behavior: str
     implementation_style: str
     extra_constraint: str
+    task_detail: str
     description_style: str
     naming_style: str
     operation_tags: tuple[str, ...]
@@ -145,6 +146,10 @@ NAMING_STYLES = [
     "use descriptive domain-neutral names",
     "use short readable names when the function is simple",
     "use parameter names that match the input kind",
+]
+
+DEFAULT_TASK_DETAILS = [
+    "choose a concrete parameter contract implied by the seed and specify it clearly",
 ]
 
 
@@ -639,6 +644,263 @@ FAMILIES = [
             "avoid recursion",
         ],
     },
+    {
+        "name": "record_list_concrete",
+        "tags": ("dict", "list", "records", "aggregation", "concrete"),
+        "input": "a list of dictionaries representing small records",
+        "operations": {
+            "compute a derived dictionary from selected records": (
+                "a dictionary from strings to integers"
+            ),
+            "return cleaned records with selected fields": (
+                "a list of dictionaries with string keys and simple values"
+            ),
+            "find the best matching record by a numeric field": "a dictionary or None",
+            "group selected record names by a categorical field": (
+                "a dictionary from strings to lists of strings"
+            ),
+            "return ids of records that pass validation": "a list of integers",
+            "merge duplicate records by id using an integer total": (
+                "a dictionary from integers to integers"
+            ),
+        },
+        "conditions": [
+            "record has an active flag set to true",
+            "record status equals a target status parameter",
+            "record amount is an integer inside an inclusive range",
+            "record name is a nonempty string after stripping",
+            "record tags list contains a requested tag",
+            "record priority is lower than or equal to a limit parameter",
+        ],
+        "edges": [
+            "skip records with missing or malformed fields",
+            "handle empty and singleton record lists naturally",
+            "preserve first-seen order for returned names or ids",
+            "resolve ties by keeping the first matching record",
+            "return None when no record satisfies the required fields",
+        ],
+        "styles": [
+            "use explicit isinstance checks for untrusted record values",
+            "use dictionary get and clear local variables",
+            "use an explicit loop over records",
+            "use setdefault when building grouped lists",
+        ],
+        "extras": [
+            "do not mutate input records",
+            "use no imports",
+            "avoid sorted unless the task detail explicitly asks for sorting",
+        ],
+        "details": [
+            "records use keys id, name, status, amount, and active; ignore inactive records and sum amount by status",
+            "records use keys id, category, score, and tags; return ids whose tags include target_tag and score is nonnegative",
+            "records use keys owner, item, and quantity; group item names by owner after stripping whitespace",
+            "records use keys id and points; combine duplicate ids by summing integer points",
+            "records use keys name, priority, and done; return the unfinished name with the lowest priority",
+            "records use keys code, region, and count; return total count per region for codes starting with prefix",
+            "records use keys user, enabled, and quota; return users whose enabled flag is true and quota is at least minimum",
+            "records use keys team, member, and active; group active members by team while skipping blank names",
+        ],
+    },
+    {
+        "name": "grid_matrix_concrete",
+        "tags": ("list", "nested", "grid", "matrix", "concrete"),
+        "input": "a two-dimensional list of integers or strings",
+        "operations": {
+            "summarize each row": "a list of integers",
+            "summarize each column": "a list of integers",
+            "return coordinates that satisfy a predicate": (
+                "a list of tuples containing two integers"
+            ),
+            "replace selected cells in a copied grid": "a two-dimensional list",
+            "flatten selected cells while preserving row-major order": "a list",
+            "find the first coordinate matching a condition": (
+                "a tuple of two integers or None"
+            ),
+        },
+        "conditions": [
+            "cell is positive",
+            "cell is negative",
+            "cell equals a target parameter",
+            "cell is a nonempty string after stripping",
+            "cell is on the main diagonal",
+            "cell has no equal orthogonal neighbor",
+        ],
+        "edges": [
+            "handle an empty grid naturally",
+            "handle ragged rows by processing only cells that exist",
+            "handle singleton rows and singleton columns",
+            "return None when no coordinate matches",
+            "do not fail on empty inner rows",
+        ],
+        "styles": [
+            "use nested loops with row and column indexes",
+            "build result rows without mutating the input grid",
+            "use clear coordinate tuple names",
+            "use local variables for row and cell values",
+        ],
+        "extras": [
+            "do not mutate the input grid",
+            "use no imports",
+            "avoid assuming rectangular rows unless the detail says so",
+        ],
+        "details": [
+            "sum positive integers in each row and return one total per row",
+            "count nonempty stripped strings in each column of a rectangular grid",
+            "return coordinates of negative integers in ragged row-major order",
+            "copy the grid and replace cells equal to target with replacement",
+            "return the first coordinate whose value is strictly greater than threshold",
+            "flatten diagonal cells from a square integer grid",
+            "count cells in each row that differ from their left and right neighbors",
+            "return column totals for rows shorter than the widest row by treating missing cells as zero",
+        ],
+    },
+    {
+        "name": "string_parsing_concrete",
+        "tags": ("string", "parsing", "normalization", "concrete"),
+        "input": "a string containing small structured text",
+        "operations": {
+            "parse tokens into a dictionary": "a dictionary from strings to strings",
+            "normalize separated words": "a string",
+            "extract valid numeric fields": "a list of integers",
+            "count categorized tokens": "a dictionary from strings to integers",
+            "return the first valid parsed value": "a string or None",
+            "redact selected text segments": "a string",
+        },
+        "conditions": [
+            "token contains an equals sign with nonempty key and value",
+            "token is an integer with an optional leading minus sign",
+            "token starts with a supplied prefix",
+            "token contains only alphabetic characters after stripping",
+            "segment is inside square brackets",
+            "word is not present in a stop word list",
+        ],
+        "edges": [
+            "handle an empty string naturally",
+            "ignore malformed tokens",
+            "preserve first occurrence when duplicate keys appear",
+            "strip surrounding whitespace from parsed pieces",
+            "return None when no valid value exists",
+        ],
+        "styles": [
+            "use split and explicit loops",
+            "use simple string methods only",
+            "use clear local names for tokens and pieces",
+            "avoid regular expressions",
+        ],
+        "extras": [
+            "use no imports",
+            "do not use eval or exec",
+            "avoid changing case unless the detail requests normalization",
+        ],
+        "details": [
+            "parse comma-separated key=value tokens into a dictionary, keeping the first value for each key",
+            "convert words separated by spaces, underscores, or hyphens into a lowercase hyphen slug",
+            "extract signed integers from comma-separated tokens, skipping malformed tokens",
+            "count lowercase words after stripping periods and commas from their ends",
+            "return the first bracketed segment that is nonempty after stripping",
+            "redact the local part of an email-like string before the first at sign",
+            "parse semicolon-separated name:score pairs and keep scores that are valid integers",
+            "normalize repeated whitespace to single spaces and trim the final string",
+        ],
+    },
+    {
+        "name": "optional_lookup_concrete",
+        "tags": ("dict", "list", "optional", "lookup", "concrete"),
+        "input": "one or two dictionaries plus simple lookup parameters",
+        "operations": {
+            "return a looked-up value after validation": "a string or None",
+            "return a derived integer from optional fields": "an integer or None",
+            "overlay two mappings without mutating either input": "a dictionary",
+            "select keys whose mapped values satisfy a predicate": "a list of strings",
+            "fill missing values from fallback data": "a dictionary",
+            "compare two mappings and report changed keys": "a list of strings",
+        },
+        "conditions": [
+            "key exists in the primary mapping",
+            "value is not None and not an empty string",
+            "value is an integer greater than a threshold parameter",
+            "fallback value is used only when primary value is missing or None",
+            "keys start with a prefix parameter",
+            "values differ between two dictionaries",
+        ],
+        "edges": [
+            "handle empty dictionaries naturally",
+            "return None when the lookup cannot be completed",
+            "preserve insertion order of primary keys first",
+            "do not include keys whose final value is None",
+            "handle duplicate key choices through normal dictionary behavior",
+        ],
+        "styles": [
+            "use explicit membership checks",
+            "copy dictionaries before adding or replacing keys",
+            "use dictionary get where it does not hide required None handling",
+            "build key lists incrementally",
+        ],
+        "extras": [
+            "do not mutate input dictionaries",
+            "use no imports",
+            "avoid broad exception handling",
+        ],
+        "details": [
+            "return user display name from profiles[id]['name'] when id exists and the name is nonempty",
+            "return the sum of two optional integer fields only when both are present and integers",
+            "merge default settings with override settings, skipping override values that are None",
+            "return keys whose values are nonempty strings after stripping whitespace",
+            "fill missing inventory counts from fallback counts while dropping negative final counts",
+            "return changed keys sorted by their first appearance in the primary mapping then the secondary mapping",
+            "return a lowercase email value for a user id when it contains exactly one at sign",
+            "build a mapping of requested keys to values found in primary or fallback dictionaries",
+        ],
+    },
+    {
+        "name": "sequence_algorithm_concrete",
+        "tags": ("list", "algorithm", "sequence", "concrete"),
+        "input": "a list of integers or strings",
+        "operations": {
+            "find contiguous segments": "a list of lists",
+            "compute adjacent differences or transitions": "a list",
+            "summarize windows of fixed size": "a list of integers",
+            "remove or collapse repeated values": "a list",
+            "return indexes of structural positions": "a list of integers",
+            "choose a best segment by length or total": "a list",
+        },
+        "conditions": [
+            "value changes from the previous value",
+            "window sum is at least a threshold parameter",
+            "segment contains no negative numbers",
+            "string value changes after case normalization",
+            "value is a strict local peak",
+            "run length is at least a minimum parameter",
+        ],
+        "edges": [
+            "handle empty and singleton lists naturally",
+            "handle duplicate and negative values explicitly",
+            "resolve ties by keeping the earliest segment",
+            "return an empty list when no segment qualifies",
+            "avoid indexing past either end of the list",
+        ],
+        "styles": [
+            "use one pass when practical",
+            "use clear start and end index variables",
+            "use explicit loops instead of recursion",
+            "use local accumulators for current and best segments",
+        ],
+        "extras": [
+            "do not mutate input lists",
+            "use no imports",
+            "avoid clever one-line implementations",
+        ],
+        "details": [
+            "return lengths of consecutive equal-value runs",
+            "return adjacent integer differences as current minus previous",
+            "return indexes of strict local peaks excluding endpoints",
+            "return the longest contiguous segment containing only nonnegative values",
+            "collapse case-insensitive adjacent duplicate strings while preserving original spelling of the first item",
+            "return sums of all complete windows of size width",
+            "return segments separated by zero values, excluding the zero separators",
+            "return values that are larger than every value seen before them",
+        ],
+    },
 ]
 
 
@@ -666,12 +928,22 @@ def compatible_seed_candidates() -> list[TaskSeed]:
     candidates: list[TaskSeed] = []
     seed_id = 0
     for family in FAMILIES:
+        details = family.get("details", DEFAULT_TASK_DETAILS)
         for operation, output_kind in family["operations"].items():
-            for condition, edge, style, extra, description_style, naming_style in itertools.product(
+            for (
+                condition,
+                edge,
+                style,
+                extra,
+                task_detail,
+                description_style,
+                naming_style,
+            ) in itertools.product(
                 family["conditions"],
                 family["edges"],
                 family["styles"],
                 family["extras"],
+                details,
                 DESCRIPTION_STYLES,
                 NAMING_STYLES,
             ):
@@ -685,6 +957,7 @@ def compatible_seed_candidates() -> list[TaskSeed]:
                     edge_behavior=edge,
                     implementation_style=style,
                     extra_constraint=extra,
+                    task_detail=task_detail,
                     description_style=description_style,
                     naming_style=naming_style,
                     operation_tags=tuple(family["tags"]),
@@ -734,6 +1007,7 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
             edge_behavior=item.edge_behavior,
             implementation_style=item.implementation_style,
             extra_constraint=item.extra_constraint,
+            task_detail=item.task_detail,
             description_style=item.description_style,
             naming_style=item.naming_style,
             operation_tags=item.operation_tags,
@@ -754,6 +1028,7 @@ Required output: {seed.output_kind}
 Edge behavior: {seed.edge_behavior}
 Implementation style: {seed.implementation_style}
 Additional constraint: {seed.extra_constraint}
+Concrete task detail: {seed.task_detail}
 Description style: {seed.description_style}
 Naming style: {seed.naming_style}
 
@@ -859,6 +1134,7 @@ def build_valid_record(
         "sample_index": sample_index,
         "task_family": seed.task_family,
         "operation_tags": list(seed.operation_tags),
+        "task_detail": seed.task_detail,
         "signature": _function_signature_line(code=parsed.code),
         "normalized_description": _normalize_description(parsed.task_description),
         "task_description": parsed.task_description,
@@ -904,7 +1180,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--invalid-output", type=Path)
-    parser.add_argument("--num-seeds", type=int, default=50_000)
+    parser.add_argument("--num-seeds", type=int, default=500_000)
     parser.add_argument("--samples-per-seed", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)

@@ -24,6 +24,7 @@ def test_generate_seeds_assigns_stable_requested_ids() -> None:
     assert all(seed.naming_style for seed in seeds)
     assert all(seed.task_family for seed in seeds)
     assert all(seed.operation_tags for seed in seeds)
+    assert all(seed.task_detail for seed in seeds)
 
 
 def test_unique_seed_space_supports_main_generation_run() -> None:
@@ -90,6 +91,7 @@ def count_positive(values: list[int]) -> int:
 
     assert record["task_family"] == seed.task_family
     assert record["operation_tags"] == list(seed.operation_tags)
+    assert record["task_detail"] == seed.task_detail
     assert record["signature"] == "def count_positive(values: list[int]) -> int:"
     assert record["normalized_description"] == (
         "return the number of positive integers in values."
@@ -169,7 +171,7 @@ def test_defaults_match_training_plan() -> None:
     parser = build_argument_parser()
     arguments = parser.parse_args(["--model", "teacher", "--output", "teacher.jsonl"])
 
-    assert arguments.num_seeds == 50_000
+    assert arguments.num_seeds == 500_000
     assert arguments.batch_size == 512
     assert arguments.max_tokens == 512
     assert arguments.dtype == "bfloat16"

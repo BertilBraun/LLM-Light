@@ -19,8 +19,8 @@ dataset:
 tokenizer:
   type: rust_byte_bpe
   vocabulary_size: 4096
-  max_training_documents: 20000
-  max_training_bytes: 10000000
+  max_training_documents: 100000
+  max_training_bytes: 50000000
   training_workers: 8
   add_bos_token: true
   add_eos_token: true

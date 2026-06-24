@@ -7,6 +7,8 @@ from itertools import chain
 from multiprocessing import get_context
 from pathlib import Path
 
+from tqdm.auto import tqdm
+
 from llm_lite.config.models import (
     AssignSplitTransformConfiguration,
     ExactDeduplicationTransformConfiguration,
@@ -159,6 +161,7 @@ def preprocess_text_shards(
     worker_inputs = _contiguous_worker_inputs(
         shard_references=shard_references,
         worker_count=effective_workers,
+        progress_total_documents=input_documents,
     )
     worker_results: list[PreprocessingWorkerResult] = []
     multiprocessing_context = get_context("spawn")
@@ -172,17 +175,12 @@ def preprocess_text_shards(
             )
             for worker_input in worker_inputs
         ]
-        with progress_bar(
-            description=f"preprocess/{effective_workers} workers",
-            total=input_documents,
-            unit="doc",
-        ) as bar:
-            for worker_result in pool.imap_unordered(
+        worker_results.extend(
+            pool.imap_unordered(
                 _preprocess_worker_from_arguments,
                 worker_arguments,
-            ):
-                worker_results.append(worker_result)
-                bar.update(worker_result.counters.input_documents)
+            ),
+        )
     counters = PreprocessingCounters()
     for worker_result in sorted(worker_results, key=lambda result: result.worker_index):
         counters.add(other=worker_result.counters)
@@ -202,6 +200,8 @@ def preprocess_text_shards(
 class PreprocessingWorkerInput:
     worker_index: int
     shard_references: tuple[TextShardReference, ...]
+    progress_total_documents: int | None
+    progress_document_multiplier: int
 
 
 @dataclass(frozen=True)
@@ -229,12 +229,72 @@ def _preprocess_worker(
         shard_document_limit=output_shard_documents,
         shard_name_prefix=f"part_{worker_input.worker_index:06d}_",
     )
-    for document in preprocessing_result.documents:
-        writer.append(document=document)
+    _write_preprocessed_worker_documents(
+        worker_input=worker_input,
+        preprocessing_result=preprocessing_result,
+        writer=writer,
+    )
     return PreprocessingWorkerResult(
         worker_index=worker_input.worker_index,
         counters=preprocessing_result.counters,
         corpus_manifest=writer.close(),
+    )
+
+
+@dataclass(frozen=True)
+class PreprocessingProgress:
+    progress_bar_instance: tqdm
+    total_documents: int
+    document_multiplier: int
+    reported_input_documents: int
+
+
+def _write_preprocessed_worker_documents(
+    worker_input: PreprocessingWorkerInput,
+    preprocessing_result: PreprocessingResult,
+    writer: TextShardWriter,
+) -> None:
+    if worker_input.progress_total_documents is None:
+        for document in preprocessing_result.documents:
+            writer.append(document=document)
+        return
+    with progress_bar(
+        description=f"preprocess/{worker_input.progress_document_multiplier} workers",
+        total=worker_input.progress_total_documents,
+        unit="doc",
+    ) as progress_bar_instance:
+        progress = PreprocessingProgress(
+            progress_bar_instance=progress_bar_instance,
+            total_documents=worker_input.progress_total_documents,
+            document_multiplier=worker_input.progress_document_multiplier,
+            reported_input_documents=0,
+        )
+        for document in preprocessing_result.documents:
+            writer.append(document=document)
+            progress = _update_preprocessing_progress(
+                progress=progress,
+                input_documents=preprocessing_result.counters.input_documents,
+            )
+        _update_preprocessing_progress(
+            progress=progress,
+            input_documents=preprocessing_result.counters.input_documents,
+        )
+
+
+def _update_preprocessing_progress(
+    progress: PreprocessingProgress,
+    input_documents: int,
+) -> PreprocessingProgress:
+    unreported_input_documents = input_documents - progress.reported_input_documents
+    scaled_increment = unreported_input_documents * progress.document_multiplier
+    remaining_documents = progress.total_documents - progress.progress_bar_instance.n
+    if remaining_documents > 0:
+        progress.progress_bar_instance.update(min(scaled_increment, remaining_documents))
+    return PreprocessingProgress(
+        progress_bar_instance=progress.progress_bar_instance,
+        total_documents=progress.total_documents,
+        document_multiplier=progress.document_multiplier,
+        reported_input_documents=input_documents,
     )
 
 
@@ -483,6 +543,7 @@ def _has_exact_deduplication(
 def _contiguous_worker_inputs(
     shard_references: tuple[TextShardReference, ...],
     worker_count: int,
+    progress_total_documents: int,
 ) -> tuple[PreprocessingWorkerInput, ...]:
     worker_inputs: list[PreprocessingWorkerInput] = []
     for worker_index in range(worker_count):
@@ -492,6 +553,8 @@ def _contiguous_worker_inputs(
             PreprocessingWorkerInput(
                 worker_index=worker_index,
                 shard_references=shard_references[start_index:end_index],
+                progress_total_documents=(progress_total_documents if worker_index == 0 else None),
+                progress_document_multiplier=worker_count,
             ),
         )
     return tuple(worker_inputs)

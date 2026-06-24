@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from multiprocessing import get_context
 from pathlib import Path
 
+from tqdm.auto import tqdm
+
 from llm_lite.config.models import TokenizerConfiguration
 from llm_lite.data.datasets import (
     PackedDatasetIndex,
@@ -17,7 +19,7 @@ from llm_lite.data.text_shards import (
     text_shard_references,
 )
 from llm_lite.pipeline.progress import progress_bar
-from llm_lite.tokenizer.loading import load_tokenizer
+from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
 
 
 def pack_token_sequences(
@@ -48,6 +50,8 @@ class ParallelPackingResult:
 class PackingWorkerInput:
     worker_index: int
     shard_references: tuple[TextShardReference, ...]
+    progress_total_documents: int | None
+    progress_document_multiplier: int
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,7 @@ def pack_text_shards(
     worker_inputs = _contiguous_worker_inputs(
         shard_references=shard_references,
         worker_count=effective_workers,
+        progress_total_documents=input_documents,
     )
     worker_arguments = [
         (
@@ -106,25 +111,18 @@ def pack_text_shards(
         for worker_input in worker_inputs
     ]
     if effective_workers == 1:
-        with progress_bar(description="pack", total=input_documents, unit="doc") as bar:
-            worker_result = _packing_worker(*worker_arguments[0])
-            bar.update(worker_result.input_documents)
-            worker_results = [worker_result]
+        worker_result = _packing_worker(*worker_arguments[0])
+        worker_results = [worker_result]
     else:
         multiprocessing_context = get_context("spawn")
         with multiprocessing_context.Pool(processes=effective_workers) as pool:
-            worker_results = []
-            with progress_bar(
-                description=f"pack/{effective_workers} workers",
-                total=input_documents,
-                unit="doc",
-            ) as bar:
+            worker_results = [
+                worker_result
                 for worker_result in pool.imap_unordered(
                     _packing_worker_from_arguments,
                     worker_arguments,
-                ):
-                    worker_results.append(worker_result)
-                    bar.update(worker_result.input_documents)
+                )
+            ]
     index = _merge_packing_worker_results(
         worker_results=tuple(worker_results),
         output_artifact_directory=output_artifact_directory,
@@ -160,6 +158,82 @@ def _packing_worker(
         maximum_shard_tokens=maximum_shard_tokens,
         shard_name_prefix=f"part_{worker_input.worker_index:06d}_",
     )
+    input_documents = _write_packed_worker_shards(
+        worker_input=worker_input,
+        writer=writer,
+        tokenizer=tokenizer,
+        context_length=context_length,
+        pad_token_id=pad_token_id,
+        add_bos=add_bos,
+        add_eos=add_eos,
+    )
+    index = writer.close()
+    return PackingWorkerResult(
+        worker_index=worker_input.worker_index,
+        sequence_count=index.total_sequences,
+        input_documents=input_documents,
+        shards=index.shards,
+    )
+
+
+@dataclass(frozen=True)
+class PackingProgress:
+    progress_bar_instance: tqdm
+    total_documents: int
+    document_multiplier: int
+
+
+def _write_packed_worker_shards(
+    worker_input: PackingWorkerInput,
+    writer: PackedShardWriter,
+    tokenizer: TextTokenizer,
+    context_length: int,
+    pad_token_id: int,
+    add_bos: bool,
+    add_eos: bool,
+) -> int:
+    if worker_input.progress_total_documents is None:
+        return _write_packed_worker_documents(
+            worker_input=worker_input,
+            writer=writer,
+            tokenizer=tokenizer,
+            context_length=context_length,
+            pad_token_id=pad_token_id,
+            add_bos=add_bos,
+            add_eos=add_eos,
+            progress=None,
+        )
+    with progress_bar(
+        description=f"pack/{worker_input.progress_document_multiplier} workers",
+        total=worker_input.progress_total_documents,
+        unit="doc",
+    ) as progress_bar_instance:
+        return _write_packed_worker_documents(
+            worker_input=worker_input,
+            writer=writer,
+            tokenizer=tokenizer,
+            context_length=context_length,
+            pad_token_id=pad_token_id,
+            add_bos=add_bos,
+            add_eos=add_eos,
+            progress=PackingProgress(
+                progress_bar_instance=progress_bar_instance,
+                total_documents=worker_input.progress_total_documents,
+                document_multiplier=worker_input.progress_document_multiplier,
+            ),
+        )
+
+
+def _write_packed_worker_documents(
+    worker_input: PackingWorkerInput,
+    writer: PackedShardWriter,
+    tokenizer: TextTokenizer,
+    context_length: int,
+    pad_token_id: int,
+    add_bos: bool,
+    add_eos: bool,
+    progress: PackingProgress | None,
+) -> int:
     input_documents = 0
     for shard_reference in worker_input.shard_references:
         for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
@@ -171,13 +245,9 @@ def _packing_worker(
                 pad_token_id=pad_token_id,
             ):
                 writer.append(sequence=sequence)
-    index = writer.close()
-    return PackingWorkerResult(
-        worker_index=worker_input.worker_index,
-        sequence_count=index.total_sequences,
-        input_documents=input_documents,
-        shards=index.shards,
-    )
+            if progress is not None:
+                _update_scaled_progress(progress=progress)
+    return input_documents
 
 
 def _packing_worker_from_arguments(
@@ -239,6 +309,7 @@ def _effective_worker_count(requested_workers: int, shard_count: int) -> int:
 def _contiguous_worker_inputs(
     shard_references: tuple[TextShardReference, ...],
     worker_count: int,
+    progress_total_documents: int,
 ) -> tuple[PackingWorkerInput, ...]:
     worker_inputs: list[PackingWorkerInput] = []
     for worker_index in range(worker_count):
@@ -248,6 +319,17 @@ def _contiguous_worker_inputs(
             PackingWorkerInput(
                 worker_index=worker_index,
                 shard_references=shard_references[start_index:end_index],
+                progress_total_documents=(progress_total_documents if worker_index == 0 else None),
+                progress_document_multiplier=worker_count,
             ),
         )
     return tuple(worker_inputs)
+
+
+def _update_scaled_progress(progress: PackingProgress) -> None:
+    remaining_documents = progress.total_documents - progress.progress_bar_instance.n
+    if remaining_documents <= 0:
+        return
+    progress.progress_bar_instance.update(
+        min(progress.document_multiplier, remaining_documents),
+    )

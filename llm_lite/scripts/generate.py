@@ -3,7 +3,7 @@ from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.config.models import InferenceConfiguration
-from llm_lite.inference.engine import generate_text
+from llm_lite.inference.engine import generate_batch
 from llm_lite.model.factory import build_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
@@ -16,6 +16,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     argument_parser.add_argument("--config", required=True, type=Path)
     argument_parser.add_argument("--prompt", required=True)
     argument_parser.add_argument("--maximum-new-tokens", type=int)
+    argument_parser.add_argument("--include-prompt", action="store_true")
     return argument_parser
 
 
@@ -46,19 +47,24 @@ def main() -> int:
     )
     if checkpoint_step is None:
         raise ValueError("Generation requires a completed pretraining checkpoint.")
-    generated_text = generate_text(
+    generation_result = generate_batch(
         model=model,
         tokenizer=tokenizer,
-        prompt=arguments.prompt,
+        prompts=(arguments.prompt,),
         inference_configuration=InferenceConfiguration(
             engine=experiment_configuration.inference.engine,
             precision=experiment_configuration.inference.precision,
             quantization=experiment_configuration.inference.quantization,
             decoding=experiment_configuration.inference.decoding,
             maximum_new_tokens=maximum_new_tokens,
+            batch_size=experiment_configuration.inference.batch_size,
+            stop_sequences=experiment_configuration.inference.stop_sequences,
         ),
-    )
-    print(generated_text)
+    )[0]
+    if arguments.include_prompt:
+        print(generation_result.full_text)
+    else:
+        print(generation_result.generated_text)
     return 0
 
 

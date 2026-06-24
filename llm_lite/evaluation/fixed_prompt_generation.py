@@ -1,3 +1,6 @@
+from datetime import datetime
+from time import perf_counter
+
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
@@ -28,6 +31,12 @@ def evaluate_fixed_prompt_generation(
     evaluation_configuration: FixedPromptGenerationEvaluationConfiguration,
     inference_configuration: InferenceConfiguration,
 ) -> FixedPromptGenerationResult:
+    started = perf_counter()
+    _log(
+        "[eval] fixed_prompt_generation_start "
+        f"prompts={len(evaluation_configuration.prompts)} "
+        f"maximum_new_tokens={evaluation_configuration.maximum_new_tokens}"
+    )
     generation_results = generate_batch(
         model=model,
         tokenizer=tokenizer,
@@ -49,4 +58,13 @@ def evaluate_fixed_prompt_generation(
         )
         for generation_result in generation_results
     )
+    _log(
+        "[eval] fixed_prompt_generation_done "
+        f"samples={len(samples)} "
+        f"seconds={perf_counter() - started:.1f}"
+    )
     return FixedPromptGenerationResult(samples=samples)
+
+
+def _log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)

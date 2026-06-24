@@ -1,5 +1,7 @@
 import math
 from collections.abc import Iterable, Iterator
+from datetime import datetime
+from time import perf_counter
 
 import torch
 from pydantic import BaseModel, ConfigDict
@@ -10,6 +12,7 @@ from llm_lite.config.models import (
     PerplexityEvaluationConfiguration,
 )
 from llm_lite.data.packing import pack_token_sequences
+from llm_lite.pipeline.progress import progress_bar
 from llm_lite.tokenizer.loading import TextTokenizer
 from llm_lite.training.objectives import causal_language_modeling_loss
 
@@ -33,6 +36,12 @@ def evaluate_perplexity(
 ) -> PerplexityEvaluationResult:
     if tokenizer.pad_token_id is None:
         raise ValueError("Perplexity evaluation requires a configured pad token.")
+    started = perf_counter()
+    _log(
+        "[eval] perplexity_start "
+        f"split={evaluation_configuration.split} "
+        f"maximum_documents={evaluation_configuration.maximum_documents}"
+    )
     document_counter = _DocumentCounter(
         texts=texts,
         maximum_documents=evaluation_configuration.maximum_documents,
@@ -54,15 +63,40 @@ def evaluate_perplexity(
     sequence_count = 0
     model.eval()
     with torch.no_grad():
-        for sequence in sequences:
-            token_ids = torch.tensor([sequence.token_ids], dtype=torch.long)
-            model_output = model(token_ids)
-            loss = causal_language_modeling_loss(
-                logits=model_output.logits,
-                token_ids=token_ids,
-            )
-            total_loss += float(loss.detach().cpu().item())
-            sequence_count += 1
+        with progress_bar(
+            description="eval/perplexity",
+            total=evaluation_configuration.maximum_documents,
+            unit="seq",
+        ) as bar:
+            last_document_count = 0
+            for sequence in sequences:
+                if document_counter.documents != last_document_count:
+                    bar.update(document_counter.documents - last_document_count)
+                    last_document_count = document_counter.documents
+                if sequence_count == 0:
+                    _log("[eval] perplexity_first_sequence")
+                if sequence_count > 0 and sequence_count % 100 == 0:
+                    elapsed = perf_counter() - started
+                    _log(
+                        "[eval] perplexity_progress "
+                        f"documents={document_counter.documents} "
+                        f"sequences={sequence_count} "
+                        f"seconds={elapsed:.1f}"
+                    )
+                token_ids = torch.tensor([sequence.token_ids], dtype=torch.long)
+                token_ids = token_ids.to(device=next(model.parameters()).device)
+                model_output = model(token_ids)
+                loss = causal_language_modeling_loss(
+                    logits=model_output.logits,
+                    token_ids=token_ids,
+                )
+                total_loss += float(loss.detach().cpu().item())
+                sequence_count += 1
+            if (
+                evaluation_configuration.maximum_documents is not None
+                and last_document_count < document_counter.documents
+            ):
+                bar.update(document_counter.documents - last_document_count)
     if sequence_count == 0:
         raise ValueError(
             "Perplexity evaluation produced no sequences for split "
@@ -71,6 +105,12 @@ def evaluate_perplexity(
             "and context/tokenization settings.",
         )
     average_loss = total_loss / sequence_count
+    _log(
+        "[eval] perplexity_done "
+        f"documents={document_counter.documents} "
+        f"sequences={sequence_count} "
+        f"seconds={perf_counter() - started:.1f}"
+    )
     return PerplexityEvaluationResult(
         split=evaluation_configuration.split,
         documents=document_counter.documents,
@@ -92,3 +132,7 @@ class _DocumentCounter:
                 break
             self.documents += 1
             yield text
+
+
+def _log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)

@@ -80,13 +80,11 @@ training:
     evaluators:
       perplexity:
         split: validation
-        maximum_documents: 1000
+        maximum_documents: 200
       fixed_prompt_generation:
         prompts:
           - "Once upon a time"
-          - "The little girl found"
-          - "Tom wanted to help his friend"
-        maximum_new_tokens: 120
+        maximum_new_tokens: 60
 
 evaluation:
   perplexity:

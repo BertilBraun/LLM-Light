@@ -14,6 +14,7 @@ from llm_lite.model.factory import build_model
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.model.moe import MoeGpt
 from llm_lite.model.output import ModelOutput
+from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.model.routing import TopKRouter
 from llm_lite.pipeline.runner import run_pipeline
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
@@ -47,6 +48,15 @@ def test_moe_forward_output_shape_and_auxiliary_loss() -> None:
     assert model_output.logits.shape == (2, 4, 19)
     assert model_output.auxiliary_loss is not None
     assert torch.isfinite(model_output.auxiliary_loss)
+
+
+def test_moe_parameter_summary_reports_active_parameters() -> None:
+    model = MoeGpt(model_configuration=_moe_configuration(), vocabulary_size=19)
+
+    parameter_summary = model_parameter_summary(model=model)
+
+    assert parameter_summary.total_parameters > parameter_summary.active_parameters
+    assert parameter_summary.trainable_parameters > parameter_summary.trainable_active_parameters
 
 
 def test_router_top_k_shape_and_deterministic_routing() -> None:
@@ -143,7 +153,11 @@ def test_tiny_pipeline_config_trains_moe_for_a_few_steps(tmp_path: Path) -> None
     )
 
     assert exit_code == 0
-    assert pretraining_manifest["metrics"]["final_step"] == 2
+    assert pretraining_manifest["metrics"]["final_step"] == 50
+    assert (
+        pretraining_manifest["metrics"]["model_parameters"]
+        > pretraining_manifest["metrics"]["active_model_parameters"]
+    )
     assert (run_directory / "artifacts" / "pretraining" / "checkpoints" / "latest.pt").exists()
 
 

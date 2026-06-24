@@ -130,6 +130,7 @@ class LocalTextDatasetConfiguration(Configuration):
 class HuggingFaceDatasetSplitConfiguration(Configuration):
     source_split: str
     split: str
+    skip_documents: int = Field(default=0, ge=0)
     max_documents: int | None = Field(default=None, gt=0)
 
 
@@ -137,8 +138,20 @@ class HuggingFaceDatasetConfiguration(Configuration):
     type: Literal[DatasetType.HUGGINGFACE]
     name: str
     text_column: str
+    language_column: str | None = None
+    languages: tuple[str, ...] = ()
+    license_column: str | None = None
+    licenses: tuple[str, ...] = ()
     streaming: bool = True
     splits: tuple[HuggingFaceDatasetSplitConfiguration, ...]
+
+    @model_validator(mode="after")
+    def require_filter_columns_for_filter_values(self) -> HuggingFaceDatasetConfiguration:
+        if self.languages and self.language_column is None:
+            raise ValueError("Hugging Face language filters require language_column.")
+        if self.licenses and self.license_column is None:
+            raise ValueError("Hugging Face license filters require license_column.")
+        return self
 
 
 class CharacterTokenizerConfiguration(Configuration):

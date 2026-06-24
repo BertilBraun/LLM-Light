@@ -100,6 +100,38 @@ class MoeGpt(CachedAutoregressiveModel):
         )
         return GptInferenceCache(layers=empty_layers)
 
+    def active_parameter_count(self) -> int:
+        return self._shared_parameter_count(trainable_only=False) + self._active_expert_count(
+            trainable_only=False,
+        )
+
+    def trainable_active_parameter_count(self) -> int:
+        return self._shared_parameter_count(trainable_only=True) + self._active_expert_count(
+            trainable_only=True,
+        )
+
+    def _shared_parameter_count(self, trainable_only: bool) -> int:
+        return sum(
+            parameter.numel()
+            for parameter in self.parameters()
+            if _count_parameter(parameter=parameter, trainable_only=trainable_only)
+        ) - self._total_expert_parameter_count(trainable_only=trainable_only)
+
+    def _active_expert_count(self, trainable_only: bool) -> int:
+        return sum(
+            block.active_expert_parameter_count(
+                top_k=self.model_configuration.router_top_k,
+                trainable_only=trainable_only,
+            )
+            for block in self.blocks
+        )
+
+    def _total_expert_parameter_count(self, trainable_only: bool) -> int:
+        return sum(
+            block.total_expert_parameter_count(trainable_only=trainable_only)
+            for block in self.blocks
+        )
+
 
 class MoeTransformerBlock(nn.Module):
     def __init__(self, model_configuration: MoeGptConfiguration) -> None:
@@ -162,6 +194,22 @@ class MoeTransformerBlock(nn.Module):
         return TransformerBlockInferenceCache(
             key_states=torch.empty(empty_cache_shape, device=device),
             value_states=torch.empty(empty_cache_shape, device=device),
+        )
+
+    def active_expert_parameter_count(self, top_k: int, trainable_only: bool) -> int:
+        first_expert = self.feed_forward.experts[0]
+        return top_k * sum(
+            parameter.numel()
+            for parameter in first_expert.parameters()
+            if _count_parameter(parameter=parameter, trainable_only=trainable_only)
+        )
+
+    def total_expert_parameter_count(self, trainable_only: bool) -> int:
+        return sum(
+            parameter.numel()
+            for expert in self.feed_forward.experts
+            for parameter in expert.parameters()
+            if _count_parameter(parameter=parameter, trainable_only=trainable_only)
         )
 
     def _cached_attention(
@@ -329,3 +377,7 @@ def _causal_cache_mask(
     )
     key_positions = torch.arange(total_sequence_length, device=device)
     return key_positions[None, :] > query_positions[:, None]
+
+
+def _count_parameter(parameter: nn.Parameter, trainable_only: bool) -> bool:
+    return not trainable_only or parameter.requires_grad

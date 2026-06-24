@@ -116,18 +116,27 @@ def _iter_huggingface_split_documents(
         split=split_configuration.source_split,
         streaming=dataset_configuration.streaming,
     )
-    for row_index, row in enumerate(dataset):
+    accepted_rows = 0
+    emitted_rows = 0
+    for row in dataset:
+        if not _row_matches_filters(row=row, dataset_configuration=dataset_configuration):
+            continue
+        if accepted_rows < split_configuration.skip_documents:
+            accepted_rows += 1
+            continue
         if (
             split_configuration.max_documents is not None
-            and row_index >= split_configuration.max_documents
+            and emitted_rows >= split_configuration.max_documents
         ):
             break
         text = _record_text(row=row, text_column=dataset_configuration.text_column)
         yield Document(
-            document_id=f"{split_configuration.split}-{row_index:08d}",
+            document_id=f"{split_configuration.split}-{emitted_rows:08d}",
             text=text,
             split=split_configuration.split,
         )
+        accepted_rows += 1
+        emitted_rows += 1
 
 
 def _record_text(row: Mapping[str, object], text_column: str) -> str:
@@ -137,3 +146,37 @@ def _record_text(row: Mapping[str, object], text_column: str) -> str:
             return text_value
         case _:
             raise ValueError("Hugging Face text column must contain strings.")
+
+
+def _row_matches_filters(
+    row: Mapping[str, object],
+    dataset_configuration: HuggingFaceDatasetConfiguration,
+) -> bool:
+    if dataset_configuration.languages:
+        if dataset_configuration.language_column is None:
+            raise ValueError("Hugging Face language filters require language_column.")
+        language_value = _optional_record_text(
+            row=row,
+            column=dataset_configuration.language_column,
+        )
+        if language_value not in dataset_configuration.languages:
+            return False
+    if dataset_configuration.licenses:
+        if dataset_configuration.license_column is None:
+            raise ValueError("Hugging Face license filters require license_column.")
+        license_value = _optional_record_text(
+            row=row,
+            column=dataset_configuration.license_column,
+        )
+        if license_value not in dataset_configuration.licenses:
+            return False
+    return True
+
+
+def _optional_record_text(row: Mapping[str, object], column: str) -> str:
+    text_value = row[column]
+    match text_value:
+        case str():
+            return text_value
+        case _:
+            raise ValueError("Hugging Face filter columns must contain strings.")

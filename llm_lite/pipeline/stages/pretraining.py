@@ -14,6 +14,7 @@ from llm_lite.config.models import (
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.factory import build_model
+from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
@@ -68,8 +69,7 @@ class PretrainingStage(BasePipelineStage):
             model_configuration=experiment_configuration.model,
             vocabulary_size=tokenizer.vocabulary_size,
         )
-        parameter_count = _parameter_count(model=model)
-        trainable_parameter_count = _trainable_parameter_count(model=model)
+        parameter_summary = model_parameter_summary(model=model)
         evaluation_callback = _training_evaluation_callback(
             experiment_configuration=experiment_configuration,
             registry=registry,
@@ -125,8 +125,12 @@ class PretrainingStage(BasePipelineStage):
                 'final_step': result.final_step,
                 'final_loss': result.final_loss,
                 'resumed_from_step': result.resumed_from_step,
-                'model_parameters': parameter_count,
-                'trainable_model_parameters': trainable_parameter_count,
+                'model_parameters': parameter_summary.total_parameters,
+                'trainable_model_parameters': parameter_summary.trainable_parameters,
+                'active_model_parameters': parameter_summary.active_parameters,
+                'trainable_active_model_parameters': (
+                    parameter_summary.trainable_active_parameters
+                ),
                 'requested_maximum_steps': experiment_configuration.training.maximum_steps,
                 'distributed_world_size': experiment_configuration.distributed.world_size,
                 'distributed_strategy': experiment_configuration.distributed.strategy.value,
@@ -207,14 +211,6 @@ def _training_evaluation_callback(
         return evaluation_path
 
     return run_training_evaluation
-
-
-def _parameter_count(model: nn.Module) -> int:
-    return sum(parameter.numel() for parameter in model.parameters())
-
-
-def _trainable_parameter_count(model: nn.Module) -> int:
-    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
 
 
 def _print_training_evaluation(

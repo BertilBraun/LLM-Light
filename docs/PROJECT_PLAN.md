@@ -2041,17 +2041,20 @@ configs/python_moe_14m.yaml
 
 Run objective:
 
-* Train a small top-1 MoE decoder on local Python source files.
+* Train a small top-1 MoE decoder on streamed Hugging Face Python source files.
 * Target roughly 14M total parameters and roughly 2M active transformer parameters per token.
 * Validate that MoE training, checkpointing, KV-cache inference, perplexity, and Python completion evaluation work together in one artifact-producing run.
 * Produce a baseline artifact set for later dense-versus-MoE and post-training comparisons.
 
 Dataset:
 
-* Use local Python files under `data/python/**/*.py`.
-* Keep file boundaries by packing each source file independently into 512-token chunks.
-* Exclude vendored, generated, minified, cache, virtualenv, and build-output files before placing data under `data/python/`.
-* Record corpus provenance in a run note: source repositories, collection date, approximate file count, and filtering rules.
+* Use `codeparrot/github-code` from Hugging Face.
+* Read the `code` column.
+* Filter rows through generic metadata filters: `language == "Python"` and a small permissive license allowlist.
+* Stream approximately 100,000 filtered training files and 5,000 filtered validation files.
+* Keep source-file boundaries by converting each file independently into 512-token chunks.
+* Do not add Python-specific file filtering for this run; rely on dataset metadata and simple length filtering.
+* Record dataset name, source split, row filters, document counts, and collection date in the run report.
 
 Model:
 
@@ -2069,8 +2072,9 @@ Training:
 
 * Start with the single-process config in `configs/python_moe_14m.yaml`.
 * Use BF16 on GPU where supported.
-* Train for 50,000 optimizer steps.
+* Train for 25,000 optimizer steps.
 * Batch size: 32 sequences of 513 tokens.
+* This processes roughly 410M tokens. For this model scale, that is enough for a useful systems and task smoke run without claiming broad code-completion quality.
 * Checkpoint every 1,000 steps.
 * Run validation perplexity and a 10-task Python completion subset every 1,000 steps.
 * If one GPU is too slow, create a DDP variant of the same config and launch with `torchrun`; do not introduce expert parallelism yet.
@@ -2094,7 +2098,8 @@ Evaluation:
 * Python completion parse rate, execution rate, passed checks, total checks, and pass rate.
 * Greedy KV-cache generation samples for a small fixed prompt set.
 * Training throughput, checkpoint duration, checkpoint size, and total wall-clock time.
-* Later comparison against a dense model with similar active compute.
+* Later comparison against a dense model with similar active compute. The dense baseline config should exist before the final report, but the first MoE run does not need to train it immediately.
+* The Python completion benchmark stays small and synthetic by design. A model at this scale is expected to show syntax/local-pattern learning before it handles broader programming tasks.
 
 Artifacts to preserve:
 
@@ -2112,11 +2117,8 @@ Commit the config and summarized run report; store large artifacts in the run di
 Open items before declaring the run a final showcase:
 
 * Router utilization metrics are not yet logged.
-* Active-versus-total parameter reporting is not yet explicit in stage metrics.
 * Dense-versus-MoE comparison config is still needed.
-* The Python source pipeline is still generic local-text ingestion rather than Python-aware filtering.
-* `packing.pack_documents` is currently configuration surface only; current packing preserves document boundaries, which is acceptable for Python but should be corrected or renamed before relying on cross-document packing.
-* The Python completion benchmark is useful as a smoke/evaluation harness but is still small and synthetic.
+* `packing.pack_documents` is currently configuration surface only. Current packing preserves document boundaries by chunking each document independently. That is acceptable for Python completion because cross-file packing can blur file-local structure, but the flag should be implemented or renamed before relying on cross-document packing for story data.
 
 ---
 

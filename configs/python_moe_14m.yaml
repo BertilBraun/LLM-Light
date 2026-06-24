@@ -4,10 +4,30 @@ experiment:
   output_dir: runs/python_moe_14m
 
 dataset:
-  type: local_text
-  paths: []
-  glob_patterns:
-    - data/python/**/*.py
+  type: huggingface
+  name: codeparrot/github-code
+  text_column: code
+  language_column: language
+  languages:
+    - Python
+  license_column: license
+  licenses:
+    - apache-2.0
+    - bsd-2-clause
+    - bsd-3-clause
+    - isc
+    - mit
+    - unlicense
+  streaming: true
+  splits:
+    - source_split: train
+      split: train
+      skip_documents: 0
+      max_documents: 100000
+    - source_split: train
+      split: validation
+      skip_documents: 100000
+      max_documents: 5000
 
 tokenizer:
   type: byte_bpe
@@ -31,10 +51,6 @@ preprocessing:
     - type: max_length
       max_characters: 20000
     - type: exact_deduplication
-    - type: assign_split
-      train_probability: 0.98
-      validation_probability: 0.01
-      test_probability: 0.01
 
 packing:
   workers: 4
@@ -59,7 +75,7 @@ training:
   objective: causal_language_modeling
   causal_language_modeling:
     auxiliary_loss_weight: 0.01
-  maximum_steps: 50000
+  maximum_steps: 25000
   batch_size_sequences: 32
   dataloader:
     num_workers: 2

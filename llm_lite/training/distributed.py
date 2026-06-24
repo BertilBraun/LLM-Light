@@ -11,6 +11,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.nn.parallel import DistributedDataParallel
 
 from llm_lite.config.models import DistributedConfiguration, DistributedStrategy
+from llm_lite.model.moe import MoeGpt
 from llm_lite.training.topology import DistributedTopology, RankTopology, build_distributed_topology
 
 
@@ -96,6 +97,7 @@ def prepare_model_for_distributed_training(
     distributed_runtime: DistributedRuntime,
 ) -> nn.Module:
     model = model.to(distributed_runtime.device)
+    find_unused_parameters = _needs_unused_parameter_detection(model=model)
     match distributed_runtime.distributed_configuration.strategy:
         case DistributedStrategy.DATA_PARALLEL:
             if distributed_runtime.device.type == 'cuda':
@@ -103,8 +105,12 @@ def prepare_model_for_distributed_training(
                     model,
                     device_ids=(distributed_runtime.local_rank,),
                     output_device=distributed_runtime.local_rank,
+                    find_unused_parameters=find_unused_parameters,
                 )
-            return DistributedDataParallel(model)
+            return DistributedDataParallel(
+                model,
+                find_unused_parameters=find_unused_parameters,
+            )
         case DistributedStrategy.FULLY_SHARDED_DATA_PARALLEL:
             return FullyShardedDataParallel(model)
         case DistributedStrategy.SINGLE_PROCESS:
@@ -117,6 +123,14 @@ def unwrap_distributed_model(model: nn.Module) -> nn.Module:
             return module
         case _:
             return model
+
+
+def _needs_unused_parameter_detection(model: nn.Module) -> bool:
+    match model:
+        case MoeGpt(model_configuration=model_configuration):
+            return model_configuration.router_top_k < model_configuration.expert_count
+        case _:
+            return False
 
 
 def _runtime_device(

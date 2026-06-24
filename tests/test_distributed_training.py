@@ -6,12 +6,15 @@ from pathlib import Path
 import pytest
 import torch
 import torch.multiprocessing as torch_multiprocessing
+from torch import nn
 
+import llm_lite.training.distributed as distributed_training
 from llm_lite.config.models import (
     DataLoaderConfiguration,
     DenseGptConfiguration,
     DistributedConfiguration,
     ModelType,
+    MoeGptConfiguration,
     TrainingConfiguration,
 )
 from llm_lite.data.datasets import (
@@ -20,6 +23,8 @@ from llm_lite.data.datasets import (
     write_packed_sequence_stream,
 )
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.moe import MoeGpt
+from llm_lite.training.distributed import DistributedRuntime, prepare_model_for_distributed_training
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
 from llm_lite.training.trainer import train_model_distributed
 
@@ -70,6 +75,38 @@ def test_two_process_gloo_data_parallel_tiny_training_and_resume(tmp_path: Path)
     assert metrics[-1]["distributed_world_size"] == 2
     assert metrics[-1]["distributed_strategy"] == "data_parallel"
     assert metrics[-1]["distributed_global_tokens_per_second"] > 0
+
+
+def test_data_parallel_wrap_enables_unused_parameter_detection_for_sparse_moe(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    ddp_calls: list[dict[str, object]] = []
+
+    class CapturingDistributedDataParallel(nn.Module):
+        def __init__(self, module: nn.Module, **kwargs: object) -> None:
+            super().__init__()
+            self.module = module
+            ddp_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        distributed_training,
+        "DistributedDataParallel",
+        CapturingDistributedDataParallel,
+    )
+    runtime = _runtime_for_wrapper_test(tmp_path=tmp_path)
+
+    prepare_model_for_distributed_training(
+        model=DenseGpt(model_configuration=_tiny_model_configuration(), vocabulary_size=16),
+        distributed_runtime=runtime,
+    )
+    prepare_model_for_distributed_training(
+        model=MoeGpt(model_configuration=_tiny_sparse_moe_configuration(), vocabulary_size=16),
+        distributed_runtime=runtime,
+    )
+
+    assert ddp_calls[0]["find_unused_parameters"] is False
+    assert ddp_calls[1]["find_unused_parameters"] is True
 
 
 @pytest.mark.skipif(
@@ -135,6 +172,20 @@ def _tiny_model_configuration() -> DenseGptConfiguration:
     )
 
 
+def _tiny_sparse_moe_configuration() -> MoeGptConfiguration:
+    return MoeGptConfiguration(
+        type=ModelType.MOE_GPT,
+        dimension=8,
+        layers=1,
+        attention_heads=2,
+        expert_feed_forward_dimension=16,
+        expert_count=4,
+        router_top_k=1,
+        dropout=0.0,
+        tie_embeddings=False,
+    )
+
+
 def _tiny_training_configuration(maximum_steps: int) -> TrainingConfiguration:
     return TrainingConfiguration(
         maximum_steps=maximum_steps,
@@ -161,6 +212,21 @@ def _data_parallel_configuration(world_size: int) -> DistributedConfiguration:
             "parallelism": {"data": world_size},
             "checkpoint": {"type": "sharded"},
         },
+    )
+
+
+def _runtime_for_wrapper_test(tmp_path: Path) -> DistributedRuntime:
+    distributed_configuration = _data_parallel_configuration(world_size=1)
+    return DistributedRuntime(
+        distributed_configuration=distributed_configuration,
+        topology=None,  # type: ignore[arg-type]
+        rank_topology=None,  # type: ignore[arg-type]
+        rank=0,
+        local_rank=0,
+        world_size=1,
+        device=torch.device("cpu"),
+        is_coordinator=True,
+        initialized_process_group=False,
     )
 
 

@@ -75,19 +75,18 @@ def test_load_tinystories_moe_full_configuration_uses_fast_tokenizer() -> None:
     assert experiment_configuration.tokenizer.type.value == "rust_byte_bpe"
 
 
-def test_load_python_moe_tiny_configuration() -> None:
+def test_load_python_moe_full_configuration() -> None:
     experiment_configuration = load_experiment_configuration(
-        configuration_path=Path("configs/python_moe_tiny.yaml"),
+        configuration_path=Path("configs/python_moe_full.yaml"),
     )
 
-    assert experiment_configuration.experiment.name == "python_moe_tiny"
-    assert experiment_configuration.dataset.type.value == "huggingface"
+    assert experiment_configuration.experiment.name == "python_moe_full"
+    assert experiment_configuration.dataset.type.value == "tinypython_jsonl"
     assert experiment_configuration.model.type.value == "moe_gpt"
-    assert experiment_configuration.model.dimension == 128
-    assert any(
-        transform.type.value == "extract_python_functions"
-        for transform in experiment_configuration.preprocessing.transforms
-    )
+    assert experiment_configuration.model.dimension == 320
+    assert experiment_configuration.tokenizer.vocabulary_size == 6000
+    assert experiment_configuration.packing.context_length == 256
+    assert experiment_configuration.packing.pack_documents is True
 
 
 def test_evaluation_configuration_allows_no_configured_evaluator() -> None:

@@ -17,6 +17,7 @@ from llm_lite.inference.runtime import (
     encode_prompts,
     finalize_generation_results,
 )
+from llm_lite.pipeline.progress import console_log
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -29,12 +30,26 @@ def generate_batch(
     stop_sequences: tuple[str, ...],
 ) -> tuple[GenerationResult, ...]:
     model.eval()
+    device = _model_device(model=model)
     encoded_prompts = encode_prompts(tokenizer=tokenizer, prompts=prompts)
     states = create_generation_states(encoded_prompts=encoded_prompts)
+    console_log(
+        "[generation] naive_start "
+        f"prompts={len(prompts)} "
+        f"maximum_new_tokens={maximum_new_tokens} "
+        f"device={device}"
+    )
     prefill_seconds = 0.0
     decode_seconds = 0.0
     with torch.no_grad():
         for _generation_step in range(maximum_new_tokens):
+            if _generation_step == 0 or (_generation_step + 1) % 10 == 0:
+                active_count = sum(1 for state in states if not state.stopped)
+                console_log(
+                    "[generation] naive_decode "
+                    f"step={_generation_step + 1}/{maximum_new_tokens} "
+                    f"active={active_count}"
+                )
             active_indexes = tuple(
                 sample_index
                 for sample_index, state in enumerate(states)
@@ -45,7 +60,7 @@ def generate_batch(
             for sample_index in active_indexes:
                 state = states[sample_index]
                 token_ids = [*state.prompt_token_ids, *state.generated_token_ids]
-                input_tensor = torch.tensor([token_ids], dtype=torch.long)
+                input_tensor = torch.tensor([token_ids], dtype=torch.long, device=device)
                 step_start_time = perf_counter()
                 model_output = model(input_tensor)
                 decode_seconds += perf_counter() - step_start_time
@@ -68,6 +83,13 @@ def generate_batch(
             decode_seconds=decode_seconds,
         ),
     )
+
+
+def _model_device(model: nn.Module) -> torch.device:
+    try:
+        return next(model.parameters()).device
+    except StopIteration:
+        return torch.device("cpu")
 
 
 def generate(

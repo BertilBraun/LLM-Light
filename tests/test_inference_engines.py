@@ -253,6 +253,33 @@ def test_moe_kv_cache_generation_supports_bfloat16_precision() -> None:
     assert inference_cache.layers[0].value_states.dtype == torch.bfloat16
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required.")
+def test_moe_kv_cache_generation_uses_model_device_on_cuda() -> None:
+    torch.manual_seed(16)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_moe_model(vocabulary_size=tokenizer.vocabulary_size).to("cuda")
+
+    generated_text = generate_text(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.BF16,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=2,
+        ),
+    )
+
+    assert isinstance(generated_text, str)
+
+
 def test_generate_text_samples_with_configured_decoding() -> None:
     torch.manual_seed(17)
     tokenizer = train_character_tokenizer(

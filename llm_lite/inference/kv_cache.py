@@ -17,6 +17,7 @@ from llm_lite.inference.runtime import (
     finalize_generation_results,
 )
 from llm_lite.model.protocol import CachedAutoregressiveModel
+from llm_lite.pipeline.progress import console_log
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -97,20 +98,37 @@ def _generate_single_with_cache(
 ) -> GenerationResult:
     encoded_prompt = encode_prompts(tokenizer=tokenizer, prompts=(prompt,))[0]
     states = create_generation_states(encoded_prompts=(encoded_prompt,))
+    device = _model_device(model=model)
+    console_log(
+        "[generation] kv_cache_single_start "
+        f"prompt_tokens={len(encoded_prompt.token_ids)} "
+        f"maximum_new_tokens={maximum_new_tokens} "
+        f"device={device}"
+    )
     prefill_start_time = perf_counter()
-    input_tensor = torch.tensor([list(encoded_prompt.token_ids)], dtype=torch.long)
+    input_tensor = torch.tensor(
+        [list(encoded_prompt.token_ids)],
+        dtype=torch.long,
+        device=device,
+    )
     with torch.no_grad():
         model_output = model.forward_with_cache(
             token_ids=input_tensor,
             inference_cache=model.empty_inference_cache(
                 batch_size=input_tensor.shape[0],
-                device=input_tensor.device,
+                device=device,
             ),
         )
     prefill_seconds = perf_counter() - prefill_start_time
+    console_log(f"[generation] kv_cache_single_prefill_done seconds={prefill_seconds:.2f}")
     decode_seconds = 0.0
     with torch.no_grad():
         for generation_step in range(maximum_new_tokens):
+            if generation_step == 0 or (generation_step + 1) % 10 == 0:
+                console_log(
+                    "[generation] kv_cache_single_decode "
+                    f"step={generation_step + 1}/{maximum_new_tokens}"
+                )
             step_start_time = perf_counter()
             next_token_id = select_next_token_id(
                 logits=model_output.logits[0, -1, :],
@@ -125,7 +143,7 @@ def _generate_single_with_cache(
             )
             if states[0].stopped or generation_step == maximum_new_tokens - 1:
                 break
-            input_tensor = torch.tensor([[next_token_id]], dtype=torch.long)
+            input_tensor = torch.tensor([[next_token_id]], dtype=torch.long, device=device)
             step_start_time = perf_counter()
             model_output = model.forward_with_cache(
                 token_ids=input_tensor,
@@ -153,9 +171,18 @@ def _generate_equal_length_batch_with_cache(
 ) -> tuple[GenerationResult, ...]:
     encoded_prompts = encode_prompts(tokenizer=tokenizer, prompts=prompts)
     states = create_generation_states(encoded_prompts=encoded_prompts)
+    device = _model_device(model=model)
+    console_log(
+        "[generation] kv_cache_batch_start "
+        f"prompts={len(prompts)} "
+        f"prompt_tokens={len(encoded_prompts[0].token_ids)} "
+        f"maximum_new_tokens={maximum_new_tokens} "
+        f"device={device}"
+    )
     input_tensor = torch.tensor(
         [list(encoded_prompt.token_ids) for encoded_prompt in encoded_prompts],
         dtype=torch.long,
+        device=device,
     )
     prefill_start_time = perf_counter()
     with torch.no_grad():
@@ -163,13 +190,21 @@ def _generate_equal_length_batch_with_cache(
             token_ids=input_tensor,
             inference_cache=model.empty_inference_cache(
                 batch_size=input_tensor.shape[0],
-                device=input_tensor.device,
+                device=device,
             ),
         )
     prefill_seconds = perf_counter() - prefill_start_time
+    console_log(f"[generation] kv_cache_batch_prefill_done seconds={prefill_seconds:.2f}")
     decode_seconds = 0.0
     with torch.no_grad():
         for generation_step in range(maximum_new_tokens):
+            if generation_step == 0 or (generation_step + 1) % 10 == 0:
+                active_count = sum(1 for state in states if not state.stopped)
+                console_log(
+                    "[generation] kv_cache_batch_decode "
+                    f"step={generation_step + 1}/{maximum_new_tokens} "
+                    f"active={active_count}"
+                )
             active_indexes = tuple(
                 sample_index
                 for sample_index, state in enumerate(states)
@@ -203,6 +238,7 @@ def _generate_equal_length_batch_with_cache(
             input_tensor = torch.tensor(
                 [[next_token_id] for next_token_id in next_input_token_ids],
                 dtype=torch.long,
+                device=device,
             )
             step_start_time = perf_counter()
             model_output = model.forward_with_cache(
@@ -219,3 +255,7 @@ def _generate_equal_length_batch_with_cache(
             decode_seconds=decode_seconds,
         ),
     )
+
+
+def _model_device(model: CachedAutoregressiveModel) -> torch.device:
+    return next(model.parameters()).device

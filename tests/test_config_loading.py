@@ -66,6 +66,15 @@ def test_load_tinystories_huggingface_smoke_configuration() -> None:
     assert experiment_configuration.training.evaluation is not None
 
 
+def test_load_tinystories_moe_full_configuration_uses_fast_tokenizer() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/tinystories_moe_full.yaml"),
+    )
+
+    assert experiment_configuration.experiment.name == "tinystories_moe_full"
+    assert experiment_configuration.tokenizer.type.value == "rust_byte_bpe"
+
+
 def test_load_python_moe_tiny_configuration() -> None:
     experiment_configuration = load_experiment_configuration(
         configuration_path=Path("configs/python_moe_tiny.yaml"),

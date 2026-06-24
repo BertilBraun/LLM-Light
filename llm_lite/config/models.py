@@ -16,6 +16,7 @@ class DatasetType(str, Enum):
 class TokenizerType(str, Enum):
     CHARACTER = "character"
     BYTE_BPE = "byte_bpe"
+    RUST_BYTE_BPE = "rust_byte_bpe"
 
 
 class PreprocessingTransformType(str, Enum):
@@ -181,8 +182,29 @@ class ByteBpeTokenizerConfiguration(Configuration):
         return self
 
 
+class RustByteBpeTokenizerConfiguration(Configuration):
+    type: Literal[TokenizerType.RUST_BYTE_BPE]
+    vocabulary_size: int = Field(ge=256)
+    max_training_documents: int | None = Field(gt=0)
+    max_training_bytes: int | None = Field(gt=0)
+    training_workers: int = Field(default=1, ge=1)
+    add_bos_token: bool = True
+    add_eos_token: bool = True
+    add_pad_token: bool = True
+
+    @model_validator(mode="after")
+    def require_training_sample_bound(self) -> RustByteBpeTokenizerConfiguration:
+        if self.max_training_documents is None and self.max_training_bytes is None:
+            raise ValueError(
+                "Rust Byte BPE training requires max_training_documents or max_training_bytes.",
+            )
+        return self
+
+
 TokenizerConfiguration = Annotated[
-    CharacterTokenizerConfiguration | ByteBpeTokenizerConfiguration,
+    CharacterTokenizerConfiguration
+    | ByteBpeTokenizerConfiguration
+    | RustByteBpeTokenizerConfiguration,
     Field(discriminator="type"),
 ]
 

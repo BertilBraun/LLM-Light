@@ -21,6 +21,10 @@ dev = [
   "pytest>=8",
   "ruff>=0.5",
 ]
+generation = [
+  "transformers>=4.40",
+  "vllm>=0.5",
+]
 
 [tool.setuptools.packages.find]
 include = ["llm_lite*"]

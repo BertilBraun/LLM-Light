@@ -77,6 +77,14 @@ training:
       perplexity:
         split: validation
         maximum_documents: 200
+      python_completion:
+        tasks_path: tests/fixtures/tinypython_completion/tasks.jsonl
+        maximum_new_tokens: 160
+        execution_timeout_seconds: 2.0
+        stop_sequences:
+          - "\n\nReturn "
+          - "\n\nGiven "
+          - "\n\nCreate "
 
 evaluation:
   perplexity:

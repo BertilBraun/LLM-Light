@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from torch import nn
 
 from llm_lite.config.models import (
@@ -26,8 +26,25 @@ class PythonCompletionTaskRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     task_id: str
-    prompt: str
+    prompt: str | None = None
+    task_description: str | None = None
     checks: tuple[str, ...]
+
+    @model_validator(mode="after")
+    def require_exactly_one_prompt_kind(self) -> PythonCompletionTaskRecord:
+        prompt_count = sum(
+            value is not None for value in (self.prompt, self.task_description)
+        )
+        if prompt_count != 1:
+            raise ValueError("Python completion task requires exactly one prompt kind.")
+        return self
+
+    @property
+    def inference_prompt(self) -> str:
+        if self.prompt is not None:
+            return self.prompt
+        assert self.task_description is not None
+        return f"{self.task_description.strip()}\n\n"
 
 
 class PythonCompletionTaskResult(BaseModel):
@@ -122,27 +139,31 @@ def evaluate_python_completion_task(
     evaluation_configuration: PythonCompletionEvaluationConfiguration,
     inference_configuration: InferenceConfiguration,
 ) -> PythonCompletionTaskResult:
+    prompt = task.inference_prompt
     generated_completion = truncate_at_stop_sequence(
-        text=generate_text(
-            model=model,
-            tokenizer=tokenizer,
-            prompt=task.prompt,
-            inference_configuration=InferenceConfiguration(
-                engine=inference_configuration.engine,
-                precision=inference_configuration.precision,
-                quantization=inference_configuration.quantization,
-                decoding=inference_configuration.decoding,
-                maximum_new_tokens=evaluation_configuration.maximum_new_tokens,
+        text=completion_from_generated_text(
+            generated_text=generate_text(
+                model=model,
+                tokenizer=tokenizer,
+                prompt=prompt,
+                inference_configuration=InferenceConfiguration(
+                    engine=inference_configuration.engine,
+                    precision=inference_configuration.precision,
+                    quantization=inference_configuration.quantization,
+                    decoding=inference_configuration.decoding,
+                    maximum_new_tokens=evaluation_configuration.maximum_new_tokens,
+                ),
             ),
+            prompt=prompt,
         ),
         stop_sequences=evaluation_configuration.stop_sequences,
     )
-    source = task.prompt + generated_completion
+    source = source_from_completion(task=task, generated_completion=generated_completion)
     parse_result = parse_python_source(source=source)
     if not parse_result.parsed:
         return PythonCompletionTaskResult(
             task_id=task.task_id,
-            prompt=task.prompt,
+            prompt=prompt,
             generated_completion=generated_completion,
             parsed=False,
             passed_checks=0,
@@ -168,7 +189,7 @@ def evaluate_python_completion_task(
     )
     return PythonCompletionTaskResult(
         task_id=task.task_id,
-        prompt=task.prompt,
+        prompt=prompt,
         generated_completion=generated_completion,
         parsed=True,
         passed_checks=passed_checks,
@@ -178,6 +199,21 @@ def evaluate_python_completion_task(
         stdout=execution_result.stdout,
         stderr=execution_result.stderr,
     )
+
+
+def completion_from_generated_text(generated_text: str, prompt: str) -> str:
+    if generated_text.startswith(prompt):
+        return generated_text[len(prompt) :]
+    return generated_text
+
+
+def source_from_completion(
+    task: PythonCompletionTaskRecord,
+    generated_completion: str,
+) -> str:
+    if task.prompt is not None:
+        return task.prompt + generated_completion
+    return generated_completion
 
 
 def truncate_at_stop_sequence(text: str, stop_sequences: tuple[str, ...]) -> str:

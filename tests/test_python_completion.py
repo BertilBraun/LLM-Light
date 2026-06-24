@@ -21,6 +21,7 @@ from llm_lite.evaluation import python_completion
 from llm_lite.evaluation.python_completion import (
     PythonCompletionTaskRecord,
     build_check_counting_harness,
+    completion_from_generated_text,
     evaluate_python_completion,
     load_python_completion_tasks,
     parse_python_source,
@@ -88,6 +89,15 @@ def test_truncate_at_stop_sequence_uses_first_configured_match() -> None:
     )
 
     assert truncated_text == "    return 1\n"
+
+
+def test_completion_from_generated_text_strips_full_prompt_echo() -> None:
+    completion = completion_from_generated_text(
+        generated_text="Return an int.\n\ndef answer() -> int:\n    return 1\n",
+        prompt="Return an int.\n\n",
+    )
+
+    assert completion == "def answer() -> int:\n    return 1\n"
 
 
 def test_parse_python_source_reports_success_and_failure() -> None:
@@ -181,6 +191,60 @@ def test_evaluator_uses_generate_text_with_configured_inference_settings(
     assert result.executed_tasks == 1
     assert result.passed_checks == 5
     assert result.total_checks == 5
+    assert result.pass_rate == 1.0
+
+
+def test_evaluator_runs_task_description_to_function_records(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured_calls: list[CapturedGenerationCall] = []
+
+    def generate_completion(
+        model: nn.Module,
+        tokenizer: UnusedTokenizer,
+        prompt: str,
+        inference_configuration: InferenceConfiguration,
+    ) -> str:
+        captured_calls.append(
+            CapturedGenerationCall(
+                prompt=prompt,
+                inference_configuration=inference_configuration,
+            ),
+        )
+        return (
+            prompt
+            + "def count_positive(values: list[int]) -> int:\n"
+            + "    return sum(1 for value in values if value > 0)\n"
+        )
+
+    monkeypatch.setattr(python_completion, "generate_text", generate_completion)
+
+    result = evaluate_python_completion(
+        model=nn.Identity(),
+        tokenizer=UnusedTokenizer(),
+        evaluation_configuration=PythonCompletionEvaluationConfiguration(
+            tasks_path=Path("tests/fixtures/tinypython_completion/tasks.jsonl"),
+            maximum_tasks=1,
+            maximum_new_tokens=32,
+            execution_timeout_seconds=2.0,
+            stop_sequences=("\n\nReturn ",),
+        ),
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.NAIVE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=99,
+        ),
+    )
+
+    assert len(captured_calls) == 1
+    assert captured_calls[0].prompt.endswith("\n\n")
+    assert captured_calls[0].prompt.startswith("Define a function named count_positive")
+    assert result.parsed_tasks == 1
+    assert result.executed_tasks == 1
+    assert result.passed_checks == 4
+    assert result.total_checks == 4
     assert result.pass_rate == 1.0
 
 

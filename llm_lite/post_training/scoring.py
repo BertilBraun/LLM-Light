@@ -6,6 +6,7 @@ from llm_lite.evaluation.python_completion import (
     parse_check_marker,
     parse_python_source,
     run_python_source_in_subprocess,
+    source_from_completion,
 )
 from llm_lite.inference.candidates import GeneratedCandidateRecord
 
@@ -61,12 +62,13 @@ def score_python_candidate(
     task: PythonCompletionTaskRecord,
     execution_timeout_seconds: float,
 ) -> PythonCandidateScoreRecord:
-    source = task.prompt + candidate.generated_text
+    prompt = task.inference_prompt
+    source = source_from_completion(task=task, generated_completion=candidate.generated_text)
     parse_result = parse_python_source(source=source)
     if not parse_result.parsed:
         return PythonCandidateScoreRecord(
             task_id=candidate.task_id,
-            prompt=task.prompt,
+            prompt=prompt,
             sample_index=candidate.sample_index,
             generated_text=candidate.generated_text,
             score=0.0,
@@ -101,7 +103,7 @@ def score_python_candidate(
     )
     return PythonCandidateScoreRecord(
         task_id=candidate.task_id,
-        prompt=task.prompt,
+        prompt=prompt,
         sample_index=candidate.sample_index,
         generated_text=candidate.generated_text,
         score=1.0 + passed_checks,

@@ -76,12 +76,12 @@ training:
     evaluators:
       perplexity:
         split: validation
-        maximum_documents: 1000
+        maximum_documents: 200
 
 evaluation:
   perplexity:
     split: validation
-    maximum_documents: 5000
+    maximum_documents: 1000
   fixed_prompt_generation:
     prompts:
       - "Return the number of positive integers in values."
@@ -89,6 +89,14 @@ evaluation:
       - "Return a dictionary mapping each word to the number of times it occurs."
       - "Return the first integer in values that is divisible by divisor. Return None if no such integer exists."
     maximum_new_tokens: 160
+  python_completion:
+    tasks_path: tests/fixtures/tinypython_completion/tasks.jsonl
+    maximum_new_tokens: 160
+    execution_timeout_seconds: 2.0
+    stop_sequences:
+      - "\n\nReturn "
+      - "\n\nGiven "
+      - "\n\nCreate "
 
 inference:
   engine: kv_cache

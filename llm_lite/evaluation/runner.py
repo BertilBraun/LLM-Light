@@ -16,7 +16,6 @@ from llm_lite.evaluation.perplexity import evaluate_perplexity
 from llm_lite.evaluation.python_completion import evaluate_python_completion
 from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
-from llm_lite.pipeline.stages.io import iter_processed_document_texts
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -51,6 +50,8 @@ def run_configured_evaluators(
             raise ValueError('Exact reproduction evaluation failed.')
     perplexity_configuration = evaluation_configuration.perplexity
     if perplexity_configuration is not None:
+        from llm_lite.pipeline.stages.io import iter_processed_document_texts
+
         perplexity_result = evaluate_perplexity(
             model=model,
             tokenizer=tokenizer,

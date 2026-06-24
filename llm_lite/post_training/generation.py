@@ -40,7 +40,7 @@ def generate_python_dpo_data(
     execution_timeout_seconds: float,
 ) -> PythonGeneratedDpoDataResult:
     candidate_prompts = tuple(
-        CandidatePrompt(task_id=task.task_id, prompt=task.prompt)
+        CandidatePrompt(task_id=task.task_id, prompt=task.inference_prompt)
         for task in tasks
     )
     candidate_generation_result = generate_candidates(

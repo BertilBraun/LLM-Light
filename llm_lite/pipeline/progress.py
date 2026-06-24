@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from datetime import datetime
 from typing import TypeVar
 
 from tqdm.auto import tqdm
 
 T = TypeVar("T")
+
+
+def console_log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)
 
 
 @contextmanager

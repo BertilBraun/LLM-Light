@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from datetime import datetime
 
 from torch import nn
 
@@ -15,6 +14,7 @@ from llm_lite.evaluation.fixed_prompt_generation import (
 )
 from llm_lite.evaluation.perplexity import evaluate_perplexity
 from llm_lite.evaluation.python_completion import evaluate_python_completion
+from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stages.io import iter_processed_document_texts
 from llm_lite.tokenizer.loading import TextTokenizer
@@ -46,7 +46,7 @@ def run_configured_evaluators(
         )
         report['exact_reproduction'] = exact_reproduction_result.model_dump()
         metrics['exact_reproduction_passed'] = exact_reproduction_result.passed
-        _log(f"[eval] exact_reproduction passed={exact_reproduction_result.passed}")
+        console_log(f"[eval] exact_reproduction passed={exact_reproduction_result.passed}")
         if not exact_reproduction_result.passed:
             raise ValueError('Exact reproduction evaluation failed.')
     perplexity_configuration = evaluation_configuration.perplexity
@@ -66,7 +66,7 @@ def run_configured_evaluators(
         metrics['perplexity'] = perplexity_result.perplexity
         metrics['perplexity_sequences'] = perplexity_result.sequences
         metrics['perplexity_documents'] = perplexity_result.documents
-        _log(
+        console_log(
             "[eval] perplexity "
             f'split={perplexity_result.split} '
             f'documents={perplexity_result.documents} '
@@ -86,7 +86,7 @@ def run_configured_evaluators(
         metrics['fixed_prompt_generation_samples'] = len(
             fixed_prompt_generation_result.samples,
         )
-        _log(
+        console_log(
             f"[eval] fixed_prompt_generation "
             f"samples={len(fixed_prompt_generation_result.samples)}"
         )
@@ -108,7 +108,7 @@ def run_configured_evaluators(
         metrics['python_completion_passed_checks'] = python_completion_result.passed_checks
         metrics['python_completion_total_checks'] = python_completion_result.total_checks
         metrics['python_completion_pass_rate'] = python_completion_result.pass_rate
-        _log(
+        console_log(
             "[eval] python_completion "
             f'tasks={len(python_completion_result.tasks)} '
             f'parsed={python_completion_result.parsed_tasks} '
@@ -124,8 +124,5 @@ def _print_fixed_prompt_generation_samples(
     samples: tuple[FixedPromptGenerationSample, ...],
 ) -> None:
     for sample_index, sample in enumerate(samples):
-        _log(f"[eval-sample {sample_index}] {sample.generated_text}")
+        console_log(f"[eval-sample {sample_index}] {sample.generated_text}")
 
-
-def _log(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)

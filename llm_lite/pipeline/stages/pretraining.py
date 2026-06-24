@@ -1,5 +1,4 @@
 import json
-from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -17,6 +16,7 @@ from llm_lite.evaluation.runner import run_configured_evaluators
 from llm_lite.model.factory import build_model
 from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.pipeline.hashing import hash_json_value
+from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
@@ -219,13 +219,9 @@ def _print_training_evaluation(
     metrics: dict[str, int | float | str | bool],
 ) -> None:
     if not metrics:
-        _log(f"[train-eval] step={step} no configured evaluator metrics")
+        console_log(f"[train-eval] step={step} no configured evaluator metrics")
         return
     formatted_metrics = ' '.join(
         f'{metric_name}={metric_value}' for metric_name, metric_value in sorted(metrics.items())
     )
-    _log(f"[train-eval] step={step} {formatted_metrics}")
-
-
-def _log(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)
+    console_log(f"[train-eval] step={step} {formatted_metrics}")

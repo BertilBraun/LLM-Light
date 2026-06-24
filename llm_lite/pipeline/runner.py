@@ -2,7 +2,6 @@ import argparse
 import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
@@ -15,6 +14,7 @@ from llm_lite.pipeline.logging import (
 from llm_lite.pipeline.performance import (
     PipelinePerformanceLogger,
 )
+from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
@@ -51,10 +51,6 @@ def run_pipeline(
             dry_run=dry_run,
             rank=distributed_rank,
         )
-    event_logger = PipelineEventLogger(run_directory=experiment_configuration.experiment.output_dir)
-    performance_logger = PipelinePerformanceLogger(
-        run_directory=experiment_configuration.experiment.output_dir,
-    )
     force_stage_names = _expanded_force_stages(
         stages=selected_stages,
         force_stages=force_stages,
@@ -66,9 +62,13 @@ def run_pipeline(
         force_stage_names=force_stage_names,
     )
     _print_review(review=review)
-    _log_review(review=review, event_logger=event_logger)
     if dry_run:
         return 0
+    event_logger = PipelineEventLogger(run_directory=experiment_configuration.experiment.output_dir)
+    performance_logger = PipelinePerformanceLogger(
+        run_directory=experiment_configuration.experiment.output_dir,
+    )
+    _log_review(review=review, event_logger=event_logger)
     experiment_configuration.experiment.output_dir.mkdir(parents=True, exist_ok=True)
     resolved_configuration_path = (
         experiment_configuration.experiment.output_dir / "resolved_config.json"
@@ -172,7 +172,7 @@ def _run_distributed_worker_stage(
         return 0
     artifact_directory = registry.artifacts_directory / StageName.PRETRAINING.value
     artifact_directory.mkdir(parents=True, exist_ok=True)
-    _log(f"[rank {rank}] entering distributed pretraining worker")
+    console_log(f"[rank {rank}] entering distributed pretraining worker")
     pretraining_stage.run(
         experiment_configuration=experiment_configuration,
         registry=registry,
@@ -249,7 +249,7 @@ def _execute_pipeline(
             compatible and stage.name not in force_stage_names and continuation_action is not None
         )
         if compatible and stage.name not in force_stage_names and not continue_compatible_stage:
-            _log(f"[skip] {stage.name.value}: compatible artifact found")
+            console_log(f"[skip] {stage.name.value}: compatible artifact found")
             _log_stage_event(
                 event_logger=event_logger,
                 event_type=PipelineEventType.STAGE_SKIP,
@@ -274,7 +274,7 @@ def _execute_pipeline(
             stage_name=stage.name,
             message="stage execution started",
         )
-        _log(f"[start] {stage.name.value}")
+        console_log(f"[start] {stage.name.value}")
         with performance_logger.measure_stage(stage_name=stage.name.value) as performance_timer:
             stage_output = stage.run(
                 experiment_configuration=experiment_configuration,
@@ -324,26 +324,26 @@ def _expanded_force_stages(
 
 
 def _print_review(review: list[StageReview]) -> None:
-    _log("Pipeline review:")
+    console_log("Pipeline review:")
     for review_item in review:
-        _log(f"{review_item.stage_name.value:18} {review_item.action}")
-    _log("")
+        console_log(f"{review_item.stage_name.value:18} {review_item.action}")
+    console_log("")
 
 
 def _print_stage_output(stage_name: StageName, stage_output: StageOutput) -> None:
-    _log(f"[done]  {stage_name.value}")
+    console_log(f"[done]  {stage_name.value}")
     if stage_output.files:
         files = ", ".join(
             f"{file_name}={relative_path}"
             for file_name, relative_path in sorted(stage_output.files.items())
         )
-        _log(f"        files: {files}")
+        console_log(f"        files: {files}")
     if stage_output.metrics:
         metrics = ", ".join(
             f"{metric_name}={metric_value}"
             for metric_name, metric_value in sorted(stage_output.metrics.items())
         )
-        _log(f"        metrics: {metrics}")
+        console_log(f"        metrics: {metrics}")
 
 
 def _log_review(review: list[StageReview], event_logger: PipelineEventLogger) -> None:
@@ -369,10 +369,6 @@ def _log_stage_event(
             message=message,
         ),
     )
-
-
-def _log(message: str) -> None:
-    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)
 
 
 if __name__ == "__main__":

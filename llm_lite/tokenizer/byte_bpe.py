@@ -10,7 +10,7 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 
 from llm_lite.data.text_shards import TextShardReference, text_shard_references
-from llm_lite.pipeline.progress import progress_bar
+from llm_lite.pipeline.progress import console_log, progress_bar
 
 ByteToken = tuple[int, ...]
 BytePair = tuple[ByteToken, ByteToken]
@@ -223,12 +223,11 @@ def train_byte_bpe_tokenizer(
         max_training_documents=max_training_documents,
         max_training_bytes=max_training_bytes,
     )
-    print(
+    console_log(
         "[tokenizer] byte_bpe sample "
         f"documents={len(corpus_sample.documents)} "
         f"bytes={corpus_sample.bytes} "
         f"target_vocabulary_size={vocabulary_size}",
-        flush=True,
     )
     training_state = _train_serial_merges(
         documents=corpus_sample.documents,
@@ -239,12 +238,11 @@ def train_byte_bpe_tokenizer(
     byte_token_to_id = training_state.byte_token_to_id
     corpus_sample.documents = training_state.documents
     training_tokens = sum(len(document) for document in corpus_sample.documents)
-    print(
+    console_log(
         "[tokenizer] byte_bpe complete "
         f"merges={len(merge_rules)} "
         f"training_tokens={training_tokens} "
         f"bytes_per_token={corpus_sample.bytes / max(training_tokens, 1):.4f}",
-        flush=True,
     )
     tokenizer = ByteBpeTokenizer(
         token_to_id=token_to_id,
@@ -509,11 +507,10 @@ def _train_serial_merges(
             merge_application_seconds += time.perf_counter() - merge_start
             bar.update(1)
             if len(merge_rules) % 100 == 0:
-                print(
+                console_log(
                     "[tokenizer] byte_bpe "
                     f"merges={len(merge_rules)} "
                     f"vocabulary_size={len(token_to_id) + len(byte_token_to_id)}",
-                    flush=True,
                 )
     return ByteBpeMergeTrainingState(
         byte_token_to_id=byte_token_to_id,
@@ -545,12 +542,11 @@ def _train_parallel_merges(
     try:
         for connection in worker_connections:
             ready = connection.recv()
-            print(
+            console_log(
                 "[tokenizer] byte_bpe worker_ready "
                 f"worker={ready.worker_index} "
                 f"documents={ready.document_count} "
                 f"bytes={ready.byte_count}",
-                flush=True,
             )
         byte_token_to_id = _initial_byte_token_to_id(starting_index=len(token_to_id))
         merge_rules: list[BytePair] = []

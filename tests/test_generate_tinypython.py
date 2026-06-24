@@ -40,6 +40,25 @@ def count_positive(values: list[int]) -> int:
     assert parsed.code.startswith("def count_positive")
 
 
+def test_parse_generation_strips_top_level_imports() -> None:
+    parsed = parse_generation(
+        """
+<task>Return item counts.</task>
+<code>
+from collections import Counter
+
+def count_items(items: list[str]) -> dict[str, int]:
+    return dict(Counter(items))
+</code>
+""",
+    )
+
+    assert parsed.code == (
+        "def count_items(items: list[str]) -> dict[str, int]:\n"
+        "    return dict(Counter(items))"
+    )
+
+
 @pytest.mark.parametrize(
     ("generation", "reason"),
     [
@@ -54,18 +73,6 @@ def count_positive(values: list[int]) -> int:
 x = 1
 def value() -> int:
     return x
-</code>
-""",
-            "not_exactly_one_top_level_function",
-        ),
-        (
-            """
-<task>Return item counts.</task>
-<code>
-from collections import Counter
-
-def count_items(items: list[str]) -> dict[str, int]:
-    return dict(Counter(items))
 </code>
 """,
             "not_exactly_one_top_level_function",

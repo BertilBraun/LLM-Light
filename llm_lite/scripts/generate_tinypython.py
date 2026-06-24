@@ -447,8 +447,39 @@ def parse_generation(text: str) -> ParsedGeneration:
         raise ValueError("empty_task")
     if not code:
         raise ValueError("empty_code")
+    code = _strip_top_level_imports(code=code)
     _validate_code(code=code)
     return ParsedGeneration(task_description=task_description, code=code)
+
+
+def _strip_top_level_imports(code: str) -> str:
+    try:
+        module = ast.parse(code)
+    except SyntaxError:
+        return code
+    if not module.body:
+        return code
+
+    non_import_nodes = [
+        node for node in module.body if not isinstance(node, ast.Import | ast.ImportFrom)
+    ]
+    if len(non_import_nodes) != 1 or not isinstance(non_import_nodes[0], ast.FunctionDef):
+        return code
+    if len(non_import_nodes) == len(module.body):
+        return code
+
+    import_lines: set[int] = set()
+    for node in module.body:
+        if isinstance(node, ast.Import | ast.ImportFrom):
+            start_line = node.lineno
+            end_line = node.end_lineno or node.lineno
+            import_lines.update(range(start_line, end_line + 1))
+
+    lines = code.splitlines()
+    cleaned_lines = [
+        line for line_number, line in enumerate(lines, 1) if line_number not in import_lines
+    ]
+    return "\n".join(cleaned_lines).strip()
 
 
 def _validate_code(code: str) -> None:

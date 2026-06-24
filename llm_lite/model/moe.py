@@ -13,7 +13,7 @@ from llm_lite.model.cache import (
 )
 from llm_lite.model.output import ModelOutput
 from llm_lite.model.protocol import CachedAutoregressiveModel
-from llm_lite.model.routing import ExpertRoutingResult, TopKRouter
+from llm_lite.model.routing import ExpertRoutingResult, RouterUsageSummary, TopKRouter
 
 
 class MoeGpt(CachedAutoregressiveModel):
@@ -132,6 +132,16 @@ class MoeGpt(CachedAutoregressiveModel):
             for block in self.blocks
         )
 
+    def router_usage_summaries(self) -> tuple[RouterUsageSummary, ...]:
+        return tuple(
+            block.router_usage_summary(layer_index=layer_index)
+            for layer_index, block in enumerate(self.blocks)
+        )
+
+    def reset_router_usage(self) -> None:
+        for block in self.blocks:
+            block.reset_router_usage()
+
 
 class MoeTransformerBlock(nn.Module):
     def __init__(self, model_configuration: MoeGptConfiguration) -> None:
@@ -191,9 +201,10 @@ class MoeTransformerBlock(nn.Module):
     ) -> TransformerBlockInferenceCache:
         head_dimension = self.attention.embed_dim // self.attention.num_heads
         empty_cache_shape = (batch_size, self.attention.num_heads, 0, head_dimension)
+        cache_dtype = self.attention.in_proj_weight.dtype
         return TransformerBlockInferenceCache(
-            key_states=torch.empty(empty_cache_shape, device=device),
-            value_states=torch.empty(empty_cache_shape, device=device),
+            key_states=torch.empty(empty_cache_shape, device=device, dtype=cache_dtype),
+            value_states=torch.empty(empty_cache_shape, device=device, dtype=cache_dtype),
         )
 
     def active_expert_parameter_count(self, top_k: int, trainable_only: bool) -> int:
@@ -211,6 +222,12 @@ class MoeTransformerBlock(nn.Module):
             for parameter in expert.parameters()
             if _count_parameter(parameter=parameter, trainable_only=trainable_only)
         )
+
+    def router_usage_summary(self, layer_index: int) -> RouterUsageSummary:
+        return self.feed_forward.router.usage_summary(layer_index=layer_index)
+
+    def reset_router_usage(self) -> None:
+        self.feed_forward.router.reset_usage()
 
     def _cached_attention(
         self,

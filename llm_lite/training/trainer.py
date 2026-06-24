@@ -9,6 +9,7 @@ from torch.optim import AdamW, Optimizer
 from torch.utils.data import Dataset, IterableDataset
 
 from llm_lite.config.models import DistributedConfiguration, TrainingConfiguration
+from llm_lite.model.router_usage import collect_router_usage_summaries, reset_router_usage
 from llm_lite.training.checkpoint import (
     finalize_sharded_checkpoint,
     load_latest_checkpoint,
@@ -107,6 +108,11 @@ def train_model(
                         tokens_processed=tokens_processed,
                     ),
                 )
+                metrics_logger.write_router_usage(
+                    step=step,
+                    router_usage_summaries=collect_router_usage_summaries(model=model),
+                )
+                reset_router_usage(model=model)
             training_evaluation_configuration = training_configuration.evaluation
             if (
                 training_evaluation_configuration is not None
@@ -280,6 +286,14 @@ def _train_model_distributed_initialized(
                         distributed_strategy=distributed_configuration.strategy.value,
                     ),
                 )
+                unwrapped_model = unwrap_distributed_model(model=model)
+                metrics_logger.write_router_usage(
+                    step=step,
+                    router_usage_summaries=collect_router_usage_summaries(
+                        model=unwrapped_model,
+                    ),
+                )
+                reset_router_usage(model=unwrapped_model)
             training_evaluation_configuration = training_configuration.evaluation
             should_run_training_evaluation = (
                 training_evaluation_configuration is not None

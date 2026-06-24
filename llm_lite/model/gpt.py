@@ -154,9 +154,10 @@ class TransformerBlock(nn.Module):
     ) -> TransformerBlockInferenceCache:
         head_dimension = self.attention.embed_dim // self.attention.num_heads
         empty_cache_shape = (batch_size, self.attention.num_heads, 0, head_dimension)
+        cache_dtype = self.attention.in_proj_weight.dtype
         return TransformerBlockInferenceCache(
-            key_states=torch.empty(empty_cache_shape, device=device),
-            value_states=torch.empty(empty_cache_shape, device=device),
+            key_states=torch.empty(empty_cache_shape, device=device, dtype=cache_dtype),
+            value_states=torch.empty(empty_cache_shape, device=device, dtype=cache_dtype),
         )
 
     def _cached_attention(

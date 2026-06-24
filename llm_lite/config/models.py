@@ -26,6 +26,7 @@ class PreprocessingTransformType(str, Enum):
     MAX_LENGTH = "max_length"
     EXACT_DEDUPLICATION = "exact_deduplication"
     ASSIGN_SPLIT = "assign_split"
+    EXTRACT_PYTHON_FUNCTIONS = "extract_python_functions"
 
 
 class ModelType(str, Enum):
@@ -219,6 +220,13 @@ class ExactDeduplicationTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.EXACT_DEDUPLICATION]
 
 
+class ExtractPythonFunctionsTransformConfiguration(Configuration):
+    type: Literal[PreprocessingTransformType.EXTRACT_PYTHON_FUNCTIONS]
+    include_async_functions: bool = False
+    include_private_functions: bool = False
+    include_methods: bool = False
+
+
 class AssignSplitTransformConfiguration(Configuration):
     type: Literal[PreprocessingTransformType.ASSIGN_SPLIT]
     train_probability: float = Field(default=0.98, ge=0.0, le=1.0)
@@ -242,6 +250,7 @@ PreprocessingTransformConfiguration = Annotated[
     | MinLengthTransformConfiguration
     | MaxLengthTransformConfiguration
     | ExactDeduplicationTransformConfiguration
+    | ExtractPythonFunctionsTransformConfiguration
     | AssignSplitTransformConfiguration,
     Field(discriminator="type"),
 ]

@@ -3,6 +3,7 @@ import pytest
 from llm_lite.config.models import (
     AssignSplitTransformConfiguration,
     ExactDeduplicationTransformConfiguration,
+    ExtractPythonFunctionsTransformConfiguration,
     LowerCaseTransformConfiguration,
     MaxLengthTransformConfiguration,
     MinLengthTransformConfiguration,
@@ -122,6 +123,91 @@ def test_preprocess_documents_exact_deduplication() -> None:
 
     assert [document.document_id for document in documents] == ["document-1", "document-3"]
     assert result.counters.deduplicated_documents == 1
+    assert result.counters.rejected_documents == 1
+
+
+def test_preprocess_documents_extracts_top_level_python_functions() -> None:
+    result = preprocess_documents(
+        documents=[
+            Document(
+                document_id="module",
+                text=(
+                    "import os\n\n"
+                    "def add(a: int, b: int) -> int:\n"
+                    "    return a + b\n\n"
+                    "def _private() -> int:\n"
+                    "    return 1\n\n"
+                    "class Calculator:\n"
+                    "    def multiply(self, left: int, right: int) -> int:\n"
+                    "        return left * right\n"
+                ),
+                split="train",
+            ),
+        ],
+        transforms=(
+            ExtractPythonFunctionsTransformConfiguration(
+                type=PreprocessingTransformType.EXTRACT_PYTHON_FUNCTIONS,
+                include_async_functions=False,
+                include_private_functions=False,
+                include_methods=False,
+            ),
+        ),
+    )
+
+    documents = list(result.documents)
+
+    assert len(documents) == 1
+    assert documents[0].document_id == "module__function_0000_add"
+    assert documents[0].split == "train"
+    assert documents[0].text == "def add(a: int, b: int) -> int:\n    return a + b\n"
+    assert "import os" not in documents[0].text
+    assert result.counters.python_extracted_functions == 1
+
+
+def test_preprocess_documents_can_extract_python_methods() -> None:
+    result = preprocess_documents(
+        documents=[
+            Document(
+                document_id="module",
+                text=(
+                    "class Calculator:\n"
+                    "    def multiply(self, left: int, right: int) -> int:\n"
+                    "        return left * right\n"
+                ),
+                split=None,
+            ),
+        ],
+        transforms=(
+            ExtractPythonFunctionsTransformConfiguration(
+                type=PreprocessingTransformType.EXTRACT_PYTHON_FUNCTIONS,
+                include_async_functions=False,
+                include_private_functions=False,
+                include_methods=True,
+            ),
+        ),
+    )
+
+    documents = list(result.documents)
+
+    assert len(documents) == 1
+    assert documents[0].text.startswith("def multiply")
+
+
+def test_preprocess_documents_rejects_unparseable_python_for_function_extraction() -> None:
+    result = preprocess_documents(
+        documents=[Document(document_id="bad", text="def broken(:\n", split=None)],
+        transforms=(
+            ExtractPythonFunctionsTransformConfiguration(
+                type=PreprocessingTransformType.EXTRACT_PYTHON_FUNCTIONS,
+                include_async_functions=False,
+                include_private_functions=False,
+                include_methods=False,
+            ),
+        ),
+    )
+
+    assert list(result.documents) == []
+    assert result.counters.python_parse_failed_documents == 1
     assert result.counters.rejected_documents == 1
 
 

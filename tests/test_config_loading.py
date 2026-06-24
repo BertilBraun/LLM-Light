@@ -66,6 +66,21 @@ def test_load_tinystories_huggingface_smoke_configuration() -> None:
     assert experiment_configuration.training.evaluation is not None
 
 
+def test_load_python_moe_tiny_configuration() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/python_moe_tiny.yaml"),
+    )
+
+    assert experiment_configuration.experiment.name == "python_moe_tiny"
+    assert experiment_configuration.dataset.type.value == "huggingface"
+    assert experiment_configuration.model.type.value == "moe_gpt"
+    assert experiment_configuration.model.dimension == 128
+    assert any(
+        transform.type.value == "extract_python_functions"
+        for transform in experiment_configuration.preprocessing.transforms
+    )
+
+
 def test_evaluation_configuration_allows_no_configured_evaluator() -> None:
     evaluation_configuration = EvaluationConfiguration.model_validate({})
 

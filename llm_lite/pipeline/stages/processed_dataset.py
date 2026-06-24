@@ -48,6 +48,8 @@ class ProcessedDatasetStage(BasePipelineStage):
             "lower_cased_documents": counters.lower_cased_documents,
             "deduplicated_documents": counters.deduplicated_documents,
             "split_assigned_documents": counters.split_assigned_documents,
+            "python_extracted_functions": counters.python_extracted_functions,
+            "python_parse_failed_documents": counters.python_parse_failed_documents,
             "shards": _shard_count(corpus_manifest=preprocessing_result.corpus_manifest),
             "workers": preprocessing_result.worker_count,
         }

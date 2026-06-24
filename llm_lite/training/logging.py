@@ -2,8 +2,11 @@ import time
 from enum import Enum
 from pathlib import Path
 
+import torch
 from pydantic import BaseModel, ConfigDict
 from torch.utils.tensorboard import SummaryWriter
+
+from llm_lite.model.routing import RouterUsageSummary
 
 
 class TrainingScalar(str, Enum):
@@ -99,6 +102,30 @@ class TrainingMetricLogger:
             )
         self.summary_writer.flush()
 
+    def write_router_usage(
+        self,
+        step: int,
+        router_usage_summaries: tuple[RouterUsageSummary, ...],
+    ) -> None:
+        for router_usage_summary in router_usage_summaries:
+            histogram_values = _expert_index_histogram_values(
+                expert_counts=router_usage_summary.expert_counts,
+            )
+            tag_prefix = f"moe/router_layer_{router_usage_summary.layer_index:02d}"
+            self.summary_writer.add_histogram(
+                f"{tag_prefix}/selected_expert",
+                histogram_values,
+                step,
+            )
+            total_count = max(float(router_usage_summary.expert_counts.sum().item()), 1.0)
+            for expert_index, expert_count in enumerate(router_usage_summary.expert_counts):
+                self.summary_writer.add_scalar(
+                    f"{tag_prefix}/expert_{expert_index:02d}_fraction",
+                    float(expert_count.item()) / total_count,
+                    step,
+                )
+        self.summary_writer.flush()
+
     def close(self) -> None:
         self.summary_writer.close()
 
@@ -131,3 +158,11 @@ def create_training_metric_record(
         distributed_checkpoint_time=distributed_checkpoint_time,
         distributed_strategy=distributed_strategy,
     )
+
+
+def _expert_index_histogram_values(expert_counts: torch.Tensor) -> torch.Tensor:
+    expert_indices = torch.arange(expert_counts.shape[0], dtype=torch.float32)
+    repeated_counts = expert_counts.to(dtype=torch.long)
+    if int(repeated_counts.sum().item()) == 0:
+        return expert_indices
+    return torch.repeat_interleave(expert_indices, repeated_counts)

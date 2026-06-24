@@ -85,6 +85,37 @@ def test_router_top_k_shape_and_deterministic_routing() -> None:
     assert routing_result.top_expert_indices.tolist() == [[[0, 1], [1, 2]]]
 
 
+def test_router_usage_counts_selected_experts_and_resets() -> None:
+    router = TopKRouter(dimension=3, expert_count=4, top_k=1)
+    with torch.no_grad():
+        router.projection.weight.copy_(
+            torch.tensor(
+                [
+                    [1.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                    [0.0, 0.0, 1.0],
+                    [-1.0, -1.0, -1.0],
+                ],
+            ),
+        )
+    hidden_states = torch.tensor(
+        [[[5.0, 1.0, 0.0], [0.0, 4.0, 2.0], [0.0, 1.0, 3.0]]],
+        dtype=torch.float32,
+    )
+
+    router(hidden_states=hidden_states)
+    usage_summary = router.usage_summary(layer_index=0)
+
+    assert usage_summary.expert_counts.tolist() == [1.0, 1.0, 1.0, 0.0]
+    router.reset_usage()
+    assert router.usage_summary(layer_index=0).expert_counts.tolist() == [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ]
+
+
 def test_causal_lm_objective_includes_auxiliary_loss_when_configured() -> None:
     token_ids = torch.tensor([[0, 1, 2]], dtype=torch.long)
     logits = torch.zeros((1, 3, 4), dtype=torch.float32)

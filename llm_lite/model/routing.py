@@ -12,6 +12,12 @@ class ExpertRoutingResult:
     auxiliary_loss: torch.Tensor
 
 
+@dataclass(frozen=True)
+class RouterUsageSummary:
+    layer_index: int
+    expert_counts: torch.Tensor
+
+
 class TopKRouter(nn.Module):
     def __init__(self, dimension: int, expert_count: int, top_k: int) -> None:
         super().__init__()
@@ -20,6 +26,11 @@ class TopKRouter(nn.Module):
         self.expert_count = expert_count
         self.top_k = top_k
         self.projection = nn.Linear(dimension, expert_count, bias=False)
+        self.register_buffer(
+            "usage_counts",
+            torch.zeros(expert_count, dtype=torch.float32),
+            persistent=False,
+        )
 
     def forward(self, hidden_states: torch.Tensor) -> ExpertRoutingResult:
         router_logits = self.projection(hidden_states)
@@ -33,6 +44,7 @@ class TopKRouter(nn.Module):
             dim=-1,
             keepdim=True,
         )
+        self._record_usage(top_expert_indices=top_expert_indices)
         return ExpertRoutingResult(
             router_logits=router_logits,
             top_expert_indices=top_expert_indices,
@@ -43,6 +55,25 @@ class TopKRouter(nn.Module):
                 expert_count=self.expert_count,
             ),
         )
+
+    def usage_summary(self, layer_index: int) -> RouterUsageSummary:
+        return RouterUsageSummary(
+            layer_index=layer_index,
+            expert_counts=self.usage_counts.detach().cpu().clone(),
+        )
+
+    def reset_usage(self) -> None:
+        self.usage_counts.zero_()
+
+    def _record_usage(self, top_expert_indices: torch.Tensor) -> None:
+        if not self.training:
+            return
+        with torch.no_grad():
+            counts = torch.bincount(
+                top_expert_indices.reshape(-1),
+                minlength=self.expert_count,
+            ).to(dtype=self.usage_counts.dtype, device=self.usage_counts.device)
+            self.usage_counts.add_(counts)
 
 
 def _load_balancing_loss(

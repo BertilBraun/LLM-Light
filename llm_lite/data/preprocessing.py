@@ -1,3 +1,4 @@
+import ast
 import hashlib
 import unicodedata
 from collections.abc import Iterable, Iterator
@@ -9,6 +10,7 @@ from pathlib import Path
 from llm_lite.config.models import (
     AssignSplitTransformConfiguration,
     ExactDeduplicationTransformConfiguration,
+    ExtractPythonFunctionsTransformConfiguration,
     LowerCaseTransformConfiguration,
     MaxLengthTransformConfiguration,
     MinLengthTransformConfiguration,
@@ -48,6 +50,8 @@ class PreprocessingCounters:
     lower_cased_documents: int = 0
     deduplicated_documents: int = 0
     split_assigned_documents: int = 0
+    python_extracted_functions: int = 0
+    python_parse_failed_documents: int = 0
 
     def add(self, other: "PreprocessingCounters") -> None:
         self.input_documents += other.input_documents
@@ -62,6 +66,8 @@ class PreprocessingCounters:
         self.lower_cased_documents += other.lower_cased_documents
         self.deduplicated_documents += other.deduplicated_documents
         self.split_assigned_documents += other.split_assigned_documents
+        self.python_extracted_functions += other.python_extracted_functions
+        self.python_parse_failed_documents += other.python_parse_failed_documents
 
 
 @dataclass(frozen=True)
@@ -83,19 +89,20 @@ def preprocess_documents(
             counters.input_documents += 1
             counters.input_bytes += len(document.text.encode("utf-8"))
             counters.input_characters += len(document.text)
-            transformed_document = _apply_transforms(
+            transformed_documents = _apply_transforms(
                 document=document,
                 transforms=transforms,
                 counters=counters,
                 seen_document_hashes=seen_document_hashes,
             )
-            if transformed_document is None:
+            if not transformed_documents:
                 counters.rejected_documents += 1
                 continue
-            counters.output_documents += 1
-            counters.output_bytes += len(transformed_document.text.encode("utf-8"))
-            counters.output_characters += len(transformed_document.text)
-            yield transformed_document
+            for transformed_document in transformed_documents:
+                counters.output_documents += 1
+                counters.output_bytes += len(transformed_document.text.encode("utf-8"))
+                counters.output_characters += len(transformed_document.text)
+                yield transformed_document
 
     return PreprocessingResult(
         documents=iter_processed_documents(),
@@ -217,18 +224,23 @@ def _apply_transforms(
     transforms: tuple[PreprocessingTransformConfiguration, ...],
     counters: PreprocessingCounters,
     seen_document_hashes: set[str],
-) -> Document | None:
-    current_document: Document | None = document
+) -> tuple[Document, ...]:
+    current_documents: tuple[Document, ...] = (document,)
     for transform in transforms:
-        if current_document is None:
-            return None
-        current_document = _apply_transform(
-            document=current_document,
-            transform=transform,
-            counters=counters,
-            seen_document_hashes=seen_document_hashes,
-        )
-    return current_document
+        next_documents: list[Document] = []
+        for current_document in current_documents:
+            next_documents.extend(
+                _apply_transform(
+                    document=current_document,
+                    transform=transform,
+                    counters=counters,
+                    seen_document_hashes=seen_document_hashes,
+                ),
+            )
+        current_documents = tuple(next_documents)
+        if not current_documents:
+            return ()
+    return current_documents
 
 
 def _apply_transform(
@@ -236,54 +248,74 @@ def _apply_transform(
     transform: PreprocessingTransformConfiguration,
     counters: PreprocessingCounters,
     seen_document_hashes: set[str],
-) -> Document | None:
+) -> tuple[Document, ...]:
     match transform:
         case NormalizeUnicodeTransformConfiguration(form=form):
             normalized_text = unicodedata.normalize(form, document.text)
             if normalized_text != document.text:
                 counters.unicode_normalized_documents += 1
-            return Document(
-                document_id=document.document_id,
-                text=normalized_text,
-                split=document.split,
+            return (
+                Document(
+                    document_id=document.document_id,
+                    text=normalized_text,
+                    split=document.split,
+                ),
             )
         case NormalizeLineEndingsTransformConfiguration():
             normalized_text = document.text.replace("\r\n", "\n").replace("\r", "\n")
             if normalized_text != document.text:
                 counters.line_endings_normalized_documents += 1
-            return Document(
-                document_id=document.document_id,
-                text=normalized_text,
-                split=document.split,
+            return (
+                Document(
+                    document_id=document.document_id,
+                    text=normalized_text,
+                    split=document.split,
+                ),
             )
         case LowerCaseTransformConfiguration():
             lowered_text = document.text.lower()
             if lowered_text != document.text:
                 counters.lower_cased_documents += 1
-            return Document(
-                document_id=document.document_id,
-                text=lowered_text,
-                split=document.split,
+            return (
+                Document(
+                    document_id=document.document_id,
+                    text=lowered_text,
+                    split=document.split,
+                ),
             )
         case ExactDeduplicationTransformConfiguration():
             document_hash = _text_hash(text=document.text)
             if document_hash in seen_document_hashes:
                 counters.deduplicated_documents += 1
-                return None
+                return ()
             seen_document_hashes.add(document_hash)
-            return Document(
-                document_id=document.document_id,
-                text=document.text,
-                split=document.split,
+            return (
+                Document(
+                    document_id=document.document_id,
+                    text=document.text,
+                    split=document.split,
+                ),
             )
         case MinLengthTransformConfiguration(min_characters=min_characters):
             if len(document.text) < min_characters:
-                return None
-            return document
+                return ()
+            return (document,)
         case MaxLengthTransformConfiguration(max_characters=max_characters):
             if len(document.text) > max_characters:
-                return None
-            return document
+                return ()
+            return (document,)
+        case ExtractPythonFunctionsTransformConfiguration(
+            include_async_functions=include_async_functions,
+            include_private_functions=include_private_functions,
+            include_methods=include_methods,
+        ):
+            return _extract_python_function_documents(
+                document=document,
+                counters=counters,
+                include_async_functions=include_async_functions,
+                include_private_functions=include_private_functions,
+                include_methods=include_methods,
+            )
         case AssignSplitTransformConfiguration(
             train_probability=train_probability,
             validation_probability=validation_probability,
@@ -296,11 +328,89 @@ def _apply_transform(
                 train_probability=train_probability,
                 validation_probability=validation_probability,
             )
-            return Document(
-                document_id=document.document_id,
-                text=document.text,
-                split=split_name,
+            return (
+                Document(
+                    document_id=document.document_id,
+                    text=document.text,
+                    split=split_name,
+                ),
             )
+
+
+def _extract_python_function_documents(
+    document: Document,
+    counters: PreprocessingCounters,
+    include_async_functions: bool,
+    include_private_functions: bool,
+    include_methods: bool,
+) -> tuple[Document, ...]:
+    try:
+        module = ast.parse(document.text)
+    except SyntaxError:
+        counters.python_parse_failed_documents += 1
+        return ()
+    extracted_documents: list[Document] = []
+    function_index = 0
+    for node in module.body:
+        extracted_functions = _node_functions(
+            node=node,
+            include_async_functions=include_async_functions,
+            include_methods=include_methods,
+        )
+        for function_node in extracted_functions:
+            if not include_private_functions and function_node.name.startswith("_"):
+                continue
+            function_text = ast.unparse(function_node).strip() + "\n"
+            extracted_documents.append(
+                Document(
+                    document_id=(
+                        f"{document.document_id}__function_{function_index:04d}_"
+                        f"{function_node.name}"
+                    ),
+                    text=function_text,
+                    split=document.split,
+                ),
+            )
+            function_index += 1
+    counters.python_extracted_functions += len(extracted_documents)
+    return tuple(extracted_documents)
+
+
+def _node_functions(
+    node: ast.stmt,
+    include_async_functions: bool,
+    include_methods: bool,
+) -> tuple[ast.FunctionDef | ast.AsyncFunctionDef, ...]:
+    match node:
+        case ast.FunctionDef():
+            return (node,)
+        case ast.AsyncFunctionDef():
+            if include_async_functions:
+                return (node,)
+            return ()
+        case ast.ClassDef():
+            if not include_methods:
+                return ()
+            return tuple(
+                child_node
+                for child_node in node.body
+                if _is_included_method(
+                    node=child_node,
+                    include_async_functions=include_async_functions,
+                )
+            )
+        case _:
+            return ()
+
+
+def _is_included_method(node: ast.stmt, include_async_functions: bool) -> bool:
+    match node:
+        case ast.FunctionDef():
+            return True
+        case ast.AsyncFunctionDef():
+            return include_async_functions
+        case _:
+            return False
 
 
 def _text_hash(text: str) -> str:

@@ -223,6 +223,36 @@ def test_generate_text_uses_configured_kv_cache_engine_for_moe() -> None:
     )
 
 
+def test_moe_kv_cache_generation_supports_bfloat16_precision() -> None:
+    torch.manual_seed(15)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_moe_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    generated_text = generate_text(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.BF16,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=2,
+        ),
+    )
+    inference_cache = model.empty_inference_cache(batch_size=1, device=torch.device("cpu"))
+
+    assert isinstance(generated_text, str)
+    assert next(model.parameters()).dtype == torch.bfloat16
+    assert inference_cache.layers[0].key_states.dtype == torch.bfloat16
+    assert inference_cache.layers[0].value_states.dtype == torch.bfloat16
+
+
 def test_generate_text_samples_with_configured_decoding() -> None:
     torch.manual_seed(17)
     tokenizer = train_character_tokenizer(

@@ -81,10 +81,6 @@ training:
       perplexity:
         split: validation
         maximum_documents: 200
-      fixed_prompt_generation:
-        prompts:
-          - "Once upon a time"
-        maximum_new_tokens: 60
 
 evaluation:
   perplexity:

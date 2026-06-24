@@ -101,10 +101,15 @@ def test_completion_from_generated_text_strips_full_prompt_echo() -> None:
     assert completion == "def answer() -> int:\n    return 1\n"
 
 
-def test_source_from_completion_appends_generated_body_to_signature_prefix() -> None:
+def test_source_from_completion_appends_generated_body_to_signature_prompt_code() -> None:
+    prompt = (
+        "Return a list containing each non-empty string uppercased and reversed, "
+        "preserving order.\n\n"
+        "def reverse_uppercase_strings(strings: list[str]) -> list[str]:\n"
+    )
     task = PythonCompletionTaskRecord(
         task_id="reverse_uppercase_strings",
-        prompt="def reverse_uppercase_strings(strings: list[str]) -> list[str]:\n",
+        prompt=prompt,
         checks=("reverse_uppercase_strings(['ab']) == ['BA']",),
     )
 
@@ -274,6 +279,8 @@ def test_evaluator_runs_signature_prefix_records(
 
     assert len(captured_calls) == 1
     assert captured_calls[0].prompt == (
+        "Return a list containing each non-empty string uppercased and reversed, "
+        "preserving order.\n\n"
         "def uppercase_reversed_nonempty(values: list[str]) -> list[str]:\n"
     )
     assert result.tasks[0].generated_completion == (

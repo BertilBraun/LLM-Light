@@ -212,8 +212,12 @@ def source_from_completion(
     generated_completion: str,
 ) -> str:
     if task.prompt is not None:
-        return task.prompt + generated_completion
+        return executable_prompt_suffix(prompt=task.prompt) + generated_completion
     return generated_completion
+
+
+def executable_prompt_suffix(prompt: str) -> str:
+    return prompt.rsplit("\n\n", maxsplit=1)[-1]
 
 
 def truncate_at_stop_sequence(text: str, stop_sequences: tuple[str, ...]) -> str:

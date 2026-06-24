@@ -1,19 +1,19 @@
 import json
-from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
 from llm_lite.config.models import (
-    DenseGptConfiguration,
+    CausalLanguageModelingObjectiveConfiguration,
     DistributedConfiguration,
     ExperimentFile,
+    ModelConfiguration,
     TrainingObjective,
 )
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.factory import build_model
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
@@ -34,8 +34,9 @@ class PretrainingReconstructionContract(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     contract_version: int
-    model: DenseGptConfiguration
+    model: ModelConfiguration
     objective: TrainingObjective
+    causal_language_modeling: CausalLanguageModelingObjectiveConfiguration
     distributed: DistributedConfiguration
 
 
@@ -63,7 +64,7 @@ class PretrainingStage(BasePipelineStage):
         dataset = load_packed_sequence_dataset(
             artifact_directory=registry.artifact_directory(StageName.PACKED_DATASET.value),
         )
-        model = DenseGpt(
+        model = build_model(
             model_configuration=experiment_configuration.model,
             vocabulary_size=tokenizer.vocabulary_size,
         )
@@ -87,7 +88,12 @@ class PretrainingStage(BasePipelineStage):
                 model_configuration_hash=hash_json_value(
                     value=experiment_configuration.model.model_dump(mode='json'),
                 ),
-                objective_runner=CausalLanguageModelingObjectiveRunner(),
+                objective_runner=CausalLanguageModelingObjectiveRunner(
+                    auxiliary_loss_weight=(
+                        experiment_configuration.training.causal_language_modeling
+                        .auxiliary_loss_weight
+                    ),
+                ),
             )
         else:
             result = train_model(
@@ -97,7 +103,12 @@ class PretrainingStage(BasePipelineStage):
                 artifact_directory=artifact_directory,
                 seed=experiment_configuration.experiment.seed,
                 evaluation_callback=evaluation_callback,
-                objective_runner=CausalLanguageModelingObjectiveRunner(),
+                objective_runner=CausalLanguageModelingObjectiveRunner(
+                    auxiliary_loss_weight=(
+                        experiment_configuration.training.causal_language_modeling
+                        .auxiliary_loss_weight
+                    ),
+                ),
             )
         files = {
             'checkpoint': str(result.checkpoint_path.relative_to(artifact_directory)),
@@ -155,6 +166,7 @@ def _pretraining_reconstruction_contract(
         contract_version=PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION,
         model=experiment_configuration.model,
         objective=experiment_configuration.training.objective,
+        causal_language_modeling=experiment_configuration.training.causal_language_modeling,
         distributed=experiment_configuration.distributed,
     )
 

@@ -16,12 +16,12 @@ from llm_lite.inference.runtime import (
     encode_prompts,
     finalize_generation_results,
 )
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.protocol import CachedAutoregressiveModel
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
 def generate_batch(
-    model: DenseGpt,
+    model: CachedAutoregressiveModel,
     tokenizer: TextTokenizer,
     prompts: tuple[str, ...],
     maximum_new_tokens: int,
@@ -53,7 +53,7 @@ def generate_batch(
 
 
 def generate(
-    model: DenseGpt,
+    model: CachedAutoregressiveModel,
     tokenizer: TextTokenizer,
     prompt: str,
     maximum_new_tokens: int,
@@ -71,7 +71,7 @@ def generate(
 
 
 def generate_greedy(
-    model: DenseGpt,
+    model: CachedAutoregressiveModel,
     tokenizer: TextTokenizer,
     prompt: str,
     maximum_new_tokens: int,
@@ -88,7 +88,7 @@ def generate_greedy(
 
 
 def _generate_single_with_cache(
-    model: DenseGpt,
+    model: CachedAutoregressiveModel,
     tokenizer: TextTokenizer,
     prompt: str,
     maximum_new_tokens: int,
@@ -144,7 +144,7 @@ def _generate_single_with_cache(
 
 
 def _generate_equal_length_batch_with_cache(
-    model: DenseGpt,
+    model: CachedAutoregressiveModel,
     tokenizer: TextTokenizer,
     prompts: tuple[str, ...],
     maximum_new_tokens: int,

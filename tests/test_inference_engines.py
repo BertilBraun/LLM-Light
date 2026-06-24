@@ -15,6 +15,7 @@ from llm_lite.config.models import (
     InferenceConfiguration,
     InferenceEngine,
     ModelType,
+    MoeGptConfiguration,
     Precision,
     QuantizationType,
     SamplingDecodingConfiguration,
@@ -32,6 +33,7 @@ from llm_lite.inference.kv_cache import generate_greedy as generate_greedy_with_
 from llm_lite.inference.naive import generate_greedy as generate_greedy_naively
 from llm_lite.inference.runtime import prepare_model_for_inference
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.moe import MoeGpt
 from llm_lite.tokenizer.character import train_character_tokenizer
 
 
@@ -44,6 +46,42 @@ def test_cached_forward_matches_full_sequence_forward() -> None:
         add_pad_token=True,
     )
     model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+    prompt_token_ids = tokenizer.encode(text="hello", add_bos=True, add_eos=False)
+    continuation_token_ids = tokenizer.encode(text=" world", add_bos=False, add_eos=False)
+
+    full_token_ids = torch.tensor([prompt_token_ids + continuation_token_ids], dtype=torch.long)
+    full_model_output = model(full_token_ids)
+    prompt_tensor = torch.tensor([prompt_token_ids], dtype=torch.long)
+    cached_model_output = model.forward_with_cache(
+        token_ids=prompt_tensor,
+        inference_cache=model.empty_inference_cache(
+            batch_size=prompt_tensor.shape[0],
+            device=prompt_tensor.device,
+        ),
+    )
+    for continuation_token_id in continuation_token_ids:
+        cached_model_output = model.forward_with_cache(
+            token_ids=torch.tensor([[continuation_token_id]], dtype=torch.long),
+            inference_cache=cached_model_output.inference_cache,
+        )
+
+    torch.testing.assert_close(
+        cached_model_output.logits[:, -1, :],
+        full_model_output.logits[:, -1, :],
+        rtol=0.00001,
+        atol=0.00001,
+    )
+
+
+def test_moe_cached_forward_matches_full_sequence_forward() -> None:
+    torch.manual_seed(8)
+    tokenizer = train_character_tokenizer(
+        texts=["hello world"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_moe_model(vocabulary_size=tokenizer.vocabulary_size)
     prompt_token_ids = tokenizer.encode(text="hello", add_bos=True, add_eos=False)
     continuation_token_ids = tokenizer.encode(text=" world", add_bos=False, add_eos=False)
 
@@ -97,6 +135,32 @@ def test_kv_cache_generation_matches_naive_generation() -> None:
     assert cached_text == naive_text
 
 
+def test_moe_kv_cache_generation_matches_naive_generation() -> None:
+    torch.manual_seed(12)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_moe_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    naive_text = generate_greedy_naively(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        maximum_new_tokens=5,
+    )
+    cached_text = generate_greedy_with_cache(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        maximum_new_tokens=5,
+    )
+
+    assert cached_text == naive_text
+
+
 def test_generate_text_uses_configured_kv_cache_engine() -> None:
     torch.manual_seed(13)
     tokenizer = train_character_tokenizer(
@@ -106,6 +170,37 @@ def test_generate_text_uses_configured_kv_cache_engine() -> None:
         add_pad_token=True,
     )
     model = _build_model(vocabulary_size=tokenizer.vocabulary_size)
+
+    generated_text = generate_text(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        inference_configuration=InferenceConfiguration(
+            engine=InferenceEngine.KV_CACHE,
+            precision=Precision.FP32,
+            quantization=QuantizationType.NONE,
+            decoding=GreedyDecodingConfiguration(strategy=DecodingStrategy.GREEDY),
+            maximum_new_tokens=5,
+        ),
+    )
+
+    assert generated_text == generate_greedy_naively(
+        model=model,
+        tokenizer=tokenizer,
+        prompt="a",
+        maximum_new_tokens=5,
+    )
+
+
+def test_generate_text_uses_configured_kv_cache_engine_for_moe() -> None:
+    torch.manual_seed(14)
+    tokenizer = train_character_tokenizer(
+        texts=["abc"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = _build_moe_model(vocabulary_size=tokenizer.vocabulary_size)
 
     generated_text = generate_text(
         model=model,
@@ -516,6 +611,25 @@ def _build_model(vocabulary_size: int) -> DenseGpt:
             layers=2,
             attention_heads=4,
             feed_forward_dimension=32,
+            dropout=0.0,
+            tie_embeddings=False,
+        ),
+        vocabulary_size=vocabulary_size,
+    )
+    model.eval()
+    return model
+
+
+def _build_moe_model(vocabulary_size: int) -> MoeGpt:
+    model = MoeGpt(
+        model_configuration=MoeGptConfiguration(
+            type=ModelType.MOE_GPT,
+            dimension=16,
+            layers=2,
+            attention_heads=4,
+            expert_feed_forward_dimension=32,
+            expert_count=4,
+            router_top_k=2,
             dropout=0.0,
             tie_embeddings=False,
         ),

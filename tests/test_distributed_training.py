@@ -107,7 +107,7 @@ def _distributed_training_worker(
         seed=7,
         evaluation_callback=None,
         model_configuration_hash="tiny-model",
-        objective_runner=CausalLanguageModelingObjectiveRunner(),
+        objective_runner=CausalLanguageModelingObjectiveRunner(auxiliary_loss_weight=0.0),
     )
     result_path = Path(artifact_directory) / f"rank_{rank}_result.json"
     result_path.write_text(

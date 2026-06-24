@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import math
 from dataclasses import dataclass
 
@@ -7,7 +5,7 @@ import torch
 import torch.nn.functional as torch_functional
 from torch import nn
 
-from llm_lite.config.models import DenseGptConfiguration
+from llm_lite.config.models import MoeGptConfiguration
 from llm_lite.model.cache import (
     CachedModelOutput,
     GptInferenceCache,
@@ -15,10 +13,11 @@ from llm_lite.model.cache import (
 )
 from llm_lite.model.output import ModelOutput
 from llm_lite.model.protocol import CachedAutoregressiveModel
+from llm_lite.model.routing import ExpertRoutingResult, TopKRouter
 
 
-class DenseGpt(CachedAutoregressiveModel):
-    def __init__(self, model_configuration: DenseGptConfiguration, vocabulary_size: int) -> None:
+class MoeGpt(CachedAutoregressiveModel):
+    def __init__(self, model_configuration: MoeGptConfiguration, vocabulary_size: int) -> None:
         super().__init__()
         if model_configuration.dimension % model_configuration.attention_heads != 0:
             raise ValueError("Model dimension must be divisible by attention heads.")
@@ -27,13 +26,15 @@ class DenseGpt(CachedAutoregressiveModel):
         self.position_embedding = nn.Embedding(1024, model_configuration.dimension)
         self.blocks = nn.ModuleList(
             [
-                TransformerBlock(model_configuration=model_configuration)
+                MoeTransformerBlock(model_configuration=model_configuration)
                 for _ in range(model_configuration.layers)
             ]
         )
         self.final_normalization = nn.LayerNorm(model_configuration.dimension)
         self.output_projection = nn.Linear(
-            model_configuration.dimension, vocabulary_size, bias=False
+            model_configuration.dimension,
+            vocabulary_size,
+            bias=False,
         )
         if model_configuration.tie_embeddings:
             self.output_projection.weight = self.token_embedding.weight
@@ -48,12 +49,18 @@ class DenseGpt(CachedAutoregressiveModel):
             torch.full((sequence_length, sequence_length), float("-inf"), device=token_ids.device),
             diagonal=1,
         )
+        auxiliary_losses: list[torch.Tensor] = []
         for block in self.blocks:
-            hidden_states = block(hidden_states=hidden_states, causal_mask=causal_mask)
+            block_output = block(hidden_states=hidden_states, causal_mask=causal_mask)
+            hidden_states = block_output.hidden_states
+            auxiliary_losses.append(block_output.routing_result.auxiliary_loss)
         hidden_states = self.final_normalization(hidden_states)
         logits = self.output_projection(hidden_states)
         assert logits.shape[0] == batch_size
-        return ModelOutput(logits=logits)
+        return ModelOutput(
+            logits=logits,
+            auxiliary_loss=torch.stack(auxiliary_losses).mean(),
+        )
 
     def forward_with_cache(
         self,
@@ -94,8 +101,8 @@ class DenseGpt(CachedAutoregressiveModel):
         return GptInferenceCache(layers=empty_layers)
 
 
-class TransformerBlock(nn.Module):
-    def __init__(self, model_configuration: DenseGptConfiguration) -> None:
+class MoeTransformerBlock(nn.Module):
+    def __init__(self, model_configuration: MoeGptConfiguration) -> None:
         super().__init__()
         self.attention_normalization = nn.LayerNorm(model_configuration.dimension)
         self.attention = nn.MultiheadAttention(
@@ -105,15 +112,10 @@ class TransformerBlock(nn.Module):
             batch_first=True,
         )
         self.feed_forward_normalization = nn.LayerNorm(model_configuration.dimension)
-        self.feed_forward = nn.Sequential(
-            nn.Linear(model_configuration.dimension, model_configuration.feed_forward_dimension),
-            nn.GELU(),
-            nn.Linear(model_configuration.feed_forward_dimension, model_configuration.dimension),
-            nn.Dropout(model_configuration.dropout),
-        )
+        self.feed_forward = MoeFeedForward(model_configuration=model_configuration)
         self._reset_parameters()
 
-    def forward(self, hidden_states: torch.Tensor, causal_mask: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, causal_mask: torch.Tensor) -> "MoeBlockOutput":
         normalized_states = self.attention_normalization(hidden_states)
         attention_output, _attention_weights = self.attention(
             normalized_states,
@@ -123,27 +125,30 @@ class TransformerBlock(nn.Module):
             need_weights=False,
         )
         hidden_states = hidden_states + attention_output
-        hidden_states = hidden_states + self.feed_forward(
-            self.feed_forward_normalization(hidden_states),
+        feed_forward_output = self.feed_forward(
+            hidden_states=self.feed_forward_normalization(hidden_states),
         )
-        return hidden_states
+        return MoeBlockOutput(
+            hidden_states=hidden_states + feed_forward_output.hidden_states,
+            routing_result=feed_forward_output.routing_result,
+        )
 
     def forward_with_cache(
         self,
         hidden_states: torch.Tensor,
         inference_cache: TransformerBlockInferenceCache,
-    ) -> TransformerBlockOutput:
+    ) -> "MoeCachedBlockOutput":
         normalized_states = self.attention_normalization(hidden_states)
         attention_output, next_cache = self._cached_attention(
             normalized_states=normalized_states,
             inference_cache=inference_cache,
         )
         hidden_states = hidden_states + attention_output
-        hidden_states = hidden_states + self.feed_forward(
-            self.feed_forward_normalization(hidden_states),
+        feed_forward_output = self.feed_forward(
+            hidden_states=self.feed_forward_normalization(hidden_states),
         )
-        return TransformerBlockOutput(
-            hidden_states=hidden_states,
+        return MoeCachedBlockOutput(
+            hidden_states=hidden_states + feed_forward_output.hidden_states,
             inference_cache=next_cache,
         )
 
@@ -221,11 +226,72 @@ class TransformerBlock(nn.Module):
     def _reset_parameters(self) -> None:
         for parameter in self.parameters():
             if parameter.dim() > 1:
-                nn.init.normal_(parameter, mean=0.0, std=0.02 / math.sqrt(parameter.dim()))
+                nn.init.normal_(parameter, mean=0.0, std=0.02)
+
+
+class MoeFeedForward(nn.Module):
+    def __init__(self, model_configuration: MoeGptConfiguration) -> None:
+        super().__init__()
+        self.expert_count = model_configuration.expert_count
+        self.router = TopKRouter(
+            dimension=model_configuration.dimension,
+            expert_count=model_configuration.expert_count,
+            top_k=model_configuration.router_top_k,
+        )
+        self.experts = nn.ModuleList(
+            [
+                nn.Sequential(
+                    nn.Linear(
+                        model_configuration.dimension,
+                        model_configuration.expert_feed_forward_dimension,
+                    ),
+                    nn.GELU(),
+                    nn.Linear(
+                        model_configuration.expert_feed_forward_dimension,
+                        model_configuration.dimension,
+                    ),
+                    nn.Dropout(model_configuration.dropout),
+                )
+                for _ in range(model_configuration.expert_count)
+            ]
+        )
+
+    def forward(self, hidden_states: torch.Tensor) -> "MoeFeedForwardOutput":
+        routing_result = self.router(hidden_states=hidden_states)
+        combined_states = torch.zeros_like(hidden_states)
+        for expert_index, expert in enumerate(self.experts):
+            for route_index in range(routing_result.top_expert_indices.shape[-1]):
+                expert_token_mask = (
+                    routing_result.top_expert_indices[..., route_index] == expert_index
+                )
+                if not bool(expert_token_mask.any()):
+                    continue
+                expert_input = hidden_states[expert_token_mask]
+                expert_output = expert(expert_input)
+                expert_weight = routing_result.top_expert_weights[..., route_index][
+                    expert_token_mask
+                ].unsqueeze(dim=-1)
+                combined_states[expert_token_mask] += expert_output * expert_weight
+        return MoeFeedForwardOutput(
+            hidden_states=combined_states,
+            routing_result=routing_result,
+        )
 
 
 @dataclass(frozen=True)
-class TransformerBlockOutput:
+class MoeFeedForwardOutput:
+    hidden_states: torch.Tensor
+    routing_result: ExpertRoutingResult
+
+
+@dataclass(frozen=True)
+class MoeBlockOutput:
+    hidden_states: torch.Tensor
+    routing_result: ExpertRoutingResult
+
+
+@dataclass(frozen=True)
+class MoeCachedBlockOutput:
     hidden_states: torch.Tensor
     inference_cache: TransformerBlockInferenceCache
 

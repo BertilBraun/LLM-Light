@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from torch import nn
+
 from llm_lite.config.models import (
     DirectPreferenceOptimizationConfiguration,
     ExperimentFile,
@@ -9,7 +11,7 @@ from llm_lite.config.models import (
     TrainingConfiguration,
 )
 from llm_lite.evaluation.python_completion import load_python_completion_tasks
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.factory import build_model
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
@@ -191,12 +193,12 @@ def _load_base_models(
     experiment_configuration: ExperimentFile,
     registry: ArtifactRegistry,
     vocabulary_size: int,
-) -> tuple[DenseGpt, DenseGpt]:
-    policy_model = DenseGpt(
+) -> tuple[nn.Module, nn.Module]:
+    policy_model = build_model(
         model_configuration=experiment_configuration.model,
         vocabulary_size=vocabulary_size,
     )
-    reference_model = DenseGpt(
+    reference_model = build_model(
         model_configuration=experiment_configuration.model,
         vocabulary_size=vocabulary_size,
     )

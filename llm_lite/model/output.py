@@ -6,3 +6,4 @@ import torch
 @dataclass(frozen=True)
 class ModelOutput:
     logits: torch.Tensor
+    auxiliary_loss: torch.Tensor | None = None

@@ -49,7 +49,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
         evaluation_callback=None,
-        objective_runner=CausalLanguageModelingObjectiveRunner(),
+        objective_runner=CausalLanguageModelingObjectiveRunner(auxiliary_loss_weight=0.0),
     )
     second_result = train_model(
         model=model,
@@ -58,7 +58,7 @@ def test_training_checkpoint_resume(tmp_path: Path) -> None:
         artifact_directory=tmp_path,
         seed=experiment_configuration.experiment.seed,
         evaluation_callback=None,
-        objective_runner=CausalLanguageModelingObjectiveRunner(),
+        objective_runner=CausalLanguageModelingObjectiveRunner(auxiliary_loss_weight=0.0),
     )
 
     assert first_result.final_step == experiment_configuration.training.maximum_steps

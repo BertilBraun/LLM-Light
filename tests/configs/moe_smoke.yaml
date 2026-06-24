@@ -1,0 +1,64 @@
+experiment:
+  name: moe_smoke
+  seed: 1337
+  output_dir: runs/moe_smoke
+
+dataset:
+  type: inline_text
+  documents:
+    - "hello world\n"
+    - "hi there\n"
+
+tokenizer:
+  type: character
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+
+preprocessing:
+  output_shard_documents: 1000
+  transforms:
+    - type: normalize_line_endings
+
+packing:
+  context_length: 13
+  add_bos: true
+  add_eos: true
+  pack_documents: false
+  maximum_shard_tokens: 1024
+
+model:
+  type: moe_gpt
+  dimension: 16
+  layers: 1
+  attention_heads: 2
+  expert_feed_forward_dimension: 32
+  expert_count: 4
+  router_top_k: 2
+  dropout: 0.0
+  tie_embeddings: true
+
+training:
+  objective: causal_language_modeling
+  causal_language_modeling:
+    auxiliary_loss_weight: 0.01
+  maximum_steps: 50
+  batch_size_sequences: 1
+  dataloader:
+    num_workers: 0
+    pin_memory: false
+    persistent_workers: false
+    prefetch_factor: null
+  optimizer:
+    learning_rate: 0.01
+    weight_decay: 0.0
+  precision: fp32
+  gradient_clip_norm: 1.0
+  checkpoint_interval_steps: 1
+  log_interval_steps: 1
+  evaluation: null
+
+evaluation:
+  exact_reproduction: 
+    prompt: "he"
+    expected_completion: "llo world\n"

@@ -3,7 +3,7 @@ from torch import nn
 from llm_lite.config.models import InferenceConfiguration, InferenceEngine
 from llm_lite.inference import kv_cache, naive
 from llm_lite.inference.runtime import GenerationResult, prepare_model_for_inference
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.protocol import CachedAutoregressiveModel
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -65,7 +65,7 @@ def _generate_prompt_batch(
             )
         case InferenceEngine.KV_CACHE:
             match model:
-                case DenseGpt():
+                case CachedAutoregressiveModel():
                     return kv_cache.generate_batch(
                         model=model,
                         tokenizer=tokenizer,
@@ -75,7 +75,7 @@ def _generate_prompt_batch(
                         stop_sequences=inference_configuration.stop_sequences,
                     )
                 case _:
-                    raise ValueError("KV-cache inference requires a DenseGpt model.")
+                    raise ValueError("KV-cache inference requires a cache-capable model.")
 
 
 def _chunk_prompts(

@@ -4,7 +4,7 @@ from pathlib import Path
 from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.config.models import InferenceConfiguration
 from llm_lite.inference.engine import generate_text
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.factory import build_model
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
 from llm_lite.tokenizer.loading import load_tokenizer
@@ -34,7 +34,7 @@ def main() -> int:
         directory=registry.artifact_directory(StageName.TOKENIZER.value),
         tokenizer_configuration=experiment_configuration.tokenizer,
     )
-    model = DenseGpt(
+    model = build_model(
         model_configuration=experiment_configuration.model,
         vocabulary_size=tokenizer.vocabulary_size,
     )

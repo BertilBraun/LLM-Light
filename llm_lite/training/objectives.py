@@ -21,6 +21,9 @@ class TrainingObjectiveRunner(Protocol):
 
 
 class CausalLanguageModelingObjectiveRunner:
+    def __init__(self, auxiliary_loss_weight: float) -> None:
+        self.auxiliary_loss_weight = auxiliary_loss_weight
+
     def prepare_batch(self, batch: TrainingBatch, device: torch.device) -> TrainingBatch:
         match batch:
             case torch.Tensor():
@@ -32,10 +35,14 @@ class CausalLanguageModelingObjectiveRunner:
         match batch:
             case torch.Tensor():
                 model_output = model(batch)
-                return causal_language_modeling_loss(
+                language_modeling_loss = causal_language_modeling_loss(
                     logits=model_output.logits,
                     token_ids=batch,
                 )
+                auxiliary_loss = model_output.auxiliary_loss
+                if auxiliary_loss is None or self.auxiliary_loss_weight == 0.0:
+                    return language_modeling_loss
+                return language_modeling_loss + self.auxiliary_loss_weight * auxiliary_loss
             case DpoPreferenceBatch():
                 raise ValueError("Causal language modeling requires token tensor batches.")
 

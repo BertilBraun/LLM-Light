@@ -3,7 +3,7 @@ from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile, NoPostTrainingConfiguration
 from llm_lite.evaluation.runner import run_configured_evaluators
-from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.factory import build_model
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
@@ -34,7 +34,7 @@ class EvaluationStage(BasePipelineStage):
             directory=registry.artifact_directory(StageName.TOKENIZER.value),
             tokenizer_configuration=experiment_configuration.tokenizer,
         )
-        model = DenseGpt(
+        model = build_model(
             model_configuration=experiment_configuration.model,
             vocabulary_size=tokenizer.vocabulary_size,
         )

@@ -30,6 +30,7 @@ class PreprocessingTransformType(str, Enum):
 
 class ModelType(str, Enum):
     DENSE_GPT = "dense_gpt"
+    MOE_GPT = "moe_gpt"
 
 
 class TrainingObjective(str, Enum):
@@ -249,13 +250,41 @@ class PackingConfiguration(Configuration):
 
 
 class DenseGptConfiguration(Configuration):
-    type: ModelType
+    type: Literal[ModelType.DENSE_GPT]
     dimension: int = Field(gt=0)
     layers: int = Field(gt=0)
     attention_heads: int = Field(gt=0)
     feed_forward_dimension: int = Field(gt=0)
     dropout: float = Field(default=0.0, ge=0.0, le=1.0)
     tie_embeddings: bool = True
+
+
+class MoeGptConfiguration(Configuration):
+    type: Literal[ModelType.MOE_GPT]
+    dimension: int = Field(gt=0)
+    layers: int = Field(gt=0)
+    attention_heads: int = Field(gt=0)
+    expert_feed_forward_dimension: int = Field(gt=0)
+    expert_count: int = Field(gt=1)
+    router_top_k: int = Field(ge=1)
+    dropout: float = Field(default=0.0, ge=0.0, le=1.0)
+    tie_embeddings: bool = True
+
+    @model_validator(mode="after")
+    def require_top_k_not_greater_than_experts(self) -> MoeGptConfiguration:
+        if self.router_top_k > self.expert_count:
+            raise ValueError("MoE router_top_k must not be greater than expert_count.")
+        return self
+
+
+ModelConfiguration = Annotated[
+    DenseGptConfiguration | MoeGptConfiguration,
+    Field(discriminator="type"),
+]
+
+
+class CausalLanguageModelingObjectiveConfiguration(Configuration):
+    auxiliary_loss_weight: float = Field(default=0.0, ge=0.0)
 
 
 class OptimizerConfiguration(Configuration):
@@ -285,6 +314,9 @@ class TrainingEvaluationConfiguration(Configuration):
 
 class TrainingConfiguration(Configuration):
     objective: TrainingObjective = TrainingObjective.CAUSAL_LANGUAGE_MODELING
+    causal_language_modeling: CausalLanguageModelingObjectiveConfiguration = (
+        CausalLanguageModelingObjectiveConfiguration()
+    )
     maximum_steps: int = Field(gt=0)
     batch_size_sequences: int = Field(gt=0)
     dataloader: DataLoaderConfiguration = DataLoaderConfiguration()
@@ -438,7 +470,7 @@ class ExperimentFile(Configuration):
     preprocessing: PreprocessingConfiguration = PreprocessingConfiguration()
     tokenizer: TokenizerConfiguration
     packing: PackingConfiguration
-    model: DenseGptConfiguration
+    model: ModelConfiguration
     training: TrainingConfiguration
     post_training: PostTrainingConfiguration = NoPostTrainingConfiguration()
     evaluation: EvaluationConfiguration = EvaluationConfiguration()

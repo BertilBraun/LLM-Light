@@ -1,0 +1,131 @@
+experiment:
+  name: tinystories_moe_full
+  seed: 1337
+  output_dir: runs/tinystories_moe_full
+
+dataset:
+  type: huggingface
+  name: roneneldan/TinyStories
+  text_column: text
+  streaming: true
+  splits:
+    - source_split: train
+      split: train
+      max_documents: null
+    - source_split: validation
+      split: validation
+      max_documents: null
+
+tokenizer:
+  type: byte_bpe
+  vocabulary_size: 4096
+  max_training_documents: 100000
+  max_training_bytes: 50000000
+  training_workers: 8
+  add_bos_token: true
+  add_eos_token: true
+  add_pad_token: true
+
+preprocessing:
+  workers: 8
+  output_shard_documents: 20000
+  transforms:
+    - type: normalize_unicode
+      form: NFC
+    - type: normalize_line_endings
+    - type: min_length
+      min_characters: 50
+    - type: max_length
+      max_characters: 4096
+    - type: exact_deduplication
+
+packing:
+  workers: 8
+  context_length: 512
+  add_bos: true
+  add_eos: true
+  pack_documents: true
+  maximum_shard_tokens: 5000000
+
+model:
+  type: moe_gpt
+  dimension: 256
+  layers: 6
+  attention_heads: 8
+  expert_feed_forward_dimension: 1024
+  expert_count: 4
+  router_top_k: 1
+  dropout: 0.05
+  tie_embeddings: true
+
+training:
+  objective: causal_language_modeling
+  causal_language_modeling:
+    auxiliary_loss_weight: 0.01
+  maximum_steps: 50000
+  batch_size_sequences: 32
+  dataloader:
+    num_workers: 4
+    pin_memory: true
+    persistent_workers: true
+    prefetch_factor: 2
+  optimizer:
+    learning_rate: 0.0006
+    weight_decay: 0.1
+  precision: bf16
+  gradient_clip_norm: 1.0
+  checkpoint_interval_steps: 1000
+  log_interval_steps: 20
+  evaluation:
+    interval_steps: 1000
+    evaluators:
+      perplexity:
+        split: validation
+        maximum_documents: 1000
+      fixed_prompt_generation:
+        prompts:
+          - "Once upon a time"
+          - "The little girl found"
+          - "Tom wanted to help his friend"
+        maximum_new_tokens: 120
+
+evaluation:
+  perplexity:
+    split: validation
+    maximum_documents: null
+  fixed_prompt_generation:
+    prompts:
+      - "Once upon a time"
+      - "The little girl found"
+      - "Tom wanted to help his friend"
+      - "Lily was afraid because"
+    maximum_new_tokens: 160
+
+inference:
+  engine: kv_cache
+  precision: bf16
+  quantization: none
+  decoding:
+    strategy: sample
+    temperature: 0.8
+    top_k: 40
+  maximum_new_tokens: 160
+  batch_size: 1
+
+distributed:
+  enabled: true
+  backend: nccl
+  strategy: data_parallel
+  world_size: 2
+  simulated_nodes:
+    count: 1
+    processes_per_node: 2
+  parallelism:
+    data: 2
+    tensor: 1
+    pipeline: 1
+    context: 1
+    expert: 1
+  checkpoint:
+    type: sharded
+    save_rank_local_state: true

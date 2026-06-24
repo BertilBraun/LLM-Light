@@ -17,7 +17,6 @@ from llm_lite.inference.runtime import (
     encode_prompts,
     finalize_generation_results,
 )
-from llm_lite.pipeline.progress import console_log
 from llm_lite.tokenizer.loading import TextTokenizer
 
 
@@ -33,23 +32,10 @@ def generate_batch(
     device = _model_device(model=model)
     encoded_prompts = encode_prompts(tokenizer=tokenizer, prompts=prompts)
     states = create_generation_states(encoded_prompts=encoded_prompts)
-    console_log(
-        "[generation] naive_start "
-        f"prompts={len(prompts)} "
-        f"maximum_new_tokens={maximum_new_tokens} "
-        f"device={device}"
-    )
     prefill_seconds = 0.0
     decode_seconds = 0.0
     with torch.no_grad():
         for _generation_step in range(maximum_new_tokens):
-            if _generation_step == 0 or (_generation_step + 1) % 10 == 0:
-                active_count = sum(1 for state in states if not state.stopped)
-                console_log(
-                    "[generation] naive_decode "
-                    f"step={_generation_step + 1}/{maximum_new_tokens} "
-                    f"active={active_count}"
-                )
             active_indexes = tuple(
                 sample_index
                 for sample_index, state in enumerate(states)

@@ -9,6 +9,8 @@ from llm_lite.scripts.generate_tinypython import (
     generate_seeds,
     invalid_output_path,
     parse_generation,
+    seed_space_warning,
+    unique_compatible_seed_count,
 )
 
 
@@ -17,6 +19,24 @@ def test_generate_seeds_assigns_stable_requested_ids() -> None:
 
     assert [seed.seed_id for seed in seeds] == [0, 1, 2, 3, 4]
     assert len({seed.input_kind for seed in seeds}) >= 1
+    assert all(seed.description_style for seed in seeds)
+    assert all(seed.naming_style for seed in seeds)
+
+
+def test_unique_seed_space_supports_main_generation_run() -> None:
+    assert unique_compatible_seed_count() >= 50_000
+
+
+def test_seed_space_warning_when_request_cycles() -> None:
+    warning = seed_space_warning(requested_seed_count=101, unique_seed_count=100)
+
+    assert warning is not None
+    assert "requested=101" in warning
+    assert "unique=100" in warning
+
+
+def test_seed_space_warning_omitted_within_unique_space() -> None:
+    assert seed_space_warning(requested_seed_count=100, unique_seed_count=100) is None
 
 
 def test_parse_generation_extracts_task_and_code() -> None:
@@ -113,6 +133,7 @@ def test_defaults_match_training_plan() -> None:
     parser = build_argument_parser()
     arguments = parser.parse_args(["--model", "teacher", "--output", "teacher.jsonl"])
 
+    assert arguments.num_seeds == 50_000
     assert arguments.batch_size == 512
     assert arguments.max_tokens == 512
     assert arguments.dtype == "bfloat16"

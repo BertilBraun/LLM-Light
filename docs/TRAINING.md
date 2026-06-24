@@ -274,7 +274,9 @@ Examples include:
 
 Compatibility rules remove obviously contradictory combinations.
 
-The semantic ontology can be extended later if the first generated dataset lacks sufficient diversity.
+The semantic ontology includes explicit description-style and naming-style variants. These are not intended to train broad natural language competence; they provide controlled surface variation so the model sees the same simple semantics expressed with different task wording and identifier choices.
+
+As of the first TinyPython pilot, the compatible seed space is approximately 760k unique semantic seeds. The generator prints a warning when `--num-seeds` exceeds the current unique compatible seed count, because that means it will cycle through semantic seeds and rely on stochastic sampling for additional variants.
 
 ---
 
@@ -302,13 +304,13 @@ The pilot should measure:
 After the pilot:
 
 ```text
-10,000 semantic seeds
+50,000 semantic seeds
 × 2 completions per model
 × 2 models
-= 40,000 raw generations
+= 200,000 raw generations
 ```
 
-This should be sufficient for the first Python training experiment.
+This should be sufficient for the first serious Python training experiment while staying well within the current unique semantic-seed space.
 
 The corpus can later be expanded to:
 
@@ -334,7 +336,7 @@ Example:
 ```bash
 CUDA_VISIBLE_DEVICES=0 python -m llm_lite.scripts.generate_tinypython \
   --model TEACHER_A \
-  --num-seeds 10000 \
+  --num-seeds 50000 \
   --samples-per-seed 2 \
   --batch-size 512 \
   --output data/teacher_a.jsonl
@@ -343,7 +345,7 @@ CUDA_VISIBLE_DEVICES=0 python -m llm_lite.scripts.generate_tinypython \
 ```bash
 CUDA_VISIBLE_DEVICES=1 python -m llm_lite.scripts.generate_tinypython \
   --model TEACHER_B \
-  --num-seeds 10000 \
+  --num-seeds 50000 \
   --samples-per-seed 2 \
   --batch-size 512 \
   --output data/teacher_b.jsonl
@@ -850,9 +852,9 @@ The holdout set may need adjustment after the final synthetic-data distribution 
 
 ### Phase 3: Full Python dataset generation
 
-1. Generate approximately 10,000 semantic seeds.
+1. Generate approximately 50,000 semantic seeds.
 2. Generate two completions per seed per teacher.
-3. Produce approximately 40,000 raw generations.
+3. Produce approximately 200,000 raw generations.
 4. Merge valid teacher JSONL files.
 5. Run the existing dataset pipeline for:
 

@@ -121,6 +121,8 @@ class TaskSeed:
     edge_behavior: str
     implementation_style: str
     extra_constraint: str
+    description_style: str
+    naming_style: str
 
 
 @dataclass(frozen=True)
@@ -129,18 +131,40 @@ class ParsedGeneration:
     code: str
 
 
+DESCRIPTION_STYLES = [
+    "use a terse direct instruction",
+    "use a precise declarative sentence",
+    "mention the edge behavior naturally",
+    "use alternate wording from the operation name",
+]
+
+NAMING_STYLES = [
+    "use generic names such as values, items, result, and mapping",
+    "use descriptive domain-neutral names",
+    "use short readable names when the function is simple",
+    "use parameter names that match the input kind",
+]
+
+
 FAMILIES = [
     {
         "input": "a list of integers",
         "operations": {
             "count matching elements": "an integer",
             "sum matching elements": "an integer",
+            "compute the product of matching elements": "an integer",
+            "compute the minimum matching element": "an integer or None",
+            "compute the maximum matching element": "an integer or None",
+            "return both count and sum for matching elements": (
+                "a tuple of an integer count and an integer sum"
+            ),
             "filter matching elements": "a list of integers",
             "find the first matching element": "an integer or None",
             "find the last matching element": "an integer or None",
             "check whether any element matches": "a boolean",
             "check whether every element matches": "a boolean",
             "transform matching elements": "a list of integers",
+            "clamp matching elements to a lower and upper bound": "a list of integers",
             "partition elements into two groups": "a tuple of two integer lists",
             "find the index of the first matching element": "an integer or None",
         },
@@ -155,22 +179,30 @@ FAMILIES = [
             "equal to a target parameter",
             "divisible by a positive divisor parameter",
             "inside an inclusive lower and upper bound",
+            "outside an inclusive lower and upper bound",
+            "absolute value greater than a threshold parameter",
+            "index is even",
+            "index is odd",
         ],
         "edges": [
             "handle an empty input naturally",
             "preserve original order",
             "return None when no match exists",
+            "return zero when no match contributes to a numeric result",
+            "keep the original value when no transform applies",
         ],
         "styles": [
             "use an explicit loop",
             "use a comprehension when readable",
             "use an early return when appropriate",
             "use an accumulator variable",
+            "use helper local variables for clarity",
         ],
         "extras": [
             "do not mutate the input list",
             "keep duplicate values",
             "use no imports",
+            "avoid clever one-line implementations",
         ],
     },
     {
@@ -179,12 +211,18 @@ FAMILIES = [
             "count matching strings": "an integer",
             "filter matching strings": "a list of strings",
             "transform every string": "a list of strings",
+            "transform matching strings": "a list of strings",
             "find the first matching string": "a string or None",
+            "find the last matching string": "a string or None",
             "find the longest matching string": "a string or None",
+            "find the shortest matching string": "a string or None",
             "build a frequency dictionary": "a dictionary from strings to integers",
             "remove duplicate strings": "a list of strings",
             "join selected strings": "a string",
             "check whether all strings match": "a boolean",
+            "group strings by their first character": (
+                "a dictionary from strings to lists of strings"
+            ),
         },
         "conditions": [
             "nonempty",
@@ -197,23 +235,30 @@ FAMILIES = [
             "is entirely uppercase",
             "contains at least one digit",
             "equals a target string ignoring case",
+            "contains only alphabetic characters",
+            "contains no whitespace",
+            "has length equal to a limit parameter",
         ],
         "edges": [
             "handle an empty input naturally",
             "preserve original order",
             "return None when no match exists",
             "resolve ties by first occurrence",
+            "resolve ties by last occurrence",
+            "ignore empty strings",
         ],
         "styles": [
             "use an explicit loop",
             "use a comprehension when readable",
             "use an early return when appropriate",
             "use a dictionary accumulator when appropriate",
+            "build the result incrementally",
         ],
         "extras": [
             "do not mutate the input list",
             "keep duplicates unless the operation removes them",
             "use no imports",
+            "perform case-insensitive comparisons only when requested",
         ],
     },
     {
@@ -223,11 +268,14 @@ FAMILIES = [
             "filter characters": "a string",
             "replace matching characters": "a string",
             "find the first matching character": "a string or None",
+            "find the last matching character": "a string or None",
             "split into runs": "a list of strings",
             "normalize whitespace": "a string",
             "build a character frequency dictionary": "a dictionary from strings to integers",
             "check whether the string matches": "a boolean",
             "extract a bounded substring": "a string",
+            "remove repeated adjacent characters": "a string",
+            "return the indexes of matching characters": "a list of integers",
         },
         "conditions": [
             "is a digit",
@@ -238,25 +286,35 @@ FAMILIES = [
             "equals a target character",
             "belongs to a supplied set of characters",
             "occurs more than once",
+            "is a vowel",
+            "is not whitespace",
+            "appears before a limit index",
         ],
         "edges": [
             "handle an empty string naturally",
             "preserve character order",
             "return None when no match exists",
+            "return an empty string when no characters match",
         ],
         "styles": [
             "use an explicit loop",
             "use string methods when readable",
             "use an early return when appropriate",
             "build the result incrementally",
+            "use indexes when the condition depends on position",
         ],
-        "extras": ["use no regular expressions", "use no imports"],
+        "extras": [
+            "use no regular expressions",
+            "use no imports",
+            "avoid changing character case unless requested",
+        ],
     },
     {
         "input": "a dictionary from strings to integers",
         "operations": {
             "select matching entries": "a dictionary from strings to integers",
             "sum matching values": "an integer",
+            "count matching entries": "an integer",
             "find the key with the largest matching value": "a string or None",
             "find the key with the smallest matching value": "a string or None",
             "invert the mapping into grouped keys": (
@@ -264,8 +322,10 @@ FAMILIES = [
             ),
             "merge with a second dictionary": "a dictionary from strings to integers",
             "return keys ordered by their values": "a list of strings",
+            "return values ordered by their keys": "a list of integers",
             "check whether any entry matches": "a boolean",
             "transform matching values": "a dictionary from strings to integers",
+            "rename matching keys with a prefix parameter": "a dictionary from strings to integers",
         },
         "conditions": [
             "positive value",
@@ -276,22 +336,29 @@ FAMILIES = [
             "even value",
             "odd value",
             "key starts with a prefix parameter",
+            "key contains a substring parameter",
+            "key ends with a suffix parameter",
+            "value inside an inclusive lower and upper bound",
         ],
         "edges": [
             "handle an empty dictionary naturally",
             "return None when no match exists",
             "resolve ties by insertion order",
+            "preserve insertion order where possible",
+            "leave unmatched entries unchanged for transforms",
         ],
         "styles": [
             "use an explicit loop",
             "use a dictionary comprehension when readable",
             "use an early return when appropriate",
             "use an accumulator variable",
+            "use items() iteration",
         ],
         "extras": [
             "do not mutate input dictionaries",
             "preserve insertion order where relevant",
             "use no imports",
+            "avoid relying on sorted order unless requested",
         ],
     },
     {
@@ -299,12 +366,15 @@ FAMILIES = [
         "operations": {
             "compute elementwise sums": "a list of integers",
             "compute pairwise differences": "a list of integers",
+            "compute elementwise products": "a list of integers",
             "return values appearing in both": "a list of integers",
             "return values unique to either list": "a list of integers",
             "interleave their elements": "a list of integers",
             "compare corresponding elements": "a list of booleans",
             "combine them without duplicates": "a list of integers",
             "find common values with counts": "a dictionary from integers to integers",
+            "return pairs whose sum matches a target parameter": "a list of integer pairs",
+            "return indexes where corresponding elements match": "a list of integers",
         },
         "conditions": [
             "process only positions available in both lists",
@@ -312,20 +382,28 @@ FAMILIES = [
             "preserve order of first appearance",
             "treat duplicate values as distinct occurrences",
             "ignore duplicate values",
+            "keep pairs where the first value is greater",
+            "keep pairs where both values are even",
         ],
         "edges": [
             "handle empty lists naturally",
             "preserve original relative order",
             "stop at the shorter list for position-wise operations",
             "include remaining elements when interleaving",
+            "return an empty list when there are no matching pairs",
         ],
         "styles": [
             "use an explicit loop",
             "use zip when appropriate",
             "use index-based iteration",
             "use a set only when ordering remains correct",
+            "avoid nested loops unless necessary",
         ],
-        "extras": ["do not mutate either input list", "use no imports"],
+        "extras": [
+            "do not mutate either input list",
+            "use no imports",
+            "keep duplicate values only when requested",
+        ],
     },
 ]
 
@@ -352,13 +430,18 @@ def compatible(seed: TaskSeed) -> bool:
     return True
 
 
-def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
+def compatible_seed_candidates() -> list[TaskSeed]:
     candidates: list[TaskSeed] = []
     seed_id = 0
     for family in FAMILIES:
         for operation, output_kind in family["operations"].items():
-            for condition, edge, style, extra in itertools.product(
-                family["conditions"], family["edges"], family["styles"], family["extras"]
+            for condition, edge, style, extra, description_style, naming_style in itertools.product(
+                family["conditions"],
+                family["edges"],
+                family["styles"],
+                family["extras"],
+                DESCRIPTION_STYLES,
+                NAMING_STYLES,
             ):
                 item = TaskSeed(
                     seed_id=seed_id,
@@ -369,10 +452,32 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
                     edge_behavior=edge,
                     implementation_style=style,
                     extra_constraint=extra,
+                    description_style=description_style,
+                    naming_style=naming_style,
                 )
                 if compatible(item):
                     candidates.append(item)
                     seed_id += 1
+    return candidates
+
+
+def unique_compatible_seed_count() -> int:
+    return len(compatible_seed_candidates())
+
+
+def seed_space_warning(requested_seed_count: int, unique_seed_count: int) -> str | None:
+    if requested_seed_count <= unique_seed_count:
+        return None
+    return (
+        "[warning] requested num_seeds exceeds the unique compatible seed space: "
+        f"requested={requested_seed_count:,} unique={unique_seed_count:,}. "
+        "Generation will cycle through semantic seeds and rely on stochastic "
+        "sampling for additional variants."
+    )
+
+
+def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
+    candidates = compatible_seed_candidates()
 
     rng = random.Random(rng_seed)
     rng.shuffle(candidates)
@@ -394,6 +499,8 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
             edge_behavior=item.edge_behavior,
             implementation_style=item.implementation_style,
             extra_constraint=item.extra_constraint,
+            description_style=item.description_style,
+            naming_style=item.naming_style,
         )
         for i, item in enumerate(chosen)
     ]
@@ -409,6 +516,8 @@ Required output: {seed.output_kind}
 Edge behavior: {seed.edge_behavior}
 Implementation style: {seed.implementation_style}
 Additional constraint: {seed.extra_constraint}
+Description style: {seed.description_style}
+Naming style: {seed.naming_style}
 
 Resolve minor ambiguity in the simplest sensible way. Return only <task> and <code>."""
 
@@ -545,7 +654,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--invalid-output", type=Path)
-    parser.add_argument("--num-seeds", type=int, default=10_000)
+    parser.add_argument("--num-seeds", type=int, default=50_000)
     parser.add_argument("--samples-per-seed", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)
@@ -568,6 +677,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def main() -> int:
     args = build_argument_parser().parse_args()
     invalid_path = args.invalid_output or invalid_output_path(args.output)
+    unique_seed_count = unique_compatible_seed_count()
+    warning = seed_space_warning(
+        requested_seed_count=args.num_seeds,
+        unique_seed_count=unique_seed_count,
+    )
+    if warning is not None:
+        print(warning, flush=True)
     seeds = generate_seeds(args.num_seeds, args.seed)
     completed = (
         completed_seed_attempts([args.output, invalid_path])

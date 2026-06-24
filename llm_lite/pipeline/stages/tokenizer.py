@@ -2,6 +2,7 @@ from pathlib import Path
 
 from llm_lite.config.models import ByteBpeTokenizerConfiguration, ExperimentFile
 from llm_lite.pipeline.hashing import hash_model
+from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
@@ -23,10 +24,19 @@ class TokenizerStage(BasePipelineStage):
         registry: ArtifactRegistry,
         artifact_directory: Path,
     ) -> StageOutput:
+        console_log("[tokenizer] selecting training split")
         split = tokenizer_training_split(registry=registry)
+        console_log(f"[tokenizer] training_split={'all' if split is None else split}")
         tokenizer_configuration = experiment_configuration.tokenizer
         match tokenizer_configuration:
             case ByteBpeTokenizerConfiguration():
+                console_log(
+                    "[tokenizer] byte_bpe start "
+                    f"vocabulary_size={tokenizer_configuration.vocabulary_size} "
+                    f"max_training_documents={tokenizer_configuration.max_training_documents} "
+                    f"max_training_bytes={tokenizer_configuration.max_training_bytes} "
+                    f"workers={tokenizer_configuration.training_workers}"
+                )
                 training_result = train_byte_bpe_tokenizer_from_text_shards(
                     artifact_directory=registry.artifact_directory(
                         StageName.PROCESSED_DATASET.value,

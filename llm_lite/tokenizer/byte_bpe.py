@@ -284,16 +284,28 @@ def train_byte_bpe_tokenizer_from_text_shards(
     minimum_vocabulary_size = len(token_to_id) + 256
     if vocabulary_size < minimum_vocabulary_size:
         raise ValueError("Byte BPE vocabulary size must include special tokens and 256 bytes.")
+    console_log(
+        "[tokenizer] byte_bpe discover_sample "
+        f"split={'all' if split is None else split} "
+        f"max_training_documents={max_training_documents} "
+        f"max_training_bytes={max_training_bytes}"
+    )
     selection = bounded_training_document_references(
         artifact_directory=artifact_directory,
         split=split,
         max_training_documents=max_training_documents,
         max_training_bytes=max_training_bytes,
     )
+    console_log(
+        "[tokenizer] byte_bpe sample_selected "
+        f"documents={len(selection.document_references)} "
+        f"bytes={selection.bytes}"
+    )
     effective_workers = _effective_worker_count(
         requested_workers=workers,
         document_count=len(selection.document_references),
     )
+    console_log(f"[tokenizer] byte_bpe workers={effective_workers}")
     if effective_workers == 1:
         texts = (
             _read_document_reference_text(document_reference=document_reference)
@@ -410,10 +422,16 @@ def bounded_training_document_references(
         raise ValueError("Byte BPE training sample must be bounded.")
     document_references: list[ByteBpeDocumentReference] = []
     sampled_bytes = 0
+    console_log(
+        "[tokenizer] byte_bpe scanning_shards "
+        f"directory={artifact_directory} "
+        f"split={'all' if split is None else split}"
+    )
     shard_references = text_shard_references(
         artifact_directory=artifact_directory,
         split=split,
     )
+    console_log(f"[tokenizer] byte_bpe shard_count={len(shard_references)}")
     with progress_bar(
         description="tokenizer/select_sample",
         total=max_training_documents,
@@ -529,6 +547,7 @@ def _train_parallel_merges(
 ) -> ByteBpeMergeTrainingState:
     worker_connections: list[Connection] = []
     processes: list[Process] = []
+    console_log(f"[tokenizer] byte_bpe launching_workers={len(worker_inputs)}")
     for worker_input in worker_inputs:
         parent_connection, child_connection = Pipe()
         process = Process(
@@ -540,6 +559,7 @@ def _train_parallel_merges(
         worker_connections.append(parent_connection)
         processes.append(process)
     try:
+        console_log("[tokenizer] byte_bpe waiting_for_worker_corpora")
         for connection in worker_connections:
             ready = connection.recv()
             console_log(

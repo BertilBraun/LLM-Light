@@ -307,9 +307,8 @@ def train_byte_bpe_tokenizer_from_text_shards(
     )
     console_log(f"[tokenizer] byte_bpe workers={effective_workers}")
     if effective_workers == 1:
-        texts = (
-            _read_document_reference_text(document_reference=document_reference)
-            for document_reference in selection.document_references
+        texts = _read_document_reference_texts(
+            document_references=selection.document_references,
         )
         return train_byte_bpe_tokenizer(
             texts=texts,
@@ -482,11 +481,49 @@ def bounded_training_document_references(
 
 
 def _read_document_reference_text(document_reference: ByteBpeDocumentReference) -> str:
-    with tarfile.open(document_reference.shard_reference.path, mode="r:gz") as shard_file:
-        extracted_file = shard_file.extractfile(document_reference.member_name)
-        if extracted_file is None:
-            raise ValueError("Byte BPE training document reference is not readable.")
-        return extracted_file.read().decode("utf-8")
+    return _read_document_reference_texts(document_references=(document_reference,))[0]
+
+
+def _read_document_reference_texts(
+    document_references: tuple[ByteBpeDocumentReference, ...],
+) -> tuple[str, ...]:
+    if not document_references:
+        return ()
+    references_by_shard: dict[Path, list[tuple[int, ByteBpeDocumentReference]]] = {}
+    for reference_index, document_reference in enumerate(document_references):
+        references_by_shard.setdefault(document_reference.shard_reference.path, []).append(
+            (reference_index, document_reference),
+        )
+    texts: list[str | None] = [None] * len(document_references)
+    for shard_path, indexed_references in references_by_shard.items():
+        member_names = {
+            document_reference.member_name
+            for _, document_reference in indexed_references
+        }
+        reference_indices_by_member = {
+            document_reference.member_name: reference_index
+            for reference_index, document_reference in indexed_references
+        }
+        found_member_names: set[str] = set()
+        with tarfile.open(shard_path, mode="r:gz") as shard_file:
+            for member in shard_file:
+                if not member.isfile() or member.name not in member_names:
+                    continue
+                extracted_file = shard_file.extractfile(member)
+                if extracted_file is None:
+                    raise ValueError("Byte BPE training document reference is not readable.")
+                texts[reference_indices_by_member[member.name]] = (
+                    extracted_file.read().decode("utf-8")
+                )
+                found_member_names.add(member.name)
+                if len(found_member_names) == len(member_names):
+                    break
+        missing_members = member_names - found_member_names
+        if missing_members:
+            raise ValueError(
+                f"Byte BPE training shard is missing {len(missing_members)} selected documents."
+            )
+    return tuple(text for text in texts if text is not None)
 
 
 def _train_serial_merges(
@@ -624,7 +661,19 @@ def _byte_bpe_worker_loop(
     connection: Connection,
     worker_input: ByteBpeWorkerInput,
 ) -> None:
+    console_log(
+        "[tokenizer] byte_bpe worker_loading "
+        f"worker={worker_input.worker_index} "
+        f"documents={len(worker_input.document_references)} "
+        f"shards={_document_reference_shard_count(worker_input.document_references)}"
+    )
     corpus = _load_worker_corpus(document_references=worker_input.document_references)
+    console_log(
+        "[tokenizer] byte_bpe worker_loaded "
+        f"worker={worker_input.worker_index} "
+        f"documents={len(corpus.documents)} "
+        f"bytes={corpus.bytes}"
+    )
     connection.send(
         ByteBpeWorkerReady(
             worker_index=worker_input.worker_index,
@@ -655,12 +704,22 @@ def _load_worker_corpus(
 ) -> ByteBpeTrainingCorpus:
     documents: list[list[ByteToken]] = []
     byte_count = 0
-    for document_reference in document_references:
-        text = _read_document_reference_text(document_reference=document_reference)
+    for text in _read_document_reference_texts(document_references=document_references):
         text_bytes = text.encode("utf-8")
         documents.append([(byte_value,) for byte_value in text_bytes])
         byte_count += len(text_bytes)
     return ByteBpeTrainingCorpus(documents=documents, bytes=byte_count)
+
+
+def _document_reference_shard_count(
+    document_references: tuple[ByteBpeDocumentReference, ...],
+) -> int:
+    return len(
+        {
+            document_reference.shard_reference.path
+            for document_reference in document_references
+        },
+    )
 
 
 def _bpe_worker_inputs(

@@ -85,7 +85,7 @@ training:
 evaluation:
   perplexity:
     split: validation
-    maximum_documents: null
+    maximum_documents: 500
   fixed_prompt_generation:
     prompts:
       - "Once upon a time"

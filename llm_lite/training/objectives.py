@@ -21,8 +21,9 @@ class TrainingObjectiveRunner(Protocol):
 
 
 class CausalLanguageModelingObjectiveRunner:
-    def __init__(self, auxiliary_loss_weight: float) -> None:
+    def __init__(self, auxiliary_loss_weight: float, pad_token_id: int | None = None) -> None:
         self.auxiliary_loss_weight = auxiliary_loss_weight
+        self.pad_token_id = pad_token_id
 
     def prepare_batch(self, batch: TrainingBatch, device: torch.device) -> TrainingBatch:
         match batch:
@@ -38,6 +39,7 @@ class CausalLanguageModelingObjectiveRunner:
                 language_modeling_loss = causal_language_modeling_loss(
                     logits=model_output.logits,
                     token_ids=batch,
+                    pad_token_id=self.pad_token_id,
                 )
                 auxiliary_loss = model_output.auxiliary_loss
                 if auxiliary_loss is None or self.auxiliary_loss_weight == 0.0:
@@ -101,12 +103,18 @@ class DirectPreferenceOptimizationObjectiveRunner:
                 ).mean()
 
 
-def causal_language_modeling_loss(logits: torch.Tensor, token_ids: torch.Tensor) -> torch.Tensor:
+def causal_language_modeling_loss(
+    logits: torch.Tensor,
+    token_ids: torch.Tensor,
+    pad_token_id: int | None = None,
+) -> torch.Tensor:
     input_logits = logits[:, :-1, :].contiguous()
     target_token_ids = token_ids[:, 1:].contiguous()
+    ignore_index = -100 if pad_token_id is None else pad_token_id
     return nn.functional.cross_entropy(
         input_logits.view(-1, input_logits.shape[-1]),
         target_token_ids.view(-1),
+        ignore_index=ignore_index,
     )
 
 

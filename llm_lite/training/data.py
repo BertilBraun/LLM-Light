@@ -31,6 +31,7 @@ class InfiniteDataIterator:
     dataset: Dataset[TrainingBatch] | IterableDataset[TrainingBatch]
     sampler: EpochAwareSampler | None
     epoch: int
+    batches_seen: int = 0
 
     def __post_init__(self) -> None:
         self._set_epoch()
@@ -38,12 +39,28 @@ class InfiniteDataIterator:
 
     def next_batch(self) -> TrainingBatch:
         try:
-            return next(self._iterator)
+            batch = next(self._iterator)
         except StopIteration:
             self.epoch += 1
             self._set_epoch()
             self._iterator = iter(self.data_loader)
-            return next(self._iterator)
+            batch = next(self._iterator)
+        self.batches_seen += 1
+        return batch
+
+    @property
+    def batches_per_epoch(self) -> int | None:
+        try:
+            return len(self.data_loader)
+        except TypeError:
+            return None
+
+    @property
+    def epoch_progress(self) -> float | None:
+        batches_per_epoch = self.batches_per_epoch
+        if batches_per_epoch is None or batches_per_epoch == 0:
+            return None
+        return self.batches_seen / batches_per_epoch
 
     def _set_epoch(self) -> None:
         match self.dataset:

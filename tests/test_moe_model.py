@@ -143,6 +143,22 @@ def test_causal_lm_objective_includes_auxiliary_loss_when_configured() -> None:
     assert torch.allclose(loss, expected_loss)
 
 
+def test_causal_lm_loss_ignores_pad_targets() -> None:
+    token_ids = torch.tensor([[1, 2, 0]], dtype=torch.long)
+    logits = torch.zeros((1, 3, 4), dtype=torch.float32)
+    logits[0, 0, 2] = 4.0
+    logits[0, 1, 0] = -100.0
+
+    masked_loss = causal_language_modeling_loss(
+        logits=logits,
+        token_ids=token_ids,
+        pad_token_id=0,
+    )
+    unmasked_loss = causal_language_modeling_loss(logits=logits, token_ids=token_ids)
+
+    assert masked_loss < unmasked_loss
+
+
 def test_moe_checkpoint_save_and_load_roundtrip(tmp_path: Path) -> None:
     torch.manual_seed(11)
     model = MoeGpt(model_configuration=_moe_configuration(), vocabulary_size=17)

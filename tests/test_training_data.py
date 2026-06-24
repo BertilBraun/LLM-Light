@@ -24,3 +24,6 @@ def test_infinite_data_iterator_wraps_finite_dataset() -> None:
     assert sorted(batches[:2]) == [1, 2]
     assert batches[2] in {1, 2}
     assert iterator.epoch == 1
+    assert iterator.batches_per_epoch == 2
+    assert iterator.batches_seen == 3
+    assert iterator.epoch_progress == 1.5

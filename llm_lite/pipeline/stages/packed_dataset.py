@@ -40,6 +40,7 @@ class PackedDatasetStage(BasePipelineStage):
             pad_token_id=tokenizer.pad_token_id,
             add_bos=experiment_configuration.packing.add_bos,
             add_eos=experiment_configuration.packing.add_eos,
+            pack_documents=experiment_configuration.packing.pack_documents,
             maximum_shard_tokens=experiment_configuration.packing.maximum_shard_tokens,
             workers=experiment_configuration.packing.workers,
         )
@@ -53,6 +54,10 @@ class PackedDatasetStage(BasePipelineStage):
                 "shards": len(index.shards),
                 "workers": packing_result.worker_count,
                 "documents_read": packing_result.input_documents,
+                "non_pad_tokens": packing_result.non_pad_tokens,
+                "pad_tokens": packing_result.pad_tokens,
+                "pad_fraction": packing_result.pad_fraction,
+                "average_sequence_fill": packing_result.average_sequence_fill,
                 "training_split": "all" if split is None else split,
             },
         )

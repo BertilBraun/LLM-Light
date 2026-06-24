@@ -89,6 +89,7 @@ def evaluate_perplexity(
                 loss = causal_language_modeling_loss(
                     logits=model_output.logits,
                     token_ids=token_ids,
+                    pad_token_id=tokenizer.pad_token_id,
                 )
                 total_loss += float(loss.detach().cpu().item())
                 sequence_count += 1

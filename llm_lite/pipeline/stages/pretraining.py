@@ -94,6 +94,7 @@ class PretrainingStage(BasePipelineStage):
                         experiment_configuration.training.causal_language_modeling
                         .auxiliary_loss_weight
                     ),
+                    pad_token_id=tokenizer.pad_token_id,
                 ),
             )
         else:
@@ -109,6 +110,7 @@ class PretrainingStage(BasePipelineStage):
                         experiment_configuration.training.causal_language_modeling
                         .auxiliary_loss_weight
                     ),
+                    pad_token_id=tokenizer.pad_token_id,
                 ),
             )
         files = {

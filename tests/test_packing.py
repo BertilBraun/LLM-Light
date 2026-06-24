@@ -8,7 +8,7 @@ from llm_lite.data.datasets import (
     load_packed_sequence_dataset,
     write_packed_sequence_stream,
 )
-from llm_lite.data.packing import pack_token_sequences
+from llm_lite.data.packing import pack_document_token_sequences, pack_token_sequences
 
 
 def test_pack_token_sequences_pads_to_context_plus_target() -> None:
@@ -21,6 +21,40 @@ def test_pack_token_sequences_pads_to_context_plus_target() -> None:
     )
 
     assert sequences[0].token_ids == (1, 2, 3, 0, 0)
+
+
+def test_pack_token_sequences_chunks_long_documents_with_one_token_overlap() -> None:
+    sequences = list(
+        pack_token_sequences(
+            tokenized_document_stream=[[1, 2, 3, 4, 5, 6]],
+            context_length=3,
+            pad_token_id=0,
+        ),
+    )
+
+    assert [sequence.token_ids for sequence in sequences] == [
+        (1, 2, 3, 4),
+        (4, 5, 6, 0),
+    ]
+
+
+def test_pack_document_token_sequences_concatenates_short_documents() -> None:
+    sequences = list(
+        pack_document_token_sequences(
+            tokenized_document_stream=[
+                [1, 2, 3],
+                [4, 5, 6],
+                [7, 8],
+            ],
+            context_length=4,
+            pad_token_id=0,
+        ),
+    )
+
+    assert [sequence.token_ids for sequence in sequences] == [
+        (1, 2, 3, 4, 5),
+        (5, 6, 7, 8, 0),
+    ]
 
 
 def test_write_and_load_file_backed_packed_sequences(tmp_path: Path) -> None:

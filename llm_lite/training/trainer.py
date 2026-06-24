@@ -19,7 +19,11 @@ from llm_lite.training.checkpoint import (
     save_rank_zero_full_checkpoint_bridge,
     save_sharded_rank_checkpoint,
 )
-from llm_lite.training.data import DistributedDataAssignment, create_training_data_iterator
+from llm_lite.training.data import (
+    DistributedDataAssignment,
+    InfiniteDataIterator,
+    create_training_data_iterator,
+)
 from llm_lite.training.distributed import (
     DistributedRuntime,
     initialize_distributed_runtime,
@@ -80,6 +84,12 @@ def train_model(
         batch_size_sequences=training_configuration.batch_size_sequences,
         dataloader_configuration=training_configuration.dataloader,
         seed=seed,
+    )
+    _log_epoch_plan(
+        prefix="[train] epoch_plan",
+        data_iterator=data_iterator,
+        maximum_steps=training_configuration.maximum_steps,
+        world_size=1,
     )
     metrics_logger = TrainingMetricLogger(artifact_directory=artifact_directory)
     final_loss = float("inf")
@@ -146,6 +156,7 @@ def train_model(
             )
     finally:
         metrics_logger.close()
+    _log_epoch_summary(prefix="[train] epoch_summary", data_iterator=data_iterator)
     return TrainingResult(
         final_step=training_configuration.maximum_steps,
         final_loss=final_loss,
@@ -237,6 +248,13 @@ def _train_model_distributed_initialized(
             world_size=distributed_runtime.world_size,
         ),
     )
+    if distributed_runtime.is_coordinator:
+        _log_epoch_plan(
+            prefix="[train] epoch_plan",
+            data_iterator=data_iterator,
+            maximum_steps=training_configuration.maximum_steps,
+            world_size=distributed_runtime.world_size,
+        )
     metrics_logger = (
         TrainingMetricLogger(artifact_directory=artifact_directory)
         if distributed_runtime.is_coordinator
@@ -340,6 +358,8 @@ def _train_model_distributed_initialized(
     finally:
         if metrics_logger is not None:
             metrics_logger.close()
+    if distributed_runtime.is_coordinator:
+        _log_epoch_summary(prefix="[train] epoch_summary", data_iterator=data_iterator)
     return TrainingResult(
         final_step=training_configuration.maximum_steps,
         final_loss=final_loss,
@@ -419,3 +439,32 @@ def _batch_token_count(batch: TrainingBatch) -> int:
             return int(batch.numel())
         case _:
             return int(batch.chosen_token_ids.numel() + batch.rejected_token_ids.numel())
+
+
+def _log_epoch_plan(
+    prefix: str,
+    data_iterator: InfiniteDataIterator,
+    maximum_steps: int,
+    world_size: int,
+) -> None:
+    batches_per_epoch = data_iterator.batches_per_epoch
+    if batches_per_epoch is None:
+        console_log(f"{prefix} batches_per_epoch=unknown requested_steps={maximum_steps}")
+        return
+    estimated_epochs = maximum_steps / max(batches_per_epoch, 1)
+    console_log(
+        f"{prefix} batches_per_epoch_per_rank={batches_per_epoch} "
+        f"requested_steps={maximum_steps} estimated_epochs={estimated_epochs:.4f} "
+        f"world_size={world_size}"
+    )
+
+
+def _log_epoch_summary(prefix: str, data_iterator: InfiniteDataIterator) -> None:
+    epoch_progress = data_iterator.epoch_progress
+    if epoch_progress is None:
+        console_log(f"{prefix} completed_epochs=unknown batches_seen={data_iterator.batches_seen}")
+        return
+    console_log(
+        f"{prefix} completed_epochs={epoch_progress:.4f} "
+        f"batches_seen={data_iterator.batches_seen}"
+    )

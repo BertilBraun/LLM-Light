@@ -39,11 +39,50 @@ def pack_token_sequences(
             start_index += context_length
 
 
+def pack_document_token_sequences(
+    tokenized_document_stream: Iterable[list[int]],
+    context_length: int,
+    pad_token_id: int,
+) -> Iterator[PackedSequence]:
+    row_length = context_length + 1
+    buffer: list[int] = []
+    for token_ids in tokenized_document_stream:
+        if len(token_ids) < 2:
+            continue
+        buffer.extend(token_ids)
+        while len(buffer) >= row_length:
+            row = buffer[:row_length]
+            del buffer[:context_length]
+            yield PackedSequence(token_ids=tuple(row))
+    if len(buffer) >= 2:
+        yield PackedSequence(
+            token_ids=tuple(buffer + [pad_token_id] * (row_length - len(buffer))),
+        )
+
+
 @dataclass(frozen=True)
 class ParallelPackingResult:
     index: PackedDatasetIndex
     worker_count: int
     input_documents: int
+    non_pad_tokens: int
+    pad_tokens: int
+
+    @property
+    def total_tokens(self) -> int:
+        return self.non_pad_tokens + self.pad_tokens
+
+    @property
+    def pad_fraction(self) -> float:
+        if self.total_tokens == 0:
+            return 0.0
+        return self.pad_tokens / self.total_tokens
+
+    @property
+    def average_sequence_fill(self) -> float:
+        if self.total_tokens == 0:
+            return 0.0
+        return self.non_pad_tokens / self.total_tokens
 
 
 @dataclass(frozen=True)
@@ -59,6 +98,8 @@ class PackingWorkerResult:
     worker_index: int
     sequence_count: int
     input_documents: int
+    non_pad_tokens: int
+    pad_tokens: int
     shards: tuple[PackedShardIndex, ...]
 
 
@@ -72,6 +113,7 @@ def pack_text_shards(
     pad_token_id: int,
     add_bos: bool,
     add_eos: bool,
+    pack_documents: bool,
     maximum_shard_tokens: int,
     workers: int,
 ) -> ParallelPackingResult:
@@ -106,6 +148,7 @@ def pack_text_shards(
             pad_token_id,
             add_bos,
             add_eos,
+            pack_documents,
             maximum_shard_tokens,
         )
         for worker_input in worker_inputs
@@ -134,6 +177,8 @@ def pack_text_shards(
         index=index,
         worker_count=effective_workers,
         input_documents=sum(worker_result.input_documents for worker_result in worker_results),
+        non_pad_tokens=sum(worker_result.non_pad_tokens for worker_result in worker_results),
+        pad_tokens=sum(worker_result.pad_tokens for worker_result in worker_results),
     )
 
 
@@ -146,6 +191,7 @@ def _packing_worker(
     pad_token_id: int,
     add_bos: bool,
     add_eos: bool,
+    pack_documents: bool,
     maximum_shard_tokens: int,
 ) -> PackingWorkerResult:
     tokenizer = load_tokenizer(
@@ -166,12 +212,15 @@ def _packing_worker(
         pad_token_id=pad_token_id,
         add_bos=add_bos,
         add_eos=add_eos,
+        pack_documents=pack_documents,
     )
     index = writer.close()
     return PackingWorkerResult(
         worker_index=worker_input.worker_index,
         sequence_count=index.total_sequences,
-        input_documents=input_documents,
+        input_documents=input_documents.input_documents,
+        non_pad_tokens=input_documents.non_pad_tokens,
+        pad_tokens=input_documents.pad_tokens,
         shards=index.shards,
     )
 
@@ -183,6 +232,20 @@ class PackingProgress:
     document_multiplier: int
 
 
+@dataclass(frozen=True)
+class PackingCounters:
+    input_documents: int = 0
+    non_pad_tokens: int = 0
+    pad_tokens: int = 0
+
+    def add(self, other: "PackingCounters") -> "PackingCounters":
+        return PackingCounters(
+            input_documents=self.input_documents + other.input_documents,
+            non_pad_tokens=self.non_pad_tokens + other.non_pad_tokens,
+            pad_tokens=self.pad_tokens + other.pad_tokens,
+        )
+
+
 def _write_packed_worker_shards(
     worker_input: PackingWorkerInput,
     writer: PackedShardWriter,
@@ -191,7 +254,8 @@ def _write_packed_worker_shards(
     pad_token_id: int,
     add_bos: bool,
     add_eos: bool,
-) -> int:
+    pack_documents: bool,
+) -> PackingCounters:
     if worker_input.progress_total_documents is None:
         return _write_packed_worker_documents(
             worker_input=worker_input,
@@ -201,6 +265,7 @@ def _write_packed_worker_shards(
             pad_token_id=pad_token_id,
             add_bos=add_bos,
             add_eos=add_eos,
+            pack_documents=pack_documents,
             progress=None,
         )
     with progress_bar(
@@ -216,6 +281,7 @@ def _write_packed_worker_shards(
             pad_token_id=pad_token_id,
             add_bos=add_bos,
             add_eos=add_eos,
+            pack_documents=pack_documents,
             progress=PackingProgress(
                 progress_bar_instance=progress_bar_instance,
                 total_documents=worker_input.progress_total_documents,
@@ -232,9 +298,23 @@ def _write_packed_worker_documents(
     pad_token_id: int,
     add_bos: bool,
     add_eos: bool,
+    pack_documents: bool,
     progress: PackingProgress | None,
-) -> int:
+) -> PackingCounters:
+    if pack_documents:
+        return _write_cross_document_packed_worker_documents(
+            worker_input=worker_input,
+            writer=writer,
+            tokenizer=tokenizer,
+            context_length=context_length,
+            pad_token_id=pad_token_id,
+            add_bos=add_bos,
+            add_eos=add_eos,
+            progress=progress,
+        )
     input_documents = 0
+    non_pad_tokens = 0
+    pad_tokens = 0
     for shard_reference in worker_input.shard_references:
         for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
             input_documents += 1
@@ -245,9 +325,62 @@ def _write_packed_worker_documents(
                 pad_token_id=pad_token_id,
             ):
                 writer.append(sequence=sequence)
+                pad_count = sequence.token_ids.count(pad_token_id)
+                non_pad_tokens += len(sequence.token_ids) - pad_count
+                pad_tokens += pad_count
             if progress is not None:
                 _update_scaled_progress(progress=progress)
-    return input_documents
+    return PackingCounters(
+        input_documents=input_documents,
+        non_pad_tokens=non_pad_tokens,
+        pad_tokens=pad_tokens,
+    )
+
+
+def _write_cross_document_packed_worker_documents(
+    worker_input: PackingWorkerInput,
+    writer: PackedShardWriter,
+    tokenizer: TextTokenizer,
+    context_length: int,
+    pad_token_id: int,
+    add_bos: bool,
+    add_eos: bool,
+    progress: PackingProgress | None,
+) -> PackingCounters:
+    row_length = context_length + 1
+    input_documents = 0
+    non_pad_tokens = 0
+    pad_tokens = 0
+
+    def tokenized_documents() -> Iterator[list[int]]:
+        nonlocal input_documents
+        for shard_reference in worker_input.shard_references:
+            for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
+                input_documents += 1
+                token_ids = tokenizer.encode(
+                    text=document.text,
+                    add_bos=add_bos,
+                    add_eos=add_eos,
+                )
+                if progress is not None:
+                    _update_scaled_progress(progress=progress)
+                yield token_ids
+
+    for sequence in pack_document_token_sequences(
+        tokenized_document_stream=tokenized_documents(),
+        context_length=context_length,
+        pad_token_id=pad_token_id,
+    ):
+        writer.append(sequence=sequence)
+        pad_count = sequence.token_ids.count(pad_token_id)
+        non_pad_tokens += row_length - pad_count
+        pad_tokens += pad_count
+
+    return PackingCounters(
+        input_documents=input_documents,
+        non_pad_tokens=non_pad_tokens,
+        pad_tokens=pad_tokens,
+    )
 
 
 def _packing_worker_from_arguments(
@@ -258,6 +391,7 @@ def _packing_worker_from_arguments(
         TokenizerConfiguration,
         int,
         int,
+        bool,
         bool,
         bool,
         int,

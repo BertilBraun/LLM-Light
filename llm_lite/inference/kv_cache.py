@@ -1,3 +1,4 @@
+import os
 from time import perf_counter
 
 import torch
@@ -111,7 +112,9 @@ def _generate_single_with_cache(
         dtype=torch.long,
         device=device,
     )
-    with torch.no_grad():
+    debug_generation = _debug_generation_enabled()
+    _debug_log(debug_generation, "[generation-debug] kv_cache_single_prefill_forward_start")
+    with torch.inference_mode():
         model_output = model.forward_with_cache(
             token_ids=input_tensor,
             inference_cache=model.empty_inference_cache(
@@ -122,7 +125,7 @@ def _generate_single_with_cache(
     prefill_seconds = perf_counter() - prefill_start_time
     console_log(f"[generation] kv_cache_single_prefill_done seconds={prefill_seconds:.2f}")
     decode_seconds = 0.0
-    with torch.no_grad():
+    with torch.inference_mode():
         for generation_step in range(maximum_new_tokens):
             if generation_step == 0 or (generation_step + 1) % 10 == 0:
                 console_log(
@@ -130,11 +133,22 @@ def _generate_single_with_cache(
                     f"step={generation_step + 1}/{maximum_new_tokens}"
                 )
             step_start_time = perf_counter()
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_single_select_start "
+                f"step={generation_step + 1}",
+            )
             next_token_id = select_next_token_id(
                 logits=model_output.logits[0, -1, :],
                 decoding_configuration=decoding_configuration,
             )
-            decode_seconds += perf_counter() - step_start_time
+            select_seconds = perf_counter() - step_start_time
+            decode_seconds += select_seconds
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_single_select_done "
+                f"step={generation_step + 1} seconds={select_seconds:.4f}",
+            )
             states[0] = append_next_token(
                 state=states[0],
                 next_token_id=next_token_id,
@@ -145,11 +159,22 @@ def _generate_single_with_cache(
                 break
             input_tensor = torch.tensor([[next_token_id]], dtype=torch.long, device=device)
             step_start_time = perf_counter()
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_single_forward_start "
+                f"step={generation_step + 1}",
+            )
             model_output = model.forward_with_cache(
                 token_ids=input_tensor,
                 inference_cache=model_output.inference_cache,
             )
-            decode_seconds += perf_counter() - step_start_time
+            forward_seconds = perf_counter() - step_start_time
+            decode_seconds += forward_seconds
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_single_forward_done "
+                f"step={generation_step + 1} seconds={forward_seconds:.4f}",
+            )
     return finalize_generation_results(
         states=tuple(states),
         tokenizer=tokenizer,
@@ -185,7 +210,9 @@ def _generate_equal_length_batch_with_cache(
         device=device,
     )
     prefill_start_time = perf_counter()
-    with torch.no_grad():
+    debug_generation = _debug_generation_enabled()
+    _debug_log(debug_generation, "[generation-debug] kv_cache_batch_prefill_forward_start")
+    with torch.inference_mode():
         model_output = model.forward_with_cache(
             token_ids=input_tensor,
             inference_cache=model.empty_inference_cache(
@@ -196,7 +223,7 @@ def _generate_equal_length_batch_with_cache(
     prefill_seconds = perf_counter() - prefill_start_time
     console_log(f"[generation] kv_cache_batch_prefill_done seconds={prefill_seconds:.2f}")
     decode_seconds = 0.0
-    with torch.no_grad():
+    with torch.inference_mode():
         for generation_step in range(maximum_new_tokens):
             if generation_step == 0 or (generation_step + 1) % 10 == 0:
                 active_count = sum(1 for state in states if not state.stopped)
@@ -213,11 +240,22 @@ def _generate_equal_length_batch_with_cache(
             if len(active_indexes) == 0:
                 break
             step_start_time = perf_counter()
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_batch_select_start "
+                f"step={generation_step + 1}",
+            )
             next_token_ids = select_next_token_ids(
                 logits=model_output.logits[:, -1, :],
                 decoding_configuration=decoding_configuration,
             )
-            decode_seconds += perf_counter() - step_start_time
+            select_seconds = perf_counter() - step_start_time
+            decode_seconds += select_seconds
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_batch_select_done "
+                f"step={generation_step + 1} seconds={select_seconds:.4f}",
+            )
             next_input_token_ids: list[int] = []
             for sample_index, state in enumerate(states):
                 next_token_id = int(next_token_ids[sample_index].item())
@@ -241,11 +279,22 @@ def _generate_equal_length_batch_with_cache(
                 device=device,
             )
             step_start_time = perf_counter()
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_batch_forward_start "
+                f"step={generation_step + 1}",
+            )
             model_output = model.forward_with_cache(
                 token_ids=input_tensor,
                 inference_cache=model_output.inference_cache,
             )
-            decode_seconds += perf_counter() - step_start_time
+            forward_seconds = perf_counter() - step_start_time
+            decode_seconds += forward_seconds
+            _debug_log(
+                debug_generation,
+                "[generation-debug] kv_cache_batch_forward_done "
+                f"step={generation_step + 1} seconds={forward_seconds:.4f}",
+            )
     return finalize_generation_results(
         states=tuple(states),
         tokenizer=tokenizer,
@@ -259,3 +308,12 @@ def _generate_equal_length_batch_with_cache(
 
 def _model_device(model: CachedAutoregressiveModel) -> torch.device:
     return next(model.parameters()).device
+
+
+def _debug_generation_enabled() -> bool:
+    return os.environ.get("LLM_LITE_GENERATION_DEBUG", "").lower() in {"1", "true", "yes"}
+
+
+def _debug_log(enabled: bool, message: str) -> None:
+    if enabled:
+        console_log(message)

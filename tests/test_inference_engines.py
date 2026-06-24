@@ -31,7 +31,11 @@ from llm_lite.inference.decoding import select_next_token_id
 from llm_lite.inference.engine import generate_batch, generate_text
 from llm_lite.inference.kv_cache import generate_greedy as generate_greedy_with_cache
 from llm_lite.inference.naive import generate_greedy as generate_greedy_naively
-from llm_lite.inference.runtime import prepare_model_for_inference
+from llm_lite.inference.runtime import (
+    MutableGenerationState,
+    append_next_token,
+    prepare_model_for_inference,
+)
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.model.moe import MoeGpt
 from llm_lite.tokenizer.character import train_character_tokenizer
@@ -488,6 +492,28 @@ def test_stop_sequences_end_batched_generation() -> None:
     assert batch_results[0].stop_reason is GenerationStopReason.STOP_SEQUENCE
 
 
+def test_append_next_token_skips_decode_when_no_stop_sequences() -> None:
+    tokenizer = CountingTokenizer()
+    state = MutableGenerationState(
+        prompt="a",
+        prompt_token_ids=(1,),
+        generated_token_ids=[],
+        stopped=False,
+        stop_reason=None,
+    )
+
+    next_state = append_next_token(
+        state=state,
+        next_token_id=2,
+        tokenizer=tokenizer,
+        stop_sequences=(),
+    )
+
+    assert next_state.generated_token_ids == [2]
+    assert not next_state.stopped
+    assert tokenizer.decode_calls == 0
+
+
 def test_inference_metrics_are_recorded() -> None:
     torch.manual_seed(41)
     tokenizer = train_character_tokenizer(
@@ -717,3 +743,22 @@ class StepTokenModel(nn.Module):
 @dataclass(frozen=True)
 class FakeModelOutput:
     logits: torch.Tensor
+
+
+class CountingTokenizer:
+    vocabulary_size = 3
+    pad_token_id = None
+    eos_token_id = 0
+
+    def __init__(self) -> None:
+        self.decode_calls = 0
+
+    def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]:
+        return [1]
+
+    def decode(self, token_ids: list[int]) -> str:
+        self.decode_calls += 1
+        return "x" * len(token_ids)
+
+    def save(self, directory) -> None:  # noqa: ANN001
+        return None

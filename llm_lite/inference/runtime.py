@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+import torch
 from torch import nn
 
 from llm_lite.config.models import (
@@ -68,6 +69,7 @@ def prepare_model_for_inference(
 ) -> nn.Module:
     _apply_precision(model=model, precision=inference_configuration.precision)
     _apply_quantization(model=model, quantization=inference_configuration.quantization)
+    _move_to_inference_device(model=model)
     model.eval()
     return model
 
@@ -115,6 +117,14 @@ def append_next_token(
             stop_reason=GenerationStopReason.EOS_TOKEN,
         )
     generated_token_ids = [*state.generated_token_ids, next_token_id]
+    if len(stop_sequences) == 0:
+        return MutableGenerationState(
+            prompt=state.prompt,
+            prompt_token_ids=state.prompt_token_ids,
+            generated_token_ids=generated_token_ids,
+            stopped=False,
+            stop_reason=None,
+        )
     generated_text = tokenizer.decode(generated_token_ids)
     stop_index = find_stop_sequence_index(text=generated_text, stop_sequences=stop_sequences)
     if stop_index is None:
@@ -195,6 +205,16 @@ def _apply_quantization(model: nn.Module, quantization: QuantizationType) -> Non
             | QuantizationType.INT4_WEIGHT_ONLY
         ):
             raise ValueError(f"Quantization type {quantization.value!r} is not implemented.")
+
+
+def _move_to_inference_device(model: nn.Module) -> None:
+    first_parameter = next(model.parameters(), None)
+    if first_parameter is None:
+        return
+    current_device = first_parameter.device
+    if current_device.type != "cpu" or not torch.cuda.is_available():
+        return
+    model.to(torch.device("cuda"))
 
 
 def _finalize_generation_result(

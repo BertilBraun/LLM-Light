@@ -13,8 +13,10 @@ from llm_lite.data.datasets import (
 from llm_lite.data.text_shards import (
     TextShardReference,
     iter_text_shard_reference_documents,
+    load_text_shard_corpus_manifest,
     text_shard_references,
 )
+from llm_lite.pipeline.progress import progress_bar
 from llm_lite.tokenizer.loading import load_tokenizer
 
 
@@ -73,6 +75,14 @@ def pack_text_shards(
         artifact_directory=input_artifact_directory,
         split=split,
     )
+    input_manifest = load_text_shard_corpus_manifest(
+        artifact_directory=input_artifact_directory,
+    )
+    input_documents = sum(
+        split_manifest.documents
+        for split_manifest in input_manifest.splits
+        if split is None or split_manifest.split == split
+    )
     effective_workers = _effective_worker_count(
         requested_workers=workers,
         shard_count=len(shard_references),
@@ -96,11 +106,25 @@ def pack_text_shards(
         for worker_input in worker_inputs
     ]
     if effective_workers == 1:
-        worker_results = [_packing_worker(*worker_arguments[0])]
+        with progress_bar(description="pack", total=input_documents, unit="doc") as bar:
+            worker_result = _packing_worker(*worker_arguments[0])
+            bar.update(worker_result.input_documents)
+            worker_results = [worker_result]
     else:
         multiprocessing_context = get_context("spawn")
         with multiprocessing_context.Pool(processes=effective_workers) as pool:
-            worker_results = pool.starmap(_packing_worker, worker_arguments)
+            worker_results = []
+            with progress_bar(
+                description=f"pack/{effective_workers} workers",
+                total=input_documents,
+                unit="doc",
+            ) as bar:
+                for worker_result in pool.imap_unordered(
+                    _packing_worker_from_arguments,
+                    worker_arguments,
+                ):
+                    worker_results.append(worker_result)
+                    bar.update(worker_result.input_documents)
     index = _merge_packing_worker_results(
         worker_results=tuple(worker_results),
         output_artifact_directory=output_artifact_directory,
@@ -154,6 +178,22 @@ def _packing_worker(
         input_documents=input_documents,
         shards=index.shards,
     )
+
+
+def _packing_worker_from_arguments(
+    arguments: tuple[
+        PackingWorkerInput,
+        Path,
+        Path,
+        TokenizerConfiguration,
+        int,
+        int,
+        bool,
+        bool,
+        int,
+    ],
+) -> PackingWorkerResult:
+    return _packing_worker(*arguments)
 
 
 def _merge_packing_worker_results(

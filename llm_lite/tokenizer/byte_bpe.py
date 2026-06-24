@@ -10,6 +10,7 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 
 from llm_lite.data.text_shards import TextShardReference, text_shard_references
+from llm_lite.pipeline.progress import progress_bar
 
 ByteToken = tuple[int, ...]
 BytePair = tuple[ByteToken, ByteToken]
@@ -411,42 +412,51 @@ def bounded_training_document_references(
         raise ValueError("Byte BPE training sample must be bounded.")
     document_references: list[ByteBpeDocumentReference] = []
     sampled_bytes = 0
-    for shard_reference in text_shard_references(
+    shard_references = text_shard_references(
         artifact_directory=artifact_directory,
         split=split,
-    ):
-        with tarfile.open(shard_reference.path, mode="r:gz") as shard_file:
-            for member in shard_file:
-                if not member.isfile():
-                    continue
-                if (
-                    max_training_documents is not None
-                    and len(document_references) >= max_training_documents
-                ):
-                    break
-                if (
-                    max_training_bytes is not None
-                    and sampled_bytes + member.size > max_training_bytes
-                ):
-                    if document_references:
-                        return ByteBpeTrainingSelection(
-                            document_references=tuple(document_references),
-                            bytes=sampled_bytes,
+    )
+    with progress_bar(
+        description="tokenizer/select_sample",
+        total=max_training_documents,
+        unit="doc",
+    ) as bar:
+        for shard_reference in shard_references:
+            with tarfile.open(shard_reference.path, mode="r:gz") as shard_file:
+                for member in shard_file:
+                    if not member.isfile():
+                        continue
+                    if (
+                        max_training_documents is not None
+                        and len(document_references) >= max_training_documents
+                    ):
+                        break
+                    if (
+                        max_training_bytes is not None
+                        and sampled_bytes + member.size > max_training_bytes
+                    ):
+                        if document_references:
+                            return ByteBpeTrainingSelection(
+                                document_references=tuple(document_references),
+                                bytes=sampled_bytes,
+                            )
+                        raise ValueError(
+                            "First Byte BPE training document exceeds max_training_bytes."
                         )
-                    raise ValueError("First Byte BPE training document exceeds max_training_bytes.")
-                document_references.append(
-                    ByteBpeDocumentReference(
-                        shard_reference=shard_reference,
-                        member_name=member.name,
-                        byte_count=member.size,
-                    ),
-                )
-                sampled_bytes += member.size
-        if (
-            max_training_documents is not None
-            and len(document_references) >= max_training_documents
-        ):
-            break
+                    document_references.append(
+                        ByteBpeDocumentReference(
+                            shard_reference=shard_reference,
+                            member_name=member.name,
+                            byte_count=member.size,
+                        ),
+                    )
+                    sampled_bytes += member.size
+                    bar.update(1)
+            if (
+                max_training_documents is not None
+                and len(document_references) >= max_training_documents
+            ):
+                break
     if not document_references:
         raise ValueError("Byte BPE training sample is empty.")
     return ByteBpeTrainingSelection(
@@ -472,32 +482,39 @@ def _train_serial_merges(
     byte_token_to_id = _initial_byte_token_to_id(starting_index=len(token_to_id))
     pair_count_seconds = 0.0
     merge_application_seconds = 0.0
-    while len(token_to_id) + len(byte_token_to_id) < vocabulary_size:
-        pair_count_start = time.perf_counter()
-        pair_counts = _pair_counts(corpus=documents)
-        pair_count_seconds += time.perf_counter() - pair_count_start
-        if not pair_counts:
-            break
-        best_pair = _best_pair(pair_counts=pair_counts)
-        merged_token = best_pair[0] + best_pair[1]
-        if merged_token in byte_token_to_id:
-            break
-        byte_token_to_id[merged_token] = len(token_to_id) + len(byte_token_to_id)
-        merge_rules.append(best_pair)
-        merge_start = time.perf_counter()
-        for document_index, document in enumerate(documents):
-            documents[document_index] = _merge_pair(
-                byte_tokens=document,
-                merge_rule=best_pair,
-            )
-        merge_application_seconds += time.perf_counter() - merge_start
-        if len(merge_rules) % 100 == 0:
-            print(
-                "[tokenizer] byte_bpe "
-                f"merges={len(merge_rules)} "
-                f"vocabulary_size={len(token_to_id) + len(byte_token_to_id)}",
-                flush=True,
-            )
+    target_merges = vocabulary_size - len(token_to_id) - len(byte_token_to_id)
+    with progress_bar(
+        description="tokenizer/byte_bpe_merges",
+        total=target_merges,
+        unit="merge",
+    ) as bar:
+        while len(token_to_id) + len(byte_token_to_id) < vocabulary_size:
+            pair_count_start = time.perf_counter()
+            pair_counts = _pair_counts(corpus=documents)
+            pair_count_seconds += time.perf_counter() - pair_count_start
+            if not pair_counts:
+                break
+            best_pair = _best_pair(pair_counts=pair_counts)
+            merged_token = best_pair[0] + best_pair[1]
+            if merged_token in byte_token_to_id:
+                break
+            byte_token_to_id[merged_token] = len(token_to_id) + len(byte_token_to_id)
+            merge_rules.append(best_pair)
+            merge_start = time.perf_counter()
+            for document_index, document in enumerate(documents):
+                documents[document_index] = _merge_pair(
+                    byte_tokens=document,
+                    merge_rule=best_pair,
+                )
+            merge_application_seconds += time.perf_counter() - merge_start
+            bar.update(1)
+            if len(merge_rules) % 100 == 0:
+                print(
+                    "[tokenizer] byte_bpe "
+                    f"merges={len(merge_rules)} "
+                    f"vocabulary_size={len(token_to_id) + len(byte_token_to_id)}",
+                    flush=True,
+                )
     return ByteBpeMergeTrainingState(
         byte_token_to_id=byte_token_to_id,
         merge_rules=tuple(merge_rules),
@@ -527,33 +544,47 @@ def _train_parallel_merges(
         processes.append(process)
     try:
         for connection in worker_connections:
-            connection.recv()
+            ready = connection.recv()
+            print(
+                "[tokenizer] byte_bpe worker_ready "
+                f"worker={ready.worker_index} "
+                f"documents={ready.document_count} "
+                f"bytes={ready.byte_count}",
+                flush=True,
+            )
         byte_token_to_id = _initial_byte_token_to_id(starting_index=len(token_to_id))
         merge_rules: list[BytePair] = []
         pair_count_seconds = 0.0
         merge_application_seconds = 0.0
-        while len(token_to_id) + len(byte_token_to_id) < vocabulary_size:
-            pair_count_start = time.perf_counter()
-            for connection in worker_connections:
-                connection.send(ByteBpeWorkerCommand.COUNT)
-            pair_counts: Counter[BytePair] = Counter()
-            for connection in worker_connections:
-                pair_counts.update(connection.recv())
-            pair_count_seconds += time.perf_counter() - pair_count_start
-            if not pair_counts:
-                break
-            best_pair = _best_pair(pair_counts=pair_counts)
-            merged_token = best_pair[0] + best_pair[1]
-            if merged_token in byte_token_to_id:
-                break
-            byte_token_to_id[merged_token] = len(token_to_id) + len(byte_token_to_id)
-            merge_rules.append(best_pair)
-            merge_start = time.perf_counter()
-            for connection in worker_connections:
-                connection.send(ByteBpeMergeCommand(merge_rule=best_pair))
-            for connection in worker_connections:
-                connection.recv()
-            merge_application_seconds += time.perf_counter() - merge_start
+        target_merges = vocabulary_size - len(token_to_id) - len(byte_token_to_id)
+        with progress_bar(
+            description="tokenizer/byte_bpe_merges",
+            total=target_merges,
+            unit="merge",
+        ) as bar:
+            while len(token_to_id) + len(byte_token_to_id) < vocabulary_size:
+                pair_count_start = time.perf_counter()
+                for connection in worker_connections:
+                    connection.send(ByteBpeWorkerCommand.COUNT)
+                pair_counts: Counter[BytePair] = Counter()
+                for connection in worker_connections:
+                    pair_counts.update(connection.recv())
+                pair_count_seconds += time.perf_counter() - pair_count_start
+                if not pair_counts:
+                    break
+                best_pair = _best_pair(pair_counts=pair_counts)
+                merged_token = best_pair[0] + best_pair[1]
+                if merged_token in byte_token_to_id:
+                    break
+                byte_token_to_id[merged_token] = len(token_to_id) + len(byte_token_to_id)
+                merge_rules.append(best_pair)
+                merge_start = time.perf_counter()
+                for connection in worker_connections:
+                    connection.send(ByteBpeMergeCommand(merge_rule=best_pair))
+                for connection in worker_connections:
+                    connection.recv()
+                merge_application_seconds += time.perf_counter() - merge_start
+                bar.update(1)
         for connection in worker_connections:
             connection.send(ByteBpeWorkerCommand.TOKEN_COUNT)
         training_tokens = sum(connection.recv() for connection in worker_connections)

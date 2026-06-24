@@ -35,6 +35,7 @@ class RawDatasetStage(BasePipelineStage):
             ),
             artifact_directory=artifact_directory,
             shard_document_limit=RAW_SHARD_DOCUMENT_LIMIT,
+            progress_description="raw_dataset",
         )
         return StageOutput(
             files={"corpus": "corpus.json"},

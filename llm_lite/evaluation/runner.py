@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from torch import nn
 
@@ -45,10 +46,7 @@ def run_configured_evaluators(
         )
         report['exact_reproduction'] = exact_reproduction_result.model_dump()
         metrics['exact_reproduction_passed'] = exact_reproduction_result.passed
-        print(
-            f'[eval] exact_reproduction passed={exact_reproduction_result.passed}',
-            flush=True,
-        )
+        _log(f"[eval] exact_reproduction passed={exact_reproduction_result.passed}")
         if not exact_reproduction_result.passed:
             raise ValueError('Exact reproduction evaluation failed.')
     perplexity_configuration = evaluation_configuration.perplexity
@@ -68,14 +66,13 @@ def run_configured_evaluators(
         metrics['perplexity'] = perplexity_result.perplexity
         metrics['perplexity_sequences'] = perplexity_result.sequences
         metrics['perplexity_documents'] = perplexity_result.documents
-        print(
-            '[eval] perplexity '
+        _log(
+            "[eval] perplexity "
             f'split={perplexity_result.split} '
             f'documents={perplexity_result.documents} '
             f'sequences={perplexity_result.sequences} '
             f'loss={perplexity_result.loss:.6f} '
-            f'perplexity={perplexity_result.perplexity:.4f}',
-            flush=True,
+            f'perplexity={perplexity_result.perplexity:.4f}'
         )
     fixed_prompt_generation_configuration = evaluation_configuration.fixed_prompt_generation
     if fixed_prompt_generation_configuration is not None:
@@ -89,9 +86,9 @@ def run_configured_evaluators(
         metrics['fixed_prompt_generation_samples'] = len(
             fixed_prompt_generation_result.samples,
         )
-        print(
-            f'[eval] fixed_prompt_generation samples={len(fixed_prompt_generation_result.samples)}',
-            flush=True,
+        _log(
+            f"[eval] fixed_prompt_generation "
+            f"samples={len(fixed_prompt_generation_result.samples)}"
         )
         _print_fixed_prompt_generation_samples(
             samples=fixed_prompt_generation_result.samples,
@@ -111,15 +108,14 @@ def run_configured_evaluators(
         metrics['python_completion_passed_checks'] = python_completion_result.passed_checks
         metrics['python_completion_total_checks'] = python_completion_result.total_checks
         metrics['python_completion_pass_rate'] = python_completion_result.pass_rate
-        print(
-            '[eval] python_completion '
+        _log(
+            "[eval] python_completion "
             f'tasks={len(python_completion_result.tasks)} '
             f'parsed={python_completion_result.parsed_tasks} '
             f'executed={python_completion_result.executed_tasks} '
             f'passed_checks={python_completion_result.passed_checks} '
             f'total_checks={python_completion_result.total_checks} '
-            f'pass_rate={python_completion_result.pass_rate:.4f}',
-            flush=True,
+            f'pass_rate={python_completion_result.pass_rate:.4f}'
         )
     return EvaluationRunResult(report=report, metrics=metrics)
 
@@ -128,4 +124,8 @@ def _print_fixed_prompt_generation_samples(
     samples: tuple[FixedPromptGenerationSample, ...],
 ) -> None:
     for sample_index, sample in enumerate(samples):
-        print(f'[eval-sample {sample_index}] {sample.generated_text}', flush=True)
+        _log(f"[eval-sample {sample_index}] {sample.generated_text}")
+
+
+def _log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)

@@ -26,8 +26,10 @@ from llm_lite.data.text_shards import (
     TextShardSplitManifest,
     TextShardWriter,
     iter_text_shard_reference_documents,
+    load_text_shard_corpus_manifest,
     text_shard_references,
 )
+from llm_lite.pipeline.progress import progress_bar, track_progress
 
 
 @dataclass(frozen=True)
@@ -121,6 +123,10 @@ def preprocess_text_shards(
         artifact_directory=input_artifact_directory,
         split=None,
     )
+    input_manifest = load_text_shard_corpus_manifest(
+        artifact_directory=input_artifact_directory,
+    )
+    input_documents = sum(split.documents for split in input_manifest.splits)
     effective_workers = _effective_worker_count(
         requested_workers=workers,
         shard_count=len(shard_references),
@@ -138,7 +144,12 @@ def preprocess_text_shards(
             shard_document_limit=output_shard_documents,
             shard_name_prefix="",
         )
-        for document in preprocessing_result.documents:
+        for document in track_progress(
+            preprocessing_result.documents,
+            description="preprocess",
+            total=input_documents,
+            unit="doc",
+        ):
             writer.append(document=document)
         return ParallelPreprocessingResult(
             corpus_manifest=writer.close(),
@@ -152,18 +163,26 @@ def preprocess_text_shards(
     worker_results: list[PreprocessingWorkerResult] = []
     multiprocessing_context = get_context("spawn")
     with multiprocessing_context.Pool(processes=effective_workers) as pool:
-        worker_results = pool.starmap(
-            _preprocess_worker,
-            [
-                (
-                    worker_input,
-                    output_artifact_directory,
-                    transforms,
-                    output_shard_documents,
-                )
-                for worker_input in worker_inputs
-            ],
-        )
+        worker_arguments = [
+            (
+                worker_input,
+                output_artifact_directory,
+                transforms,
+                output_shard_documents,
+            )
+            for worker_input in worker_inputs
+        ]
+        with progress_bar(
+            description=f"preprocess/{effective_workers} workers",
+            total=input_documents,
+            unit="doc",
+        ) as bar:
+            for worker_result in pool.imap_unordered(
+                _preprocess_worker_from_arguments,
+                worker_arguments,
+            ):
+                worker_results.append(worker_result)
+                bar.update(worker_result.counters.input_documents)
     counters = PreprocessingCounters()
     for worker_result in sorted(worker_results, key=lambda result: result.worker_index):
         counters.add(other=worker_result.counters)
@@ -217,6 +236,17 @@ def _preprocess_worker(
         counters=preprocessing_result.counters,
         corpus_manifest=writer.close(),
     )
+
+
+def _preprocess_worker_from_arguments(
+    arguments: tuple[
+        PreprocessingWorkerInput,
+        Path,
+        tuple[PreprocessingTransformConfiguration, ...],
+        int,
+    ],
+) -> PreprocessingWorkerResult:
+    return _preprocess_worker(*arguments)
 
 
 def _apply_transforms(

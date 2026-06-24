@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from llm_lite.data.document import Document
+from llm_lite.pipeline.progress import track_progress
 
 UNSPLIT_DIRECTORY_NAME = "unsplit"
 
@@ -137,13 +138,23 @@ def write_text_shards(
     documents: Iterator[Document],
     artifact_directory: Path,
     shard_document_limit: int,
+    progress_description: str | None = None,
+    progress_total: int | None = None,
 ) -> TextShardCorpusManifest:
     writer = TextShardWriter(
         artifact_directory=artifact_directory,
         shard_document_limit=shard_document_limit,
         shard_name_prefix="",
     )
-    for document in documents:
+    document_iterator = documents
+    if progress_description is not None:
+        document_iterator = track_progress(
+            documents,
+            description=progress_description,
+            total=progress_total,
+            unit="doc",
+        )
+    for document in document_iterator:
         writer.append(document=document)
     return writer.close()
 

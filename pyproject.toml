@@ -14,6 +14,7 @@ dependencies = [
   "requests>=2.34.2",
   "tensorboard>=2.20",
   "torch>=2",
+  "tqdm>=4.66",
 ]
 
 [project.optional-dependencies]

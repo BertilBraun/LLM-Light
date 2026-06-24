@@ -1,4 +1,5 @@
 import time
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 
@@ -48,7 +49,7 @@ class TrainingMetricLogger:
         with self.metrics_path.open("a", encoding="utf-8") as metrics_file:
             metrics_file.write(metric_record.model_dump_json() + "\n")
         print(
-            "[train] "
+            f"[{datetime.now().strftime('%H:%M')}] [train] "
             f"step={metric_record.step} "
             f"loss={metric_record.loss:.6f} "
             f"learning_rate={metric_record.learning_rate:.6g} "

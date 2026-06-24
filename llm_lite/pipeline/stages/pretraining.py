@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
@@ -218,9 +219,13 @@ def _print_training_evaluation(
     metrics: dict[str, int | float | str | bool],
 ) -> None:
     if not metrics:
-        print(f'[train-eval] step={step} no configured evaluator metrics', flush=True)
+        _log(f"[train-eval] step={step} no configured evaluator metrics")
         return
     formatted_metrics = ' '.join(
         f'{metric_name}={metric_value}' for metric_name, metric_value in sorted(metrics.items())
     )
-    print(f'[train-eval] step={step} {formatted_metrics}', flush=True)
+    _log(f"[train-eval] step={step} {formatted_metrics}")
+
+
+def _log(message: str) -> None:
+    print(f"[{datetime.now().strftime('%H:%M')}] {message}", flush=True)

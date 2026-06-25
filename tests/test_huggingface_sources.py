@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 
 import pytest
+from pydantic import ValidationError
 
 from llm_lite.config.models import (
     DatasetType,
@@ -100,3 +101,66 @@ def test_iter_huggingface_documents_filters_and_offsets_rows(
     assert documents[0].document_id == "validation-00000000"
     assert documents[0].text == "print('emit')"
     assert documents[0].split == "validation"
+
+
+def test_iter_huggingface_documents_formats_template_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def load_dataset_stub(path: str, split: str, streaming: bool) -> Iterator[dict[str, str]]:
+        assert path == "BertilBraun/TinyPython"
+        assert split == "train"
+        assert streaming is True
+        yield {
+            "task_description": "Return the number of values.",
+            "code": "def count_values(values: list[int]) -> int:\n    return len(values)",
+        }
+
+    monkeypatch.setattr(sources, "load_dataset", load_dataset_stub)
+    dataset_configuration = HuggingFaceDatasetConfiguration(
+        type=DatasetType.HUGGINGFACE,
+        name="BertilBraun/TinyPython",
+        text_template="{task_description}\n\n{code}\n",
+        streaming=True,
+        splits=(
+            HuggingFaceDatasetSplitConfiguration(
+                source_split="train",
+                split="train",
+            ),
+        ),
+    )
+
+    documents = list(
+        sources.iter_huggingface_documents(dataset_configuration=dataset_configuration),
+    )
+
+    assert len(documents) == 1
+    assert documents[0].document_id == "train-00000000"
+    assert documents[0].split == "train"
+    assert documents[0].text == (
+        "Return the number of values.\n\n"
+        "def count_values(values: list[int]) -> int:\n"
+        "    return len(values)\n"
+    )
+
+
+def test_huggingface_configuration_rejects_ambiguous_text_sources() -> None:
+    split_configuration = HuggingFaceDatasetSplitConfiguration(
+        source_split="train",
+        split="train",
+    )
+
+    with pytest.raises(ValidationError, match="exactly one text source"):
+        HuggingFaceDatasetConfiguration(
+            type=DatasetType.HUGGINGFACE,
+            name="BertilBraun/TinyPython",
+            text_column="code",
+            text_template="{task_description}\n\n{code}\n",
+            splits=(split_configuration,),
+        )
+
+    with pytest.raises(ValidationError, match="exactly one text source"):
+        HuggingFaceDatasetConfiguration(
+            type=DatasetType.HUGGINGFACE,
+            name="BertilBraun/TinyPython",
+            splits=(split_configuration,),
+        )

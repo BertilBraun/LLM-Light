@@ -1,6 +1,5 @@
 import glob
 import hashlib
-import json
 from collections.abc import Iterable, Iterator, Mapping
 from pathlib import Path
 
@@ -12,7 +11,6 @@ from llm_lite.config.models import (
     HuggingFaceDatasetSplitConfiguration,
     InlineTextDatasetConfiguration,
     LocalTextDatasetConfiguration,
-    TinyPythonJsonlDatasetConfiguration,
 )
 from llm_lite.data.document import Document
 
@@ -25,10 +23,6 @@ def iter_dataset_documents(experiment_configuration: ExperimentFile) -> Iterator
             )
         case LocalTextDatasetConfiguration():
             yield from iter_local_text_documents(
-                dataset_configuration=experiment_configuration.dataset,
-            )
-        case TinyPythonJsonlDatasetConfiguration():
-            yield from iter_tinypython_jsonl_documents(
                 dataset_configuration=experiment_configuration.dataset,
             )
         case HuggingFaceDatasetConfiguration():
@@ -60,51 +54,6 @@ def iter_local_text_documents(
             text=text_path.read_text(encoding="utf-8"),
             split=None,
         )
-
-
-def iter_tinypython_jsonl_documents(
-    dataset_configuration: TinyPythonJsonlDatasetConfiguration,
-) -> Iterator[Document]:
-    for jsonl_path in resolve_tinypython_jsonl_paths(dataset_configuration=dataset_configuration):
-        normalized_path = _normalized_path(path=jsonl_path)
-        with jsonl_path.open("r", encoding="utf-8") as handle:
-            for line_index, line in enumerate(handle, 1):
-                if not line.strip():
-                    continue
-                record = _tinypython_jsonl_record(
-                    line=line,
-                    path=jsonl_path,
-                    line_index=line_index,
-                )
-                text = _tinypython_training_text(record=record)
-                document_id = _tinypython_document_id(
-                    path=normalized_path,
-                    line_index=line_index,
-                    text=text,
-                )
-                yield Document(
-                    document_id=document_id,
-                    text=text,
-                    split=_assigned_split(
-                        document_id=document_id,
-                        train_probability=dataset_configuration.train_probability,
-                        validation_probability=dataset_configuration.validation_probability,
-                    ),
-                )
-
-
-def resolve_tinypython_jsonl_paths(
-    dataset_configuration: TinyPythonJsonlDatasetConfiguration,
-) -> tuple[Path, ...]:
-    resolved_paths: set[Path] = set()
-    for configured_path in dataset_configuration.paths:
-        resolved_path = configured_path.expanduser().resolve()
-        if not resolved_path.is_file():
-            raise ValueError(f"TinyPython JSONL path is not a file: {configured_path}")
-        resolved_paths.add(resolved_path)
-    for glob_pattern in dataset_configuration.glob_patterns:
-        resolved_paths.update(_resolve_glob_pattern(glob_pattern=glob_pattern))
-    return tuple(sorted(resolved_paths, key=_path_sort_key))
 
 
 def iter_huggingface_documents(
@@ -158,51 +107,6 @@ def _document_id(path: str, content_hash: str) -> str:
     return f"local-text-{identifier_hash[:24]}"
 
 
-def _tinypython_jsonl_record(
-    line: str,
-    path: Path,
-    line_index: int,
-) -> Mapping[str, object]:
-    try:
-        record = json.loads(line)
-    except json.JSONDecodeError as error:
-        raise ValueError(f"Invalid TinyPython JSONL at {path}:{line_index}") from error
-    if not isinstance(record, Mapping):
-        raise ValueError(f"TinyPython JSONL record must be an object at {path}:{line_index}")
-    return record
-
-
-def _tinypython_training_text(record: Mapping[str, object]) -> str:
-    task_description = _record_text(row=record, text_column="task_description").strip()
-    code = _record_text(row=record, text_column="code").strip()
-    if not task_description:
-        raise ValueError("TinyPython JSONL task_description must not be empty.")
-    if not code:
-        raise ValueError("TinyPython JSONL code must not be empty.")
-    return f"{task_description}\n\n{code}\n"
-
-
-def _tinypython_document_id(path: str, line_index: int, text: str) -> str:
-    content_hash = _content_hash(content_bytes=text.encode("utf-8"))
-    identifier_hash = hashlib.sha256(f"{path}\n{line_index}\n{content_hash}".encode()).hexdigest()
-    return f"tinypython-{identifier_hash[:24]}"
-
-
-def _assigned_split(
-    document_id: str,
-    train_probability: float,
-    validation_probability: float,
-) -> str:
-    hash_value = int(hashlib.sha256(document_id.encode("utf-8")).hexdigest()[:16], 16)
-    normalized_value = hash_value / float(16**16 - 1)
-    validation_threshold = train_probability + validation_probability
-    if normalized_value < train_probability:
-        return "train"
-    if normalized_value < validation_threshold:
-        return "validation"
-    return "test"
-
-
 def _iter_huggingface_split_documents(
     dataset_configuration: HuggingFaceDatasetConfiguration,
     split_configuration: HuggingFaceDatasetSplitConfiguration,
@@ -225,7 +129,10 @@ def _iter_huggingface_split_documents(
             and emitted_rows >= split_configuration.max_documents
         ):
             break
-        text = _record_text(row=row, text_column=dataset_configuration.text_column)
+        text = _huggingface_document_text(
+            row=row,
+            dataset_configuration=dataset_configuration,
+        )
         yield Document(
             document_id=f"{split_configuration.split}-{emitted_rows:08d}",
             text=text,
@@ -233,6 +140,27 @@ def _iter_huggingface_split_documents(
         )
         accepted_rows += 1
         emitted_rows += 1
+
+
+def _huggingface_document_text(
+    row: Mapping[str, object],
+    dataset_configuration: HuggingFaceDatasetConfiguration,
+) -> str:
+    if dataset_configuration.text_template is not None:
+        return dataset_configuration.text_template.format_map(
+            _TextTemplateRow(row=row),
+        )
+    if dataset_configuration.text_column is not None:
+        return _record_text(row=row, text_column=dataset_configuration.text_column)
+    raise ValueError("Hugging Face dataset requires a text source.")
+
+
+class _TextTemplateRow:
+    def __init__(self, row: Mapping[str, object]) -> None:
+        self._row = row
+
+    def __getitem__(self, text_column: str) -> str:
+        return _record_text(row=self._row, text_column=text_column)
 
 
 def _record_text(row: Mapping[str, object], text_column: str) -> str:

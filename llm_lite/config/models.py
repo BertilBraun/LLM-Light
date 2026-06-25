@@ -11,7 +11,6 @@ class DatasetType(str, Enum):
     INLINE_TEXT = "inline_text"
     LOCAL_TEXT = "local_text"
     HUGGINGFACE = "huggingface"
-    TINYPYTHON_JSONL = "tinypython_jsonl"
 
 
 class TokenizerType(str, Enum):
@@ -130,26 +129,6 @@ class LocalTextDatasetConfiguration(Configuration):
     glob_patterns: tuple[str, ...] = ()
 
 
-class TinyPythonJsonlDatasetConfiguration(Configuration):
-    type: Literal[DatasetType.TINYPYTHON_JSONL]
-    paths: tuple[Path, ...] = ()
-    glob_patterns: tuple[str, ...] = ()
-    train_probability: float = Field(default=0.98, ge=0.0, le=1.0)
-    validation_probability: float = Field(default=0.02, ge=0.0, le=1.0)
-    test_probability: float = Field(default=0.0, ge=0.0, le=1.0)
-
-    @model_validator(mode="after")
-    def require_paths_and_probabilities(self) -> TinyPythonJsonlDatasetConfiguration:
-        if not self.paths and not self.glob_patterns:
-            raise ValueError("TinyPython JSONL dataset requires paths or glob_patterns.")
-        probability_sum = (
-            self.train_probability + self.validation_probability + self.test_probability
-        )
-        if abs(probability_sum - 1.0) > 0.000001:
-            raise ValueError("TinyPython split probabilities must sum to 1.0.")
-        return self
-
-
 class HuggingFaceDatasetSplitConfiguration(Configuration):
     source_split: str
     split: str
@@ -160,7 +139,8 @@ class HuggingFaceDatasetSplitConfiguration(Configuration):
 class HuggingFaceDatasetConfiguration(Configuration):
     type: Literal[DatasetType.HUGGINGFACE]
     name: str
-    text_column: str
+    text_column: str | None = None
+    text_template: str | None = None
     language_column: str | None = None
     languages: tuple[str, ...] = ()
     license_column: str | None = None
@@ -169,7 +149,9 @@ class HuggingFaceDatasetConfiguration(Configuration):
     splits: tuple[HuggingFaceDatasetSplitConfiguration, ...]
 
     @model_validator(mode="after")
-    def require_filter_columns_for_filter_values(self) -> HuggingFaceDatasetConfiguration:
+    def require_text_source_and_filter_columns(self) -> HuggingFaceDatasetConfiguration:
+        if (self.text_column is None) == (self.text_template is None):
+            raise ValueError("Hugging Face dataset requires exactly one text source.")
         if self.languages and self.language_column is None:
             raise ValueError("Hugging Face language filters require language_column.")
         if self.licenses and self.license_column is None:
@@ -529,7 +511,6 @@ class ExperimentFile(Configuration):
     dataset: Annotated[
         InlineTextDatasetConfiguration
         | LocalTextDatasetConfiguration
-        | TinyPythonJsonlDatasetConfiguration
         | HuggingFaceDatasetConfiguration,
         Field(discriminator="type"),
     ]

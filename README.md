@@ -145,7 +145,8 @@ split metadata. `configs/tinystories_local_text.yaml` points at
 BPE; it does not download data.
 
 Use `dataset.type: huggingface` to stream a text column from Hugging Face
-Datasets and map source splits into pipeline split folders:
+Datasets and map source splits into pipeline split folders. Use
+`skip_documents` when multiple output splits are carved from one source split:
 
 ```yaml
 dataset:
@@ -163,6 +164,29 @@ dataset:
     - source_split: validation
       split: validation_small
       max_documents: 50
+```
+
+For datasets whose training text spans multiple string columns, configure
+`text_template` with Python format fields instead of `text_column`. Hugging
+Face configs must set exactly one of `text_column` or `text_template`:
+
+```yaml
+dataset:
+  type: huggingface
+  name: BertilBraun/TinyPython
+  text_template: "{task_description}\n\n{code}\n"
+  streaming: true
+  splits:
+    - source_split: train
+      split: validation
+      max_documents: 1000
+    - source_split: train
+      split: test
+      skip_documents: 1000
+      max_documents: 1000
+    - source_split: train
+      split: train
+      skip_documents: 2000
 ```
 
 When a source already assigns splits, do not configure `assign_split`; the

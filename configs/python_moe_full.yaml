@@ -4,12 +4,21 @@ experiment:
   output_dir: runs/python_moe_full
 
 dataset:
-  type: tinypython_jsonl
-  glob_patterns:
-    - data/tinypython/*_main.jsonl
-  train_probability: 0.98
-  validation_probability: 0.02
-  test_probability: 0.0
+  type: huggingface
+  name: BertilBraun/TinyPython
+  text_template: "{task_description}\n\n{code}\n"
+  streaming: true
+  splits:
+    - source_split: train
+      split: validation
+      max_documents: 1000
+    - source_split: train
+      split: test
+      skip_documents: 1000
+      max_documents: 1000
+    - source_split: train
+      split: train
+      skip_documents: 2000
 
 tokenizer:
   type: rust_byte_bpe

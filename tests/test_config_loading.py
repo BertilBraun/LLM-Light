@@ -81,7 +81,8 @@ def test_load_python_moe_full_configuration() -> None:
     )
 
     assert experiment_configuration.experiment.name == "python_moe_full"
-    assert experiment_configuration.dataset.type.value == "tinypython_jsonl"
+    assert experiment_configuration.dataset.type.value == "huggingface"
+    assert experiment_configuration.dataset.name == "BertilBraun/TinyPython"
     assert experiment_configuration.model.type.value == "moe_gpt"
     assert experiment_configuration.model.dimension == 320
     assert experiment_configuration.tokenizer.vocabulary_size == 6000

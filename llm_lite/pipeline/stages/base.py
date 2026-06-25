@@ -12,3 +12,10 @@ class BasePipelineStage:
         registry: ArtifactRegistry,
     ) -> str | None:
         return None
+
+    def interrupted_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None:
+        return None

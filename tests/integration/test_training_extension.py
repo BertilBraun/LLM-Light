@@ -105,6 +105,97 @@ def test_pipeline_resumes_after_runtime_training_configuration_changes(
     assert checkpoint_data["optimizer"]["param_groups"][0]["weight_decay"] == 0.001
 
 
+def test_pipeline_resumes_interrupted_pretraining_with_checkpoint(
+    tmp_path: Path,
+) -> None:
+    run_directory = tmp_path / "resume_interrupted_pretraining"
+    first_configuration_path = tmp_path / "resume_interrupted_first.yaml"
+    second_configuration_path = tmp_path / "resume_interrupted_second.yaml"
+    base_configuration_text = Path("configs/verify_one_sentence.yaml").read_text(
+        encoding="utf-8",
+    )
+    first_configuration_text = _training_extension_configuration_text(
+        configuration_text=base_configuration_text,
+        run_directory=run_directory,
+        maximum_steps=4,
+    )
+    second_configuration_text = (
+        _training_extension_configuration_text(
+            configuration_text=base_configuration_text,
+            run_directory=run_directory,
+            maximum_steps=6,
+        )
+        .replace("batch_size_sequences: 1", "batch_size_sequences: 2")
+    )
+    first_configuration_path.write_text(first_configuration_text, encoding="utf-8")
+    second_configuration_path.write_text(second_configuration_text, encoding="utf-8")
+
+    first_exit_code = run_pipeline(
+        configuration_path=first_configuration_path,
+        dry_run=False,
+        force_stages=(),
+    )
+    pretraining_manifest_path = run_directory / "artifacts" / "pretraining" / "manifest.json"
+    pretraining_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
+    pretraining_manifest["status"] = "running"
+    pretraining_manifest_path.write_text(
+        json.dumps(pretraining_manifest, indent=2),
+        encoding="utf-8",
+    )
+    second_exit_code = run_pipeline(
+        configuration_path=second_configuration_path,
+        dry_run=False,
+        force_stages=(),
+    )
+    resumed_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
+
+    assert first_exit_code == 0
+    assert second_exit_code == 0
+    assert resumed_manifest["metrics"]["final_step"] == 6
+    assert resumed_manifest["metrics"]["resumed_from_step"] == 4
+
+
+def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
+    tmp_path: Path,
+) -> None:
+    run_directory = tmp_path / "recover_interrupted_pretraining"
+    configuration_path = tmp_path / "recover_interrupted.yaml"
+    base_configuration_text = Path("configs/verify_one_sentence.yaml").read_text(
+        encoding="utf-8",
+    )
+    configuration_text = _training_extension_configuration_text(
+        configuration_text=base_configuration_text,
+        run_directory=run_directory,
+        maximum_steps=4,
+    )
+    configuration_path.write_text(configuration_text, encoding="utf-8")
+
+    first_exit_code = run_pipeline(
+        configuration_path=configuration_path,
+        dry_run=False,
+        force_stages=(),
+    )
+    pretraining_manifest_path = run_directory / "artifacts" / "pretraining" / "manifest.json"
+    pretraining_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
+    pretraining_manifest["status"] = "running"
+    pretraining_manifest_path.write_text(
+        json.dumps(pretraining_manifest, indent=2),
+        encoding="utf-8",
+    )
+    second_exit_code = run_pipeline(
+        configuration_path=configuration_path,
+        dry_run=False,
+        force_stages=(),
+    )
+    recovered_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
+
+    assert first_exit_code == 0
+    assert second_exit_code == 0
+    assert recovered_manifest["status"] == "complete"
+    assert recovered_manifest["metrics"]["final_step"] == 4
+    assert recovered_manifest["metrics"]["resumed_from_step"] == 4
+
+
 def _training_extension_configuration_text(
     configuration_text: str,
     run_directory: Path,

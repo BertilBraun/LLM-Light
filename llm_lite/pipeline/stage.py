@@ -35,6 +35,12 @@ class PipelineStage(Protocol):
         registry: ArtifactRegistry,
     ) -> str | None: ...
 
+    def interrupted_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None: ...
+
     def run(
         self,
         experiment_configuration: ExperimentFile,

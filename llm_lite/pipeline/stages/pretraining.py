@@ -159,11 +159,27 @@ class PretrainingStage(BasePipelineStage):
             / 'checkpoints',
         )
         if checkpoint_state is None:
-            return 'resume-compatible, execute'
+            return None
         maximum_steps = experiment_configuration.training.maximum_steps
         if checkpoint_state.step < maximum_steps:
             return f'resume from step {checkpoint_state.step} to {maximum_steps}'
         return None
+
+    def interrupted_action(
+        self,
+        experiment_configuration: ExperimentFile,
+        registry: ArtifactRegistry,
+    ) -> str | None:
+        checkpoint_state = latest_checkpoint(
+            checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
+            / 'checkpoints',
+        )
+        if checkpoint_state is None:
+            return None
+        maximum_steps = experiment_configuration.training.maximum_steps
+        if checkpoint_state.step < maximum_steps:
+            return f'resume from step {checkpoint_state.step} to {maximum_steps}'
+        return f'recover checkpoint at step {checkpoint_state.step}'
 
 
 def _pretraining_reconstruction_contract(

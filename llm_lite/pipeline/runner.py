@@ -218,6 +218,24 @@ def _review_pipeline(
                     action=stage.compatible_action(registry=registry),
                 ),
             )
+        elif registry.has_matching_fingerprint(
+            artifact_type=stage.name.value,
+            configuration_hash=configuration_hash,
+            parent_hashes=parent_hashes,
+        ):
+            interrupted_action = stage.interrupted_action(
+                experiment_configuration=experiment_configuration,
+                registry=registry,
+            )
+            if interrupted_action is not None:
+                review.append(
+                    StageReview(
+                        stage_name=stage.name,
+                        action=interrupted_action,
+                    ),
+                )
+            else:
+                review.append(StageReview(stage_name=stage.name, action="execute"))
         else:
             review.append(StageReview(stage_name=stage.name, action="execute"))
     return review
@@ -245,8 +263,25 @@ def _execute_pipeline(
             experiment_configuration=experiment_configuration,
             registry=registry,
         )
+        matching_fingerprint = registry.has_matching_fingerprint(
+            artifact_type=stage.name.value,
+            configuration_hash=configuration_hash,
+            parent_hashes=parent_hashes,
+        )
+        interrupted_action = (
+            stage.interrupted_action(
+                experiment_configuration=experiment_configuration,
+                registry=registry,
+            )
+            if matching_fingerprint and not compatible
+            else None
+        )
         continue_compatible_stage = (
-            compatible and stage.name not in force_stage_names and continuation_action is not None
+            stage.name not in force_stage_names
+            and (
+                (compatible and continuation_action is not None)
+                or interrupted_action is not None
+            )
         )
         if compatible and stage.name not in force_stage_names and not continue_compatible_stage:
             console_log(f"[skip] {stage.name.value}: compatible artifact found")

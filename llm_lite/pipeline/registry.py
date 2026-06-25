@@ -93,6 +93,20 @@ class ArtifactRegistry:
             for relative_path in manifest.files.values()
         )
 
+    def has_matching_fingerprint(
+        self,
+        artifact_type: str,
+        configuration_hash: str,
+        parent_hashes: dict[str, str],
+    ) -> bool:
+        manifest = self.read_manifest(artifact_type=artifact_type)
+        if manifest is None:
+            return False
+        return (
+            manifest.configuration_hash == configuration_hash
+            and manifest.parents == parent_hashes
+        )
+
     def artifact_identifier(self, artifact_type: str) -> str:
         manifest_path = self.manifest_path(artifact_type=artifact_type)
         return hash_file(file_path=manifest_path)

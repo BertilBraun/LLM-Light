@@ -74,7 +74,7 @@ training:
     persistent_workers: true
     prefetch_factor: 2
   optimizer:
-    learning_rate: 0.0015
+    learning_rate: 0.001
     weight_decay: 0.1
   precision: bf16
   gradient_clip_norm: 1.0
@@ -90,22 +90,18 @@ training:
         tasks_path: tests/fixtures/tinypython_completion/tasks.jsonl
         maximum_new_tokens: 160
         execution_timeout_seconds: 2.0
-        stop_sequences:
-          - "\n\nReturn "
-          - "\n\nGiven "
-          - "\n\nCreate "
+        stop_sequences: []
+      fixed_prompt_generation:
+        prompts:
+          - "Given a list of integers, write a function that returns the sum of all even numbers in the list.\n"
+          - "Given a string, write a function that returns the string in reverse order.\n"
+          - "Given a list of strings, write a function that returns a new list containing only the strings that start with the letter 'A'.\n\ndef filter_strings_starting_with_a(strings: list[str]) -> list[str]:"
+        maximum_new_tokens: 160
 
 evaluation:
   perplexity:
     split: validation
     maximum_documents: 1000
-  fixed_prompt_generation:
-    prompts:
-      - "def uppercase_reversed_nonempty(values: list[str]) -> list[str]:\n"
-      - "def sum_enabled_amounts_by_category(records: list[dict[str, object]]) -> dict[str, int]:\n"
-      - "def first_even_in_range(values: list[int], lower: int, upper: int) -> int | None:\n"
-      - "def normalize_word_counts(words: list[str], stop_words: list[str]) -> dict[str, int]:\n"
-    maximum_new_tokens: 160
   python_completion:
     tasks_path: tests/fixtures/tinypython_completion/tasks.jsonl
     maximum_new_tokens: 160

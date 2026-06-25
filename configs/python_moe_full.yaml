@@ -23,8 +23,8 @@ dataset:
 tokenizer:
   type: rust_byte_bpe
   vocabulary_size: 6000
-  max_training_documents: 200000
-  max_training_bytes: 100000000
+  max_training_documents: 500000
+  max_training_bytes: 250000000
   training_workers: 8
   add_bos_token: true
   add_eos_token: true
@@ -66,7 +66,7 @@ training:
   objective: causal_language_modeling
   causal_language_modeling:
     auxiliary_loss_weight: 0.01
-  maximum_steps: 2150
+  maximum_steps: 30000
   batch_size_sequences: 64
   dataloader:
     num_workers: 4
@@ -78,10 +78,10 @@ training:
     weight_decay: 0.1
   precision: bf16
   gradient_clip_norm: 1.0
-  checkpoint_interval_steps: 500
-  log_interval_steps: 20
+  checkpoint_interval_steps: 2000
+  log_interval_steps: 50
   evaluation:
-    interval_steps: 500
+    interval_steps: 2000
     evaluators:
       perplexity:
         split: validation

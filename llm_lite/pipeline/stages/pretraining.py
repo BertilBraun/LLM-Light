@@ -13,6 +13,10 @@ from llm_lite.config.models import (
 )
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
+from llm_lite.evaluation.tensorboard import (
+    EVALUATION_TENSORBOARD_DIRECTORY_NAME,
+    write_evaluation_metrics_to_tensorboard,
+)
 from llm_lite.model.factory import build_model
 from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.pipeline.hashing import hash_json_value
@@ -226,6 +230,11 @@ def _training_evaluation_callback(
                 )
                 + '\n',
             )
+        write_evaluation_metrics_to_tensorboard(
+            tensorboard_directory=artifact_directory / EVALUATION_TENSORBOARD_DIRECTORY_NAME,
+            metrics=evaluation_result.metrics,
+            step=step,
+        )
         _print_training_evaluation(step=step, metrics=evaluation_result.metrics)
         return evaluation_path
 

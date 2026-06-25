@@ -3,6 +3,10 @@ from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile, NoPostTrainingConfiguration
 from llm_lite.evaluation.runner import run_configured_evaluators
+from llm_lite.evaluation.tensorboard import (
+    EVALUATION_TENSORBOARD_DIRECTORY_NAME,
+    write_evaluation_metrics_to_tensorboard,
+)
 from llm_lite.model.factory import build_model
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
@@ -60,7 +64,18 @@ class EvaluationStage(BasePipelineStage):
             json.dumps(evaluation_result.report, indent=2),
             encoding="utf-8",
         )
-        return StageOutput(files={"report": "report.json"}, metrics=evaluation_result.metrics)
+        write_evaluation_metrics_to_tensorboard(
+            tensorboard_directory=artifact_directory / EVALUATION_TENSORBOARD_DIRECTORY_NAME,
+            metrics=evaluation_result.metrics,
+            step=checkpoint_step,
+        )
+        return StageOutput(
+            files={
+                "report": "report.json",
+                "tensorboard": EVALUATION_TENSORBOARD_DIRECTORY_NAME,
+            },
+            metrics=evaluation_result.metrics,
+        )
 
 
 def _evaluation_checkpoint_directory(

@@ -124,6 +124,38 @@ def test_source_from_completion_appends_generated_body_to_signature_prompt_code(
     )
 
 
+def test_signature_prompt_generation_trims_trailing_newline() -> None:
+    task = PythonCompletionTaskRecord(
+        task_id="multiply_lists",
+        prompt=(
+            "Given two lists of integers, return pairwise products.\n\n"
+            "def multiply_lists(list1: list[int], list2: list[int]) -> list[int]:\n"
+        ),
+        checks=("multiply_lists([2], [3]) == [6]",),
+    )
+
+    assert task.inference_prompt == (
+        "Given two lists of integers, return pairwise products.\n\n"
+        "def multiply_lists(list1: list[int], list2: list[int]) -> list[int]:"
+    )
+    assert source_from_completion(
+        task=task,
+        generated_completion=(
+            "\n"
+            "    result: list[int] = []\n"
+            "    for a, b in zip(list1, list2):\n"
+            "        result.append(a * b)\n"
+            "    return result\n"
+        ),
+    ) == (
+        "def multiply_lists(list1: list[int], list2: list[int]) -> list[int]:\n"
+        "    result: list[int] = []\n"
+        "    for a, b in zip(list1, list2):\n"
+        "        result.append(a * b)\n"
+        "    return result\n"
+    )
+
+
 def test_task_description_records_keep_full_function_generation_prompt() -> None:
     task = PythonCompletionTaskRecord(
         task_id="count_positive",
@@ -226,7 +258,7 @@ def test_evaluator_uses_generate_text_with_configured_inference_settings(
     )
 
     assert len(captured_calls) == 1
-    assert captured_calls[0].prompt == "def add(a: int, b: int) -> int:\n"
+    assert captured_calls[0].prompt == "def add(a: int, b: int) -> int:"
     assert captured_calls[0].inference_configuration.engine is InferenceEngine.NAIVE
     assert captured_calls[0].inference_configuration.maximum_new_tokens == 7
     assert result.tasks[0].generated_completion == "    return a + b"
@@ -254,7 +286,14 @@ def test_evaluator_runs_signature_prefix_records(
                 inference_configuration=inference_configuration,
             ),
         )
-        return prompt + "    return [value.upper()[::-1] for value in values if value]\n"
+        return (
+            prompt
+            + "\n"
+            + "    user_info = profiles.get(id)\n"
+            + "    if user_info and user_info.get('name'):\n"
+            + "        return user_info['name']\n"
+            + "    return None\n"
+        )
 
     monkeypatch.setattr(python_completion, "generate_text", generate_completion)
 
@@ -279,17 +318,22 @@ def test_evaluator_runs_signature_prefix_records(
 
     assert len(captured_calls) == 1
     assert captured_calls[0].prompt == (
-        "Return a list containing each non-empty string uppercased and reversed, "
-        "preserving order.\n\n"
-        "def uppercase_reversed_nonempty(values: list[str]) -> list[str]:\n"
+        "Given a dictionary `profiles` and an integer `id`, return the user's display "
+        "name if it exists and is nonempty. Otherwise, return `None`.\n\n"
+        "def get_user_display_name(profiles: dict[int, dict[str, str]], id: int) "
+        "-> str | None:"
     )
     assert result.tasks[0].generated_completion == (
-        "    return [value.upper()[::-1] for value in values if value]\n"
+        "\n"
+        "    user_info = profiles.get(id)\n"
+        "    if user_info and user_info.get('name'):\n"
+        "        return user_info['name']\n"
+        "    return None\n"
     )
     assert result.parsed_tasks == 1
     assert result.executed_tasks == 1
-    assert result.passed_checks == 4
-    assert result.total_checks == 4
+    assert result.passed_checks == 5
+    assert result.total_checks == 5
     assert result.pass_rate == 1.0
 
 

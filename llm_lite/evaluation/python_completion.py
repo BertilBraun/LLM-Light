@@ -42,7 +42,7 @@ class PythonCompletionTaskRecord(BaseModel):
     @property
     def inference_prompt(self) -> str:
         if self.prompt is not None:
-            return self.prompt
+            return self.prompt.rstrip("\n")
         assert self.task_description is not None
         return f"{self.task_description.strip()}\n\n"
 
@@ -212,8 +212,22 @@ def source_from_completion(
     generated_completion: str,
 ) -> str:
     if task.prompt is not None:
-        return executable_prompt_suffix(prompt=task.prompt) + generated_completion
+        return append_completion_to_prompt(
+            prompt=executable_prompt_suffix(prompt=task.inference_prompt),
+            generated_completion=generated_completion,
+        )
     return generated_completion
+
+
+def append_completion_to_prompt(prompt: str, generated_completion: str) -> str:
+    if (
+        prompt
+        and generated_completion
+        and prompt.rstrip().endswith(":")
+        and not generated_completion.startswith("\n")
+    ):
+        return prompt + "\n" + generated_completion
+    return prompt + generated_completion
 
 
 def executable_prompt_suffix(prompt: str) -> str:

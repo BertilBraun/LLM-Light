@@ -1,17 +1,34 @@
 # LLM-Light
 
-LLM-Light is a small PyTorch-native, configuration-driven LLM training pipeline.
-This repository currently implements milestones M0 and M1, with M2 local text
-ingestion and TinyStories-ready preprocessing underway: typed experiment
-configuration, local artifact manifests, ordered pipeline execution, inline text
-and local text data, Unicode and line-ending normalization, exact
-deduplication, split-sharded text artifacts, character and byte-level BPE
-tokenizers, tiny dense GPT pretraining, checkpoint resume, greedy inference,
-configurable naive or KV-cached greedy inference,
-exact-reproduction/perplexity/generation evaluation, and optional training-time
-evaluation.
+LLM-Light is a PyTorch-native LLM training system built as a research project
+with larger training-system concepts kept in view. The actual model runs are
+budget-sized, but the repository covers synthetic corpus generation,
+dataset ingestion, parallel preprocessing, tokenizer training, packed training
+shards, GPT/MoE pretraining, distributed data parallelism, checkpoint resume,
+evaluation, inference, throughput logging, TensorBoard observability, and
+artifact export.
 
-Current verification stage order:
+This is a systems and experiment-validation project. The current models are
+small research artifacts, not broadly capable assistants or production code
+models.
+
+## Documentation Map
+
+- [docs/TRAINING.md](docs/TRAINING.md): setup, tests, smoke runs, Python MoE
+  reproduction commands, generation, evaluation, and bundle export.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): implemented pipeline stages,
+  artifacts, configuration surface, datasets, models, evaluation, distributed
+  behavior, and known implementation limits.
+- [docs/RESULTS.md](docs/RESULTS.md): validated experiment summaries, including
+  the TinyPython MoE run.
+- [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md): future work and open project
+  gaps only.
+- [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md): local coding and testing
+  standards.
+
+## Implemented Surface
+
+The ordered pipeline currently supports:
 
 ```text
 raw_dataset
@@ -19,377 +36,158 @@ processed_dataset
 tokenizer
 packed_dataset
 pretraining
+post_training
 evaluation
 ```
 
-## Verification
+Implemented capabilities include:
 
-Run the one-sentence verification pipeline:
+- Inline, local text, and Hugging Face dataset ingestion.
+- Synthetic TinyPython corpus generation with local vLLM teacher models,
+  semantic task seeds, parsing, Python validation, resumable JSONL output, and
+  invalid-sample tracking.
+- Ordered preprocessing with Unicode normalization, line-ending normalization,
+  length filters, exact deduplication, split assignment, and Python function
+  extraction.
+- Parallel preprocessing over workers and split-sharded text artifacts.
+- Character tokenizer, Python byte-level BPE, and Rust-backed byte-level BPE.
+- Packed fixed-length autoregressive datasets backed by shard files and indexes.
+- Dense GPT and top-k MoE GPT models.
+- Causal language-model pretraining with checkpoint resume.
+- Single-process training and working distributed data-parallel training through
+  `torchrun`.
+- Full checkpoints and rank-local sharded checkpoints for distributed runs.
+- Greedy and sampled generation through naive or KV-cache inference engines.
+- Exact reproduction, perplexity, fixed-prompt generation, and Python completion
+  evaluation with parse, execution, and check-pass metrics.
+- Training-time evaluation, throughput metrics, structured artifacts, and
+  TensorBoard traces for inspecting runs.
+- Direct preference optimization utilities and generated Python DPO data flow.
+- Compact run-bundle export for moving completed experiments without committing
+  large run directories.
+
+Fully sharded data parallel training and model-parallel variants were part of
+the intended scale-out direction, but they are not yet validated project results.
+
+## Quick Start
+
+Install dependencies with `uv`:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
-```
-
-Review without execution:
-
-```bash
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --dry-run
-```
-
-Force recomputation from a stage and all downstream stages:
-
-```bash
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --force
-python -m llm_lite.scripts.run_pipeline \
-  --config configs/verify_one_sentence.yaml \
-  --force pretraining
+uv sync --extra dev
 ```
 
 Run tests:
 
 ```bash
-python -m pytest
+uv run python -m pytest
 ```
 
-Run the local text verification pipeline:
+Run the one-sentence smoke pipeline:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
-```
-
-Run the byte-level BPE verification pipeline:
-
-```bash
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
+uv run python -m llm_lite.scripts.run_pipeline \
+  --config configs/verify_one_sentence.yaml
 ```
 
 Generate from a completed run:
 
 ```bash
-python -m llm_lite.scripts.generate \
-  --config configs/tinystories_hf_smoke.yaml \
-  --prompt "Once upon a time" \
-  --maximum-new-tokens 80
-```
-
-Generation defaults to KV-cached autoregressive decoding with `fp32` precision,
-no quantization, greedy token selection, and 80 new tokens. Set
-`inference.engine` to `naive` only when you want full-sequence reference
-decoding.
-
-```yaml
-inference:
-  decoding:
-    strategy: sample
-    temperature: 0.8
-    top_k: 40
-  maximum_new_tokens: 80
-```
-
-## Local Text Data
-
-Use `dataset.type: local_text` to ingest UTF-8 text files from explicit paths,
-glob patterns, or both. Files are resolved, deduplicated, and processed in
-deterministic path order. Raw and processed text artifacts are written as
-split folders containing compressed tar shards of plain `.txt` members:
-
-```text
-processed_dataset/
-  corpus.json
-  train/
-    shard_000000.tar.gz
-  validation/
-    shard_000000.tar.gz
-```
-
-Inside each shard, samples are plain files named from their document id. There
-is no per-document JSON metadata in the processed corpus. Split membership is
-defined by the containing folder.
-
-```yaml
-dataset:
-  type: local_text
-  paths:
-    - data/stories/example.txt
-  glob_patterns:
-    - data/stories/**/*.txt
-```
-
-Preprocessing remains ordered and streaming. `lower_case` is available but is
-not recommended as a default for story or code corpora because it destroys
-useful casing signal.
-
-```yaml
-preprocessing:
-  output_shard_documents: 10000
-  transforms:
-    - type: normalize_unicode
-      form: NFC
-    - type: normalize_line_endings
-    - type: min_length
-      min_characters: 50
-    - type: max_length
-      max_characters: 4096
-    - type: exact_deduplication
-    - type: assign_split
-      train_probability: 0.98
-      validation_probability: 0.01
-      test_probability: 0.01
-```
-
-Recommended preliminary TinyStories defaults are NFC Unicode normalization,
-LF line endings, minimum length 50 characters, maximum length 4096 characters,
-exact deduplication after normalization, no lowercasing, and deterministic
-split metadata. `configs/tinystories_local_text.yaml` points at
-`data/tinystories/**/*.txt` as a local prepared corpus path and uses byte-level
-BPE; it does not download data.
-
-Use `dataset.type: huggingface` to stream a text column from Hugging Face
-Datasets and map source splits into pipeline split folders. Use
-`skip_documents` when multiple output splits are carved from one source split:
-
-```yaml
-dataset:
-  type: huggingface
-  name: roneneldan/TinyStories
-  text_column: text
-  streaming: true
-  splits:
-    - source_split: train
-      split: train
-      max_documents: 1000
-    - source_split: validation
-      split: validation
-      max_documents: 200
-    - source_split: validation
-      split: validation_small
-      max_documents: 50
-```
-
-For datasets whose training text spans multiple string columns, configure
-`text_template` with Python format fields instead of `text_column`. Hugging
-Face configs must set exactly one of `text_column` or `text_template`:
-
-```yaml
-dataset:
-  type: huggingface
-  name: BertilBraun/TinyPython
-  text_template: "{task_description}\n\n{code}\n"
-  streaming: true
-  splits:
-    - source_split: train
-      split: validation
-      max_documents: 1000
-    - source_split: train
-      split: test
-      skip_documents: 1000
-      max_documents: 1000
-    - source_split: train
-      split: train
-      skip_documents: 2000
-```
-
-When a source already assigns splits, do not configure `assign_split`; the
-preprocessor rejects split reassignment.
-
-Byte-level BPE starts from all 256 byte values plus configured special tokens,
-then learns deterministic pair merges up to `tokenizer.vocabulary_size`.
-Training uses a bounded deterministic prefix sample instead of materializing the
-whole corpus; configure at least one of `max_training_documents` or
-`max_training_bytes`. Encoding and decoding preserve Unicode, whitespace, tabs,
-and newlines through UTF-8 bytes. For TinyStories-style smoke runs, start with:
-
-```yaml
-tokenizer:
-  type: byte_bpe
-  vocabulary_size: 512
-  max_training_documents: 100
-  max_training_bytes: 100000
-  add_bos_token: true
-  add_eos_token: true
-  add_pad_token: true
-```
-
-Evaluation is configured by named optional blocks. Exact reproduction is kept
-for tiny verification configs; story runs should generally use perplexity and
-fixed-prompt generation:
-
-```yaml
-training:
-  evaluation:
-    interval_steps: 50
-    evaluators:
-      perplexity:
-        split: validation_small
-        maximum_documents: 50
-
-evaluation:
-  perplexity:
-    split: validation
-    maximum_documents: 200
-  fixed_prompt_generation:
-    prompts:
-      - "Once upon a time"
-    maximum_new_tokens: 120
-```
-
-Python completion evaluation measures raw Python continuation, not
-instruction-to-code prompting. Each JSONL task supplies only Python source as
-the model prompt plus expression checks that are counted after the generated
-continuation parses:
-
-```json
-{"task_id":"reverse_string","prompt":"def reverse_string(text: str) -> str:\n","checks":["reverse_string('abc') == 'cba'","reverse_string('') == ''"]}
-```
-
-Configure shared stop sequences at the evaluator level:
-
-```yaml
-evaluation:
-  python_completion:
-    tasks_path: tests/fixtures/python_completion/tasks.jsonl
-    maximum_tasks: 10
-    maximum_new_tokens: 80
-    execution_timeout_seconds: 2.0
-    stop_sequences:
-      - "\n\ndef "
-      - "\nclass "
-      - "\nif __name__"
-```
-
-Inspect training curves in TensorBoard:
-
-```bash
-python -m tensorboard.main --logdir runs/verify_one_sentence/artifacts/pretraining/tensorboard
-```
-
-Pipeline events are written to `runs/verify_one_sentence/pipeline.jsonl`. Training
-metrics are written to `runs/verify_one_sentence/artifacts/pretraining/metrics.jsonl`
-and mirrored to TensorBoard scalars.
-
-Increasing `training.maximum_steps` on a compatible pretraining run resumes from the
-latest checkpoint instead of restarting. Architecture, tokenizer, packed data, optimizer,
-batch, precision, and gradient-clipping changes still invalidate pretraining.
-
-Training dataloader behavior is configured under `training.dataloader`:
-
-```yaml
-dataloader:
-  num_workers: 0
-  pin_memory: false
-  persistent_workers: false
-  prefetch_factor: null
-```
-
-`persistent_workers` and `prefetch_factor` require `num_workers` greater than
-zero.
-
-## Packed Data Access
-
-Packed training data is stored as uint16 shard files plus a small JSON index. The
-default training dataset is a map-style `PackedSequenceDataset`, so PyTorch's
-standard `DataLoader` can provide fully random shuffling and worker
-parallelization. An explicit `IterablePackedSequenceDataset` is also available as
-a lower-memory fallback: each epoch shuffles shard order, loads one shard at a
-time, shuffles rows within that shard, and yields token rows as `torch.long`.
-Multiworker iterable loading partitions shards by worker id, so workers do not
-duplicate shard reads.
-
-Compare access modes with:
-
-```bash
-python -m llm_lite.scripts.benchmark_packed_datasets
-```
-
-Temporary local benchmark on 2026-06-20:
-
-```text
-rows_per_dataset_pass: 20000
-passes: 3
-row_length: 128
-batch_size: 64
-shard_sequences: 512
-num_workers: 0
-map_random_seconds: 0.8451
-map_random_vs_memory_ratio: 3.74x
-iterable_sharded_seconds: 0.2694
-iterable_sharded_vs_memory_ratio: 1.19x
-in_memory_random_seconds: 0.2262
-map_vs_iterable_ratio: 3.14x
-
-num_workers: 2
-map_random_seconds: 9.6713
-map_random_vs_memory_ratio: 1.26x
-iterable_sharded_seconds: 8.0780
-iterable_sharded_vs_memory_ratio: 1.05x
-in_memory_random_seconds: 7.6949
-map_vs_iterable_ratio: 1.20x
-```
-
-## Achieved Results
-
-Validated on 2026-06-20 with:
-
-```bash
-python -m pytest -q
-python -m ruff check .
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml --dry-run
-python -m llm_lite.scripts.run_pipeline \
+uv run python -m llm_lite.scripts.generate \
   --config configs/verify_one_sentence.yaml \
-  --force pretraining
+  --prompt "" \
+  --maximum-new-tokens 20
 ```
 
-Results:
-
-```text
-26 passed
-All checks passed!
-pretraining final_step: 60
-pretraining final_loss: 0.00016388329095207155
-exact reproduction: passed
-generated_text: "hello world\n"
-tensorboard event files: present
-pipeline event log: present
-```
-
-M2 local text validation should be run with:
+Run the Python MoE pretraining stage on multiple GPUs:
 
 ```bash
-python -m pytest -q
-python -m ruff check .
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
+uv run torchrun --standalone --nproc_per_node=XXX \
+  -m llm_lite.scripts.run_pipeline \
+  --config configs/python_moe_full.yaml \
+  --from pretraining \
+  --to pretraining
 ```
 
-Validated on 2026-06-23 with:
+See [docs/TRAINING.md](docs/TRAINING.md) for full commands, including the
+TinyPython MoE pipeline.
+
+## Results
+
+Two meaningful validation tracks are documented in
+[docs/RESULTS.md](docs/RESULTS.md).
+
+### TinyStories MoE Validation
+
+`configs/tinystories_moe_full.yaml` validated the story-data path. It streamed
+TinyStories from Hugging Face, trained a 4096-token Rust byte-level BPE
+tokenizer, packed 256-token story sequences, and trained a small top-1 MoE GPT
+with distributed data parallelism.
+
+Recorded local validation notes:
+
+- Two RTX 4090 GPUs.
+- 6-layer top-1 MoE decoder, 4 experts.
+- Approximately 9.0M total parameters and 3.7M active parameters.
+- 50,000 training steps.
+- Final evaluation perplexity over 500 validation documents: 6.8403.
+- Final evaluation loss: 1.9228.
+- Throughput: approximately 487k global tokens/s.
+
+This run was quick to get going and produced recognizable TinyStories-style
+continuations, which made it useful as a pipeline validation before the Python
+experiment.
+
+### TinyPython MoE Validation
+
+The latest run uses `configs/python_moe_full.yaml` and the public
+[`BertilBraun/TinyPython`](https://huggingface.co/datasets/BertilBraun/TinyPython)
+dataset. TinyPython was generated by this project with
+`llm_lite.scripts.generate_tinypython` and then uploaded to Hugging Face. It
+contains about 2.19M synthetic task-to-function Python records.
+
+- Model: top-1 MoE GPT, dimension 320, 6 layers, 8 heads, 4 experts, expert FFN
+  dimension 1280.
+- Tokenizer: 6000-token Rust byte-level BPE.
+- Parameters: 24,428,160 total, 9,653,760 active per token.
+- Training: distributed data parallel, world size 2, batch size 512 packed
+  sequences per rank.
+- Schedule: 3,750 steps at LR 0.001, then until 7,500 at LR 0.0005, then until 10,000 at
+  LR 0.00025.
+- Final validation: perplexity 1.5516, loss 0.4393.
+- Python completion evaluation: 174 tasks, 172 parsed completions, 157 executed
+  completions, 786 / 1012 checks passed, pass rate 0.7767.
+
+Qualitatively, the model learned many simple list, dictionary, numeric, and
+format patterns. It remains weak on exact semantic instruction following,
+literal replacement, case sensitivity, and confusing nearby task families.
+
+Example generated completion:
 
 ```text
-python -m pytest -q
-43 passed
+Prompt:
+Given a list of integers, write a function that returns the sum of all odd numbers in the list.
+```
 
-python -m ruff check .
-All checks passed!
+```python
+def sum_odd_numbers(numbers: list[int]) -> int:
+    total = 0
+    for number in numbers:
+        if number % 2 != 0:
+            total += number
+    return total
+```
 
-python -m llm_lite.scripts.run_pipeline --config configs/verify_one_sentence.yaml
-pretraining complete at step 60, compatible skip
+## Artifacts
 
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_local_text.yaml
-raw_documents: 1
-processed_documents: 1
-rejected_documents: 0
-total_characters: 12
-total_bytes: 12
-packed sequences: 1
-exact reproduction: passed
+Run directories under `runs/` contain datasets, tokenizer files, packed shards,
+checkpoints, metrics, TensorBoard logs, and evaluation reports. Large artifacts
+and checkpoints should stay out of source control.
 
-python -m llm_lite.scripts.run_pipeline --config tests/configs/verify_byte_bpe.yaml
-vocabulary_size: 260
-merge_count: 1
-training_documents: 1
-training_bytes: 12
-training_tokens: 11
-packed sequences: 1
-exact reproduction: passed
+Export a compact run bundle instead:
+
+```bash
+uv run python -m llm_lite.scripts.export_run_bundle \
+  --run-dir runs/python_moe_full \
+  --output python_moe_full_bundle.zip
 ```

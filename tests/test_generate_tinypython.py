@@ -7,10 +7,12 @@ from llm_lite.scripts.generate_tinypython import (
     build_argument_parser,
     build_valid_record,
     completed_seed_attempts,
+    excluded_training_seed_keys,
     generate_seeds,
     invalid_output_path,
     parse_generation,
     seed_space_warning,
+    semantic_seed_key,
     unique_compatible_seed_count,
 )
 
@@ -29,6 +31,17 @@ def test_generate_seeds_assigns_stable_requested_ids() -> None:
 
 def test_unique_seed_space_supports_main_generation_run() -> None:
     assert unique_compatible_seed_count() >= 50_000
+
+
+def test_generate_seeds_can_exclude_training_semantic_keys() -> None:
+    excluded_keys = excluded_training_seed_keys(count=100, rng_seed=42)
+    heldout_seeds = generate_seeds(
+        count=50,
+        rng_seed=123,
+        excluded_semantic_keys=excluded_keys,
+    )
+
+    assert all(semantic_seed_key(seed) not in excluded_keys for seed in heldout_seeds)
 
 
 def test_seed_space_warning_when_request_cycles() -> None:
@@ -172,6 +185,8 @@ def test_defaults_match_training_plan() -> None:
     arguments = parser.parse_args(["--model", "teacher", "--output", "teacher.jsonl"])
 
     assert arguments.num_seeds == 500_000
+    assert arguments.exclude_num_seeds == 0
+    assert arguments.exclude_seed == 42
     assert arguments.batch_size == 512
     assert arguments.max_tokens == 512
     assert arguments.dtype == "bfloat16"

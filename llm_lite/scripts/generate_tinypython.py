@@ -983,8 +983,20 @@ def seed_space_warning(requested_seed_count: int, unique_seed_count: int) -> str
     )
 
 
-def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
+def generate_seeds(
+    count: int,
+    rng_seed: int,
+    excluded_semantic_keys: set[tuple[object, ...]] | None = None,
+) -> list[TaskSeed]:
     candidates = compatible_seed_candidates()
+    if excluded_semantic_keys is not None:
+        candidates = [
+            candidate
+            for candidate in candidates
+            if semantic_seed_key(candidate) not in excluded_semantic_keys
+        ]
+    if not candidates:
+        raise ValueError("No compatible seed candidates remain after exclusions.")
 
     rng = random.Random(rng_seed)
     rng.shuffle(candidates)
@@ -1014,6 +1026,34 @@ def generate_seeds(count: int, rng_seed: int) -> list[TaskSeed]:
         )
         for i, item in enumerate(chosen)
     ]
+
+
+def semantic_seed_key(seed: TaskSeed) -> tuple[object, ...]:
+    return (
+        seed.task_family,
+        seed.input_kind,
+        seed.operation,
+        seed.condition,
+        seed.output_kind,
+        seed.edge_behavior,
+        seed.implementation_style,
+        seed.extra_constraint,
+        seed.task_detail,
+        seed.description_style,
+        seed.naming_style,
+        seed.operation_tags,
+    )
+
+
+def excluded_training_seed_keys(
+    *,
+    count: int,
+    rng_seed: int,
+) -> set[tuple[object, ...]]:
+    return {
+        semantic_seed_key(seed)
+        for seed in generate_seeds(count=count, rng_seed=rng_seed)
+    }
 
 
 def user_prompt(seed: TaskSeed) -> str:
@@ -1182,6 +1222,8 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--invalid-output", type=Path)
     parser.add_argument("--num-seeds", type=int, default=500_000)
     parser.add_argument("--samples-per-seed", type=int, default=2)
+    parser.add_argument("--exclude-num-seeds", type=int, default=0)
+    parser.add_argument("--exclude-seed", type=int, default=42)
     parser.add_argument("--batch-size", type=int, default=512)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--temperature", type=float, default=0.8)
@@ -1210,7 +1252,25 @@ def main() -> int:
     )
     if warning is not None:
         print(warning, flush=True)
-    seeds = generate_seeds(args.num_seeds, args.seed)
+    excluded_keys = (
+        excluded_training_seed_keys(
+            count=args.exclude_num_seeds,
+            rng_seed=args.exclude_seed,
+        )
+        if args.exclude_num_seeds > 0
+        else None
+    )
+    if excluded_keys is not None:
+        print(
+            f"excluded_semantic_seeds={len(excluded_keys):,} "
+            f"exclude_seed={args.exclude_seed}",
+            flush=True,
+        )
+    seeds = generate_seeds(
+        count=args.num_seeds,
+        rng_seed=args.seed,
+        excluded_semantic_keys=excluded_keys,
+    )
     completed = (
         completed_seed_attempts([args.output, invalid_path])
         if args.resume

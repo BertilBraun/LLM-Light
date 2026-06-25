@@ -99,14 +99,14 @@ uv run python -m llm_lite.scripts.generate \
   --maximum-new-tokens 20
 ```
 
-Run the Python MoE pretraining stage on multiple GPUs:
+For a fresh GPU instance or reusable config-driven launch, use the training
+helper with any experiment config:
 
 ```bash
-uv run torchrun --standalone --nproc_per_node=XXX \
-  -m llm_lite.scripts.run_pipeline \
-  --config configs/python_moe_full.yaml \
-  --from pretraining \
-  --to pretraining
+CONFIG_PATH=configs/python_moe_full.yaml \
+NPROC_PER_NODE=2 \
+GPU_IDS=0,1 \
+bash scripts/train.sh
 ```
 
 See [docs/TRAINING.md](docs/TRAINING.md) for full commands, including the

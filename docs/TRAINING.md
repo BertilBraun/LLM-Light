@@ -72,6 +72,22 @@ uv run python -m llm_lite.scripts.generate_tinypython \
 The script writes invalid generations to
 `data/tinypython/qwen25_coder_7b.invalid.jsonl` by default.
 
+Fresh-instance helper:
+
+```bash
+bash scripts/generate_tinypython_dataset.sh
+```
+
+Full public-corpus-scale helper run:
+
+```bash
+RUN_FULL=1 bash scripts/generate_tinypython_dataset.sh
+```
+
+The helper defaults to two teacher models, two samples per seed, 500 pilot
+seeds, and 500,000 full-run seeds. With two teachers and two samples per seed,
+full mode requests up to 2,000,000 raw generation attempts.
+
 ## Tests and Static Checks
 
 Run all tests:
@@ -216,6 +232,22 @@ between resumes:
 Compatible increases to `training.maximum_steps` resume from the latest
 checkpoint. Architecture, tokenizer, packed data, optimizer shape, batch,
 precision, and gradient-clipping changes invalidate pretraining.
+
+For fresh GPU instances, `scripts/train.sh` wraps the same stage sequence for
+any config. `CONFIG_PATH` is required:
+
+```bash
+CONFIG_PATH=configs/python_moe_full.yaml \
+NPROC_PER_NODE=2 \
+GPU_IDS=0,1 \
+bash scripts/train.sh
+```
+
+Useful overrides:
+
+```bash
+PREPARE_DATA=0 RUN_EVALUATION=0 CONFIG_PATH=configs/python_moe_full.yaml bash scripts/train.sh
+```
 
 ## Evaluation
 

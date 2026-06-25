@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Paste this whole file into a fresh Linux GPU instance shell.
+# Fresh-instance launcher for TinyPython teacher generation.
 # It clones the repository, installs uv if needed, syncs generation dependencies,
-# verifies CUDA, then runs the TinyPython teacher-generation pilot.
+# verifies CUDA, then runs two independent vLLM teacher processes.
 #
 # Default behavior:
-#   - 500 semantic seeds
+#   - pilot run: 500 semantic seeds
 #   - 2 samples per seed
 #   - 2 teacher models
 #   - one independent vLLM process per GPU
 #
-# Later full run:
-#   RUN_FULL=1 bash generate_samples.sh
+# Full public-corpus scale:
+#   RUN_FULL=1 bash scripts/generate_tinypython_dataset.sh
+#
+# With the defaults, full mode requests:
+#   500,000 semantic seeds x 2 samples x 2 teachers = up to 2,000,000 raw attempts.
 
 REPO_URL="${REPO_URL:-https://github.com/BertilBraun/LLM-Light.git}"
 REPO_DIR="${REPO_DIR:-LLM-Light}"
@@ -24,9 +27,9 @@ GPU_A="${GPU_A:-0}"
 GPU_B="${GPU_B:-1}"
 
 PILOT_SEEDS="${PILOT_SEEDS:-500}"
-FULL_SEEDS="${FULL_SEEDS:-10000}"
+FULL_SEEDS="${FULL_SEEDS:-500000}"
 SAMPLES_PER_SEED="${SAMPLES_PER_SEED:-2}"
-BATCH_SIZE="${BATCH_SIZE:-64}"
+BATCH_SIZE="${BATCH_SIZE:-512}"
 
 RUN_FULL="${RUN_FULL:-0}"
 OUTPUT_DIR="${OUTPUT_DIR:-data/tinypython}"
@@ -36,13 +39,17 @@ command -v git >/dev/null 2>&1 || { echo "git is required but not installed."; e
 command -v curl >/dev/null 2>&1 || { echo "curl is required but not installed."; exit 1; }
 
 echo "Cloning or updating repository..."
-if [ ! -d "$REPO_DIR/.git" ]; then
-  git clone "$REPO_URL" "$REPO_DIR"
+if [ -d ".git" ] && [ -f "pyproject.toml" ]; then
+  echo "Using current repository checkout."
+else
+  if [ ! -d "$REPO_DIR/.git" ]; then
+    git clone "$REPO_URL" "$REPO_DIR"
+  fi
+  cd "$REPO_DIR"
+  git fetch origin "$BRANCH"
+  git checkout "$BRANCH"
+  git pull --ff-only origin "$BRANCH"
 fi
-cd "$REPO_DIR"
-git fetch origin "$BRANCH"
-git checkout "$BRANCH"
-git pull --ff-only origin "$BRANCH"
 
 echo "Repository revision:"
 git log --oneline -1
@@ -103,6 +110,7 @@ LOG_B="$OUTPUT_DIR/${RUN_NAME}_teacher_b.log"
 echo "Starting TinyPython $RUN_NAME generation..."
 echo "teacher_a=$TEACHER_A gpu=$GPU_A output=$OUTPUT_A"
 echo "teacher_b=$TEACHER_B gpu=$GPU_B output=$OUTPUT_B"
+echo "seeds_per_teacher=$SEED_COUNT samples_per_seed=$SAMPLES_PER_SEED batch_size=$BATCH_SIZE"
 
 CUDA_VISIBLE_DEVICES="$GPU_A" uv run python -m llm_lite.scripts.generate_tinypython \
   --model "$TEACHER_A" \
@@ -138,10 +146,10 @@ Pilot run finished. Inspect:
   data/tinypython/pilot_teacher_b.jsonl
   data/tinypython/pilot_teacher_b.invalid.jsonl
 
-To run the full 10,000-seed generation later, paste:
+To run a full public-corpus-scale generation later:
 
   cd LLM-Light
-  RUN_FULL=1 bash generate_samples.sh
+  RUN_FULL=1 bash scripts/generate_tinypython_dataset.sh
 
 Or override teachers/output:
 
@@ -150,7 +158,7 @@ Or override teachers/output:
   TEACHER_A=Qwen/Qwen2.5-Coder-7B-Instruct \
   TEACHER_B=microsoft/Phi-4-mini-instruct \
   OUTPUT_DIR=data/tinypython \
-  bash generate_samples.sh
+  bash scripts/generate_tinypython_dataset.sh
 
 EOF
 fi

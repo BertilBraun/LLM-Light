@@ -113,6 +113,7 @@ def _iter_huggingface_split_documents(
 ) -> Iterator[Document]:
     dataset = load_dataset(
         path=dataset_configuration.name,
+        name=dataset_configuration.config_name,
         split=split_configuration.source_split,
         streaming=dataset_configuration.streaming,
     )

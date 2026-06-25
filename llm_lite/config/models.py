@@ -139,6 +139,7 @@ class HuggingFaceDatasetSplitConfiguration(Configuration):
 class HuggingFaceDatasetConfiguration(Configuration):
     type: Literal[DatasetType.HUGGINGFACE]
     name: str
+    config_name: str | None = None
     text_column: str | None = None
     text_template: str | None = None
     language_column: str | None = None

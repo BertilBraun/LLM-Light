@@ -16,8 +16,13 @@ def test_iter_huggingface_documents_maps_source_splits(
 ) -> None:
     calls: list[str] = []
 
-    def load_dataset_stub(path: str, split: str, streaming: bool) -> Iterator[dict[str, str]]:
-        calls.append(f"{path}:{split}:{streaming}")
+    def load_dataset_stub(
+        path: str,
+        name: str | None,
+        split: str,
+        streaming: bool,
+    ) -> Iterator[dict[str, str]]:
+        calls.append(f"{path}:{name}:{split}:{streaming}")
         yield {"text": f"{split} story 1"}
         yield {"text": f"{split} story 2"}
 
@@ -46,8 +51,8 @@ def test_iter_huggingface_documents_maps_source_splits(
     )
 
     assert calls == [
-        "roneneldan/TinyStories:train:True",
-        "roneneldan/TinyStories:validation:True",
+        "roneneldan/TinyStories:None:train:True",
+        "roneneldan/TinyStories:None:validation:True",
     ]
     assert [document.document_id for document in documents] == [
         "train-00000000",
@@ -64,8 +69,14 @@ def test_iter_huggingface_documents_maps_source_splits(
 def test_iter_huggingface_documents_filters_and_offsets_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def load_dataset_stub(path: str, split: str, streaming: bool) -> Iterator[dict[str, str]]:
+    def load_dataset_stub(
+        path: str,
+        name: str | None,
+        split: str,
+        streaming: bool,
+    ) -> Iterator[dict[str, str]]:
         assert path == "codeparrot/github-code"
+        assert name is None
         assert split == "train"
         assert streaming is True
         yield {"code": "print('js')", "language": "JavaScript", "license": "mit"}
@@ -106,8 +117,14 @@ def test_iter_huggingface_documents_filters_and_offsets_rows(
 def test_iter_huggingface_documents_formats_template_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def load_dataset_stub(path: str, split: str, streaming: bool) -> Iterator[dict[str, str]]:
+    def load_dataset_stub(
+        path: str,
+        name: str | None,
+        split: str,
+        streaming: bool,
+    ) -> Iterator[dict[str, str]]:
         assert path == "BertilBraun/TinyPython"
+        assert name == "big"
         assert split == "train"
         assert streaming is True
         yield {
@@ -119,6 +136,7 @@ def test_iter_huggingface_documents_formats_template_rows(
     dataset_configuration = HuggingFaceDatasetConfiguration(
         type=DatasetType.HUGGINGFACE,
         name="BertilBraun/TinyPython",
+        config_name="big",
         text_template="{task_description}\n\n{code}\n",
         streaming=True,
         splits=(

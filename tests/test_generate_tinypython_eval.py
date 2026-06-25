@@ -134,6 +134,6 @@ def test_defaults_match_heldout_plan() -> None:
     arguments = parser.parse_args(["--model", "teacher", "--output", "eval.jsonl"])
 
     assert arguments.num_tasks == 200
-    assert arguments.seed == 9001
-    assert arguments.exclude_seed == 42
-    assert arguments.exclude_num_seeds == 500_000
+    assert not hasattr(arguments, "seed")
+    assert not hasattr(arguments, "exclude_seed")
+    assert not hasattr(arguments, "exclude_num_seeds")

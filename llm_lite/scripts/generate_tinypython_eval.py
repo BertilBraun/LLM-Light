@@ -57,6 +57,9 @@ Examples of valid truthy check expressions:
 """.strip()
 
 FENCE_PATTERN = re.compile(r"^\s*```(?:json)?\s*(?P<body>.*?)\s*```\s*$", re.DOTALL)
+HELDOUT_EVAL_SEED = 9001
+TRAINING_GENERATION_SEED = 42
+TRAINING_GENERATION_SEEDS = 500_000
 
 
 def checks_user_prompt(
@@ -166,9 +169,6 @@ def build_argument_parser() -> argparse.ArgumentParser:
     parser.add_argument("--invalid-output", type=Path)
     parser.add_argument("--num-tasks", type=int, default=200)
     parser.add_argument("--candidate-seeds", type=int)
-    parser.add_argument("--seed", type=int, default=9001)
-    parser.add_argument("--exclude-seed", type=int, default=42)
-    parser.add_argument("--exclude-num-seeds", type=int, default=500_000)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--minimum-checks", type=int, default=4)
     parser.add_argument("--maximum-checks", type=int, default=6)
@@ -193,12 +193,12 @@ def main() -> int:
         raise ValueError("--minimum-checks must not be greater than --maximum-checks.")
     candidate_seed_count = args.candidate_seeds or args.num_tasks * 2
     excluded_keys = excluded_training_seed_keys(
-        count=args.exclude_num_seeds,
-        rng_seed=args.exclude_seed,
+        count=TRAINING_GENERATION_SEEDS,
+        rng_seed=TRAINING_GENERATION_SEED,
     )
     seeds = generate_seeds(
         count=candidate_seed_count,
-        rng_seed=args.seed,
+        rng_seed=HELDOUT_EVAL_SEED,
         excluded_semantic_keys=excluded_keys,
     )
 
@@ -236,7 +236,7 @@ def main() -> int:
         max_tokens=args.code_max_tokens,
         min_tokens=40,
         repetition_penalty=1.03,
-        seed=args.seed,
+        seed=HELDOUT_EVAL_SEED,
     )
     checks_sampling = SamplingParams(
         n=1,
@@ -246,7 +246,7 @@ def main() -> int:
         max_tokens=args.checks_max_tokens,
         min_tokens=40,
         repetition_penalty=1.03,
-        seed=args.seed + 1,
+        seed=HELDOUT_EVAL_SEED + 1,
     )
 
     valid_count = 0

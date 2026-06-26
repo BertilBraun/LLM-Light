@@ -2,6 +2,8 @@ from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
 
+from llm_lite.pipeline.tensorboard import configured_run_tensorboard_directory
+
 EVALUATION_TENSORBOARD_DIRECTORY_NAME = "tensorboard"
 
 EVALUATION_SCALAR_TAGS = {
@@ -26,19 +28,30 @@ def write_evaluation_metrics_to_tensorboard(
     step: int,
 ) -> None:
     tensorboard_directory.mkdir(parents=True, exist_ok=True)
-    summary_writer = SummaryWriter(log_dir=str(tensorboard_directory))
+    run_tensorboard_directory = configured_run_tensorboard_directory()
+    if run_tensorboard_directory is not None:
+        run_tensorboard_directory.mkdir(parents=True, exist_ok=True)
+        summary_writers = (
+            SummaryWriter(log_dir=str(tensorboard_directory)),
+            SummaryWriter(log_dir=str(run_tensorboard_directory)),
+        )
+    else:
+        summary_writers = (SummaryWriter(log_dir=str(tensorboard_directory)),)
     try:
         for metric_name, metric_value in metrics.items():
             if not isinstance(metric_value, int | float | bool):
                 continue
-            summary_writer.add_scalar(
-                _tensorboard_tag(metric_name=metric_name),
-                float(metric_value),
-                step,
-            )
-        summary_writer.flush()
+            for summary_writer in summary_writers:
+                summary_writer.add_scalar(
+                    _tensorboard_tag(metric_name=metric_name),
+                    float(metric_value),
+                    step,
+                )
+        for summary_writer in summary_writers:
+            summary_writer.flush()
     finally:
-        summary_writer.close()
+        for summary_writer in summary_writers:
+            summary_writer.close()
 
 
 def _tensorboard_tag(metric_name: str) -> str:

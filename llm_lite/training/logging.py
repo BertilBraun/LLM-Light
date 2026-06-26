@@ -9,6 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from llm_lite.model.routing import RouterUsageSummary
 from llm_lite.pipeline.progress import console_log
+from llm_lite.pipeline.tensorboard import configured_run_tensorboard_directory
 
 
 class TrainingScalar(str, Enum):
@@ -56,7 +57,15 @@ class TrainingMetricLogger:
         self.tensorboard_directory = artifact_directory / "tensorboard"
         self.metrics_path.parent.mkdir(parents=True, exist_ok=True)
         self.tensorboard_directory.mkdir(parents=True, exist_ok=True)
-        self.summary_writer = SummaryWriter(log_dir=str(self.tensorboard_directory))
+        run_tensorboard_directory = configured_run_tensorboard_directory()
+        if run_tensorboard_directory is not None:
+            run_tensorboard_directory.mkdir(parents=True, exist_ok=True)
+            self.summary_writers = (
+                SummaryWriter(log_dir=str(self.tensorboard_directory)),
+                SummaryWriter(log_dir=str(run_tensorboard_directory)),
+            )
+        else:
+            self.summary_writers = (SummaryWriter(log_dir=str(self.tensorboard_directory)),)
 
     def write(self, metric_record: TrainingMetricRecord) -> None:
         with self.metrics_path.open("a", encoding="utf-8") as metrics_file:
@@ -78,51 +87,47 @@ class TrainingMetricLogger:
                 f"world_size={metric_record.distributed_world_size}"
             )
         console_log(message)
-        self.summary_writer.add_scalar(
-            TrainingScalar.LOSS.value,
-            metric_record.loss,
-            metric_record.step,
-        )
-        self.summary_writer.add_scalar(
+        self._add_scalar(TrainingScalar.LOSS.value, metric_record.loss, metric_record.step)
+        self._add_scalar(
             TrainingScalar.LEARNING_RATE.value,
             metric_record.learning_rate,
             metric_record.step,
         )
-        self.summary_writer.add_scalar(
+        self._add_scalar(
             TrainingScalar.GRADIENT_NORM.value,
             metric_record.gradient_norm,
             metric_record.step,
         )
-        self.summary_writer.add_scalar(
+        self._add_scalar(
             TrainingScalar.TOKENS_PER_SECOND.value,
             metric_record.tokens_per_second,
             metric_record.step,
         )
         if metric_record.distributed_world_size is not None:
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 TrainingScalar.DISTRIBUTED_WORLD_SIZE.value,
                 metric_record.distributed_world_size,
                 metric_record.step,
             )
         if metric_record.distributed_global_tokens_per_second is not None:
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 TrainingScalar.DISTRIBUTED_GLOBAL_TOKENS_PER_SECOND.value,
                 metric_record.distributed_global_tokens_per_second,
                 metric_record.step,
             )
         if metric_record.distributed_rank_tokens_per_second is not None:
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 TrainingScalar.DISTRIBUTED_RANK_TOKENS_PER_SECOND.value,
                 metric_record.distributed_rank_tokens_per_second,
                 metric_record.step,
             )
         if metric_record.distributed_checkpoint_time is not None:
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 TrainingScalar.DISTRIBUTED_CHECKPOINT_TIME.value,
                 metric_record.distributed_checkpoint_time,
                 metric_record.step,
             )
-        self.summary_writer.flush()
+        self._flush()
 
     def write_router_usage(
         self,
@@ -135,7 +140,7 @@ class TrainingMetricLogger:
                 expert_counts=router_usage_summary.expert_counts,
             )
             tag_prefix = f"moe/router_layer_{router_usage_summary.layer_index:02d}"
-            self.summary_writer.add_histogram(
+            self._add_histogram(
                 f"{tag_prefix}/selected_expert",
                 histogram_values,
                 step,
@@ -144,61 +149,74 @@ class TrainingMetricLogger:
                 router_usage_summary=router_usage_summary,
             )
             layer_metric_summaries.append(layer_metric_summary)
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/usage_mean",
                 layer_metric_summary.usage_mean,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/usage_std",
                 layer_metric_summary.usage_std,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/usage_min",
                 layer_metric_summary.usage_min,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/usage_max",
                 layer_metric_summary.usage_max,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/entropy",
                 layer_metric_summary.entropy,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/imbalance",
                 layer_metric_summary.imbalance,
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 f"{tag_prefix}/dominance",
                 layer_metric_summary.dominance,
                 step,
             )
         if len(layer_metric_summaries) > 0:
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 "moe/summary/worst_layer_imbalance",
                 max(summary.imbalance for summary in layer_metric_summaries),
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 "moe/summary/worst_layer_dominance",
                 max(summary.dominance for summary in layer_metric_summaries),
                 step,
             )
-            self.summary_writer.add_scalar(
+            self._add_scalar(
                 "moe/summary/worst_layer_entropy",
                 min(summary.entropy for summary in layer_metric_summaries),
                 step,
             )
-        self.summary_writer.flush()
+        self._flush()
 
     def close(self) -> None:
-        self.summary_writer.close()
+        for summary_writer in self.summary_writers:
+            summary_writer.close()
+
+    def _add_scalar(self, tag: str, scalar_value: float, step: int) -> None:
+        for summary_writer in self.summary_writers:
+            summary_writer.add_scalar(tag, scalar_value, step)
+
+    def _add_histogram(self, tag: str, values: torch.Tensor, step: int) -> None:
+        for summary_writer in self.summary_writers:
+            summary_writer.add_histogram(tag, values, step)
+
+    def _flush(self) -> None:
+        for summary_writer in self.summary_writers:
+            summary_writer.flush()
 
 
 def create_training_metric_record(

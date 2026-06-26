@@ -2,10 +2,12 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import TypeAlias
 
 import torch
+from pydantic import BaseModel, ConfigDict
 from torch import nn
 from torch.optim import Optimizer
 
@@ -14,6 +16,7 @@ from llm_lite.config.models import (
     DistributedCheckpointType,
     DistributedStrategy,
 )
+from llm_lite.pipeline.artifact import ArtifactManifest
 from llm_lite.training.topology import DistributedTopology
 
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -23,6 +26,32 @@ JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dic
 class CheckpointState:
     step: int
     checkpoint_path: Path
+
+
+class CheckpointKind(str, Enum):
+    FULL = "full"
+    SHARDED = "sharded"
+
+
+class CheckpointManifest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    step: int
+    producing_artifact_fingerprint: str
+    checkpoint_kind: CheckpointKind
+    checkpoint_path: str
+    completion_status: str
+    created_at: str
+
+
+class CheckpointEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    producing_artifact_fingerprint: str
+    checkpoint_step: int
+    checkpoint_manifest_path: str
+    checkpoint_kind: CheckpointKind
+    created_at: str
 
 
 def latest_checkpoint(checkpoint_directory: Path) -> CheckpointState | None:
@@ -57,6 +86,12 @@ def save_checkpoint(
     }
     torch.save(checkpoint_data, checkpoint_path)
     torch.save(checkpoint_data, checkpoint_directory / "latest.pt")
+    _write_checkpoint_completion(
+        checkpoint_directory=checkpoint_directory,
+        step=step,
+        checkpoint_path=checkpoint_path,
+        checkpoint_kind=CheckpointKind.FULL,
+    )
     return checkpoint_path
 
 
@@ -163,6 +198,12 @@ def finalize_sharded_checkpoint(
             "manifest": f"{step_directory.name}/manifest.json",
         },
     )
+    _write_checkpoint_event(
+        checkpoint_directory=checkpoint_directory,
+        step=step,
+        checkpoint_kind=CheckpointKind.SHARDED,
+        checkpoint_manifest_path=step_directory / "manifest.json",
+    )
     return step_directory
 
 
@@ -229,6 +270,71 @@ def _write_json_atomically(path: Path, value: dict[str, JsonValue]) -> None:
     temporary_path = path.with_suffix(path.suffix + ".pending")
     temporary_path.write_text(json.dumps(value, sort_keys=True, indent=2), encoding="utf-8")
     os.replace(temporary_path, path)
+
+
+def _write_checkpoint_completion(
+    checkpoint_directory: Path,
+    step: int,
+    checkpoint_path: Path,
+    checkpoint_kind: CheckpointKind,
+) -> None:
+    artifact_directory = checkpoint_directory.parent
+    step_directory = checkpoint_directory / f"step_{step:08d}"
+    step_directory.mkdir(parents=True, exist_ok=True)
+    manifest_path = step_directory / "manifest.json"
+    manifest = CheckpointManifest(
+        step=step,
+        producing_artifact_fingerprint=_artifact_fingerprint(
+            artifact_directory=artifact_directory,
+        ),
+        checkpoint_kind=checkpoint_kind,
+        checkpoint_path=Path(os.path.relpath(checkpoint_path, step_directory)).as_posix(),
+        completion_status="complete",
+        created_at=_utc_now(),
+    )
+    temporary_path = manifest_path.with_suffix(".json.pending")
+    temporary_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+    os.replace(temporary_path, manifest_path)
+    _write_checkpoint_event(
+        checkpoint_directory=checkpoint_directory,
+        step=step,
+        checkpoint_kind=checkpoint_kind,
+        checkpoint_manifest_path=manifest_path,
+    )
+
+
+def _write_checkpoint_event(
+    checkpoint_directory: Path,
+    step: int,
+    checkpoint_kind: CheckpointKind,
+    checkpoint_manifest_path: Path,
+) -> None:
+    artifact_directory = checkpoint_directory.parent
+    event_directory = artifact_directory / "events"
+    event_directory.mkdir(parents=True, exist_ok=True)
+    event = CheckpointEvent(
+        producing_artifact_fingerprint=_artifact_fingerprint(
+            artifact_directory=artifact_directory,
+        ),
+        checkpoint_step=step,
+        checkpoint_manifest_path=checkpoint_manifest_path.relative_to(
+            artifact_directory,
+        ).as_posix(),
+        checkpoint_kind=checkpoint_kind,
+        created_at=_utc_now(),
+    )
+    event_path = event_directory / f"checkpoint_{step:08d}.json"
+    temporary_path = event_path.with_suffix(".json.pending")
+    temporary_path.write_text(event.model_dump_json(indent=2), encoding="utf-8")
+    os.replace(temporary_path, event_path)
+
+
+def _artifact_fingerprint(artifact_directory: Path) -> str:
+    manifest_path = artifact_directory / "manifest.json"
+    if not manifest_path.exists():
+        return "unknown"
+    manifest = ArtifactManifest.model_validate_json(manifest_path.read_text(encoding="utf-8"))
+    return manifest.fingerprint
 
 
 def _utc_now() -> str:

@@ -11,6 +11,7 @@ from llm_lite.data.datasets import (
     write_packed_sequence_stream,
 )
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.tokenizer.character import train_character_tokenizer
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
@@ -107,3 +108,51 @@ def test_load_latest_checkpoint_loads_model_and_returns_step(tmp_path: Path) -> 
     )
 
     assert loaded_step == 7
+
+
+def test_save_checkpoint_writes_checkpoint_manifest_and_event(tmp_path: Path) -> None:
+    model = nn.Linear(1, 1)
+    optimizer = AdamW(model.parameters(), lr=0.1)
+    artifact_directory = tmp_path / "artifact"
+    artifact_directory.mkdir()
+    (artifact_directory / "manifest.json").write_text(
+        ArtifactManifest(
+            stage_name="pretraining",
+            fingerprint="sha256:training",
+            artifact_version=1,
+            status=ArtifactStatus.RUNNING,
+            created_at="2026-06-26T00:00:00Z",
+            configuration_hash="sha256:configuration",
+            contract_version=1,
+            parents={},
+            files={},
+            metrics={},
+        ).model_dump_json(),
+        encoding="utf-8",
+    )
+
+    save_checkpoint(
+        checkpoint_directory=artifact_directory / "checkpoints",
+        model=model,
+        optimizer=optimizer,
+        step=7,
+    )
+
+    checkpoint_manifest = json.loads(
+        (artifact_directory / "checkpoints" / "step_00000007" / "manifest.json").read_text(
+            encoding="utf-8"
+        ),
+    )
+    checkpoint_event = json.loads(
+        (artifact_directory / "events" / "checkpoint_00000007.json").read_text(
+            encoding="utf-8",
+        ),
+    )
+
+    assert checkpoint_manifest["producing_artifact_fingerprint"] == "sha256:training"
+    assert checkpoint_manifest["checkpoint_kind"] == "full"
+    assert checkpoint_manifest["completion_status"] == "complete"
+    assert checkpoint_event["checkpoint_step"] == 7
+    assert checkpoint_event["checkpoint_manifest_path"] == (
+        "checkpoints/step_00000007/manifest.json"
+    )

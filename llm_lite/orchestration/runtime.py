@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import shutil
 import socket
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +17,7 @@ from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.pipeline.registry import ArtifactDirectory, ArtifactRegistry
 from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
+from llm_lite.pipeline.tensorboard import RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT
 
 
 class LockRecord(BaseModel):
@@ -140,11 +143,15 @@ def run_stage_job(
         contract_version=planned_artifact.contract_version,
     )
     try:
-        stage_output = stage.run(
-            experiment_configuration=resolved_run.experiment_configuration,
-            registry=registry,
-            artifact_directory=artifact_directory,
-        )
+        with _stage_run_tensorboard_environment(
+            resolved_run=resolved_run,
+            stage_name=stage_name,
+        ):
+            stage_output = stage.run(
+                experiment_configuration=resolved_run.experiment_configuration,
+                registry=registry,
+                artifact_directory=artifact_directory,
+            )
     except Exception:
         registry.write_failed_manifest(
             artifact_type=stage_name.value,
@@ -245,6 +252,23 @@ def _process_is_running(process_id: int) -> bool:
     except OSError:
         return False
     return True
+
+
+@contextmanager
+def _stage_run_tensorboard_environment(
+    resolved_run: ResolvedRun,
+    stage_name: StageName,
+) -> Iterator[None]:
+    run_tensorboard_directory = resolved_run.run_directory / "tensorboard" / stage_name.value
+    previous_value = os.environ.get(RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT)
+    os.environ[RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT] = str(run_tensorboard_directory)
+    try:
+        yield
+    finally:
+        if previous_value is None:
+            os.environ.pop(RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT, None)
+        else:
+            os.environ[RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT] = previous_value
 
 
 def _utc_now() -> str:

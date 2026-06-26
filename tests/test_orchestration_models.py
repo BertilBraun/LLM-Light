@@ -80,12 +80,17 @@ def test_pipeline_writes_resolved_run_and_semantic_manifest(tmp_path: Path) -> N
         to_stage=StageName.RAW_DATASET,
     )
 
-    raw_manifest = json.loads(
-        (run_directory / "artifacts" / "raw_dataset" / "manifest.json").read_text(
-            encoding="utf-8",
-        ),
-    )
     run_manifest = json.loads((run_directory / "run_manifest.json").read_text(encoding="utf-8"))
+    raw_fingerprint = run_manifest["artifacts"]["raw_dataset"]
+    raw_manifest = json.loads(
+        (
+            tmp_path
+            / "artifact_store"
+            / "raw_dataset"
+            / raw_fingerprint.replace(":", "_")
+            / "manifest.json"
+        ).read_text(encoding="utf-8"),
+    )
 
     assert exit_code == 0
     assert (run_directory / "resolved_config.json").exists()

@@ -77,7 +77,24 @@ def build_argument_parser() -> argparse.ArgumentParser:
 def main() -> int:
     argument_parser = build_argument_parser()
     arguments = argument_parser.parse_args()
-    configuration_paths = _expand_configuration_paths(configurations=tuple(arguments.config))
+    return run_plan(
+        configuration_paths=_expand_configuration_paths(configurations=tuple(arguments.config)),
+        max_parallel_jobs=arguments.max_parallel_jobs,
+        gpus=arguments.gpus,
+        from_stage=None if arguments.from_stage is None else StageName(arguments.from_stage),
+        to_stage=None if arguments.to_stage is None else StageName(arguments.to_stage),
+    )
+
+
+def run_plan(
+    configuration_paths: tuple[Path, ...],
+    max_parallel_jobs: int,
+    gpus: str | None,
+    from_stage: StageName | None = None,
+    to_stage: StageName | None = None,
+) -> int:
+    if max_parallel_jobs < 1:
+        raise ValueError("--max-parallel-jobs must be at least 1.")
     resolved_runs = tuple(
         resolve_run(
             experiment_configuration=load_experiment_configuration(
@@ -87,10 +104,10 @@ def main() -> int:
         )
         for configuration_path in configuration_paths
     )
-    gpu_pool = GpuPool.from_argument(gpus=arguments.gpus)
+    gpu_pool = GpuPool.from_argument(gpus=gpus)
     selected_stage_names = _selected_stage_names(
-        from_stage=None if arguments.from_stage is None else StageName(arguments.from_stage),
-        to_stage=None if arguments.to_stage is None else StageName(arguments.to_stage),
+        from_stage=from_stage,
+        to_stage=to_stage,
     )
     for resolved_run in resolved_runs:
         _execute_resolved_run(

@@ -19,6 +19,7 @@ from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
+from llm_lite.scripts.run_plan import run_plan
 from llm_lite.utilities.random import seed_everything
 
 
@@ -71,23 +72,18 @@ def run_pipeline(
     _print_review(review=review)
     if dry_run:
         return 0
-    event_logger = PipelineEventLogger(run_directory=experiment_configuration.experiment.output_dir)
-    performance_logger = PipelinePerformanceLogger(
-        run_directory=experiment_configuration.experiment.output_dir,
-    )
-    _log_review(review=review, event_logger=event_logger)
-    try:
-        _execute_pipeline(
-            resolved_run=resolved_run,
-            registry=registry,
-            event_logger=event_logger,
-            performance_logger=performance_logger,
-            stages=selected_stages,
-            force_stage_names=force_stage_names,
+    if force_stages:
+        console_log(
+            "--force is not supported by run_plan execution; recompute by removing artifacts.",
         )
-    finally:
-        performance_logger.close()
-    return 0
+        return 1
+    return run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
+        from_stage=from_stage,
+        to_stage=to_stage,
+    )
 
 
 def build_argument_parser() -> argparse.ArgumentParser:

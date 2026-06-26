@@ -6,6 +6,7 @@ from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.config.models import ExperimentFile
+from llm_lite.orchestration.models import PlannedArtifact, ResolvedRun, resolve_run
 from llm_lite.pipeline.logging import (
     PipelineEventLogger,
     PipelineEventRecord,
@@ -36,12 +37,18 @@ def run_pipeline(
 ) -> int:
     experiment_configuration = load_experiment_configuration(configuration_path=configuration_path)
     seed_everything(seed=experiment_configuration.experiment.seed)
-    registry = ArtifactRegistry(run_directory=experiment_configuration.experiment.output_dir)
     selected_stages = _selected_stages(
         stages=ORDERED_PIPELINE_STAGES,
         from_stage=from_stage,
         to_stage=to_stage,
     )
+    resolved_run = resolve_run(
+        experiment_configuration=experiment_configuration,
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+    if not dry_run:
+        _write_resolved_configuration(resolved_run=resolved_run)
+    registry = ArtifactRegistry(run_directory=resolved_run.run_directory)
     distributed_rank = _environment_rank()
     if distributed_rank is not None and distributed_rank != 0:
         return _run_distributed_worker_stage(
@@ -56,7 +63,7 @@ def run_pipeline(
         force_stages=force_stages,
     )
     review = _review_pipeline(
-        experiment_configuration=experiment_configuration,
+        resolved_run=resolved_run,
         registry=registry,
         stages=selected_stages,
         force_stage_names=force_stage_names,
@@ -69,17 +76,9 @@ def run_pipeline(
         run_directory=experiment_configuration.experiment.output_dir,
     )
     _log_review(review=review, event_logger=event_logger)
-    experiment_configuration.experiment.output_dir.mkdir(parents=True, exist_ok=True)
-    resolved_configuration_path = (
-        experiment_configuration.experiment.output_dir / "resolved_config.json"
-    )
-    resolved_configuration_path.write_text(
-        experiment_configuration.model_dump_json(indent=2),
-        encoding="utf-8",
-    )
     try:
         _execute_pipeline(
-            experiment_configuration=experiment_configuration,
+            resolved_run=resolved_run,
             registry=registry,
             event_logger=event_logger,
             performance_logger=performance_logger,
@@ -178,26 +177,26 @@ def _run_distributed_worker_stage(
 
 
 def _review_pipeline(
-    experiment_configuration: ExperimentFile,
+    resolved_run: ResolvedRun,
     registry: ArtifactRegistry,
     stages: tuple[PipelineStage, ...],
     force_stage_names: set[StageName],
 ) -> list[StageReview]:
     review: list[StageReview] = []
     for stage in stages:
-        configuration_hash = stage.configuration_hash(
-            experiment_configuration=experiment_configuration,
-        )
-        parent_hashes = _parent_hashes(registry=registry, stage=stage)
+        planned_artifact = resolved_run.artifact_for_stage(stage_name=stage.name)
+        parent_hashes = _parent_fingerprints(planned_artifact=planned_artifact)
         if stage.name in force_stage_names:
             review.append(StageReview(stage_name=stage.name, action="force recompute"))
         elif registry.is_compatible(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
         ):
             continuation_action = stage.continuation_action(
-                experiment_configuration=experiment_configuration,
+                experiment_configuration=resolved_run.experiment_configuration,
                 registry=registry,
             )
             if continuation_action is not None:
@@ -216,11 +215,13 @@ def _review_pipeline(
             )
         elif registry.has_matching_fingerprint(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
         ):
             interrupted_action = stage.interrupted_action(
-                experiment_configuration=experiment_configuration,
+                experiment_configuration=resolved_run.experiment_configuration,
                 registry=registry,
             )
             if interrupted_action is not None:
@@ -238,35 +239,38 @@ def _review_pipeline(
 
 
 def _execute_pipeline(
-    experiment_configuration: ExperimentFile,
+    resolved_run: ResolvedRun,
     registry: ArtifactRegistry,
     event_logger: PipelineEventLogger,
     performance_logger: PipelinePerformanceLogger,
     stages: tuple[PipelineStage, ...],
     force_stage_names: set[StageName],
 ) -> None:
+    completed_stage_names: list[StageName] = []
     for stage in stages:
-        configuration_hash = stage.configuration_hash(
-            experiment_configuration=experiment_configuration,
-        )
-        parent_hashes = _parent_hashes(registry=registry, stage=stage)
+        planned_artifact = resolved_run.artifact_for_stage(stage_name=stage.name)
+        parent_hashes = _parent_fingerprints(planned_artifact=planned_artifact)
         compatible = registry.is_compatible(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
         )
         continuation_action = stage.continuation_action(
-            experiment_configuration=experiment_configuration,
+            experiment_configuration=resolved_run.experiment_configuration,
             registry=registry,
         )
         matching_fingerprint = registry.has_matching_fingerprint(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
         )
         interrupted_action = (
             stage.interrupted_action(
-                experiment_configuration=experiment_configuration,
+                experiment_configuration=resolved_run.experiment_configuration,
                 registry=registry,
             )
             if matching_fingerprint and not compatible
@@ -283,6 +287,11 @@ def _execute_pipeline(
                 stage_name=stage.name,
                 message="compatible artifact found",
             )
+            completed_stage_names.append(stage.name)
+            _write_run_manifest(
+                resolved_run=resolved_run,
+                completed_stage_names=tuple(completed_stage_names),
+            )
             continue
         artifact_directory = registry.artifacts_directory / stage.name.value
         if artifact_directory.exists() and (
@@ -292,8 +301,10 @@ def _execute_pipeline(
         artifact_directory.mkdir(parents=True, exist_ok=True)
         registry.write_running_manifest(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
         )
         _log_stage_event(
             event_logger=event_logger,
@@ -304,16 +315,23 @@ def _execute_pipeline(
         console_log(f"[start] {stage.name.value}")
         with performance_logger.measure_stage(stage_name=stage.name.value) as performance_timer:
             stage_output = stage.run(
-                experiment_configuration=experiment_configuration,
+                experiment_configuration=resolved_run.experiment_configuration,
                 registry=registry,
                 artifact_directory=artifact_directory,
             )
         registry.write_complete_manifest(
             artifact_type=stage.name.value,
-            configuration_hash=configuration_hash,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
             parent_hashes=parent_hashes,
+            contract_version=planned_artifact.contract_version,
             files=stage_output.files,
             metrics=stage_output.metrics,
+        )
+        completed_stage_names.append(stage.name)
+        _write_run_manifest(
+            resolved_run=resolved_run,
+            completed_stage_names=tuple(completed_stage_names),
         )
         _print_stage_output(stage_name=stage.name, stage_output=stage_output)
         performance_logger.write_stage_timing(
@@ -328,15 +346,31 @@ def _execute_pipeline(
         )
 
 
-def _parent_hashes(registry: ArtifactRegistry, stage: PipelineStage) -> dict[str, str]:
-    parent_hashes: dict[str, str] = {}
-    for parent_stage_name in stage.parents:
-        manifest = registry.read_manifest(artifact_type=parent_stage_name.value)
-        if manifest is not None:
-            parent_hashes[parent_stage_name.value] = registry.artifact_identifier(
-                artifact_type=parent_stage_name.value,
-            )
-    return parent_hashes
+def _parent_fingerprints(planned_artifact: PlannedArtifact) -> dict[str, str]:
+    return {
+        parent.stage_name.value: parent.fingerprint.value
+        for parent in planned_artifact.parent_fingerprints
+    }
+
+
+def _write_resolved_configuration(resolved_run: ResolvedRun) -> None:
+    resolved_run.run_directory.mkdir(parents=True, exist_ok=True)
+    resolved_run.resolved_configuration_path.write_text(
+        resolved_run.experiment_configuration.model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_run_manifest(
+    resolved_run: ResolvedRun,
+    completed_stage_names: tuple[StageName, ...],
+) -> None:
+    resolved_run.run_manifest_path.write_text(
+        resolved_run.run_manifest(
+            completed_stage_names=completed_stage_names,
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
 
 
 def _expanded_force_stages(

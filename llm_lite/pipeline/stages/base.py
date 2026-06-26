@@ -3,6 +3,8 @@ from llm_lite.pipeline.registry import ArtifactRegistry
 
 
 class BasePipelineStage:
+    contract_version: int = 1
+
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         return "compatible, skip"
 

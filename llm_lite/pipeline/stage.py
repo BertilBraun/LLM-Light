@@ -26,6 +26,7 @@ class StageOutput:
 class PipelineStage(Protocol):
     name: StageName
     parents: tuple[StageName, ...]
+    contract_version: int
 
     def configuration_hash(self, experiment_configuration: ExperimentFile) -> str: ...
 

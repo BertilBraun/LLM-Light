@@ -5,7 +5,6 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
-from llm_lite.pipeline.hashing import hash_file
 
 
 class ArtifactRegistry:
@@ -34,16 +33,19 @@ class ArtifactRegistry:
     def write_running_manifest(
         self,
         artifact_type: str,
+        fingerprint: str,
         configuration_hash: str,
         parent_hashes: dict[str, str],
+        contract_version: int,
     ) -> None:
         manifest = ArtifactManifest(
-            artifact_type=artifact_type,
+            stage_name=artifact_type,
+            fingerprint=fingerprint,
             artifact_version=1,
             status=ArtifactStatus.RUNNING,
             created_at=_utc_now(),
             configuration_hash=configuration_hash,
-            implementation_version="local",
+            contract_version=contract_version,
             parents=parent_hashes,
             files={},
             metrics={},
@@ -53,18 +55,22 @@ class ArtifactRegistry:
     def write_complete_manifest(
         self,
         artifact_type: str,
+        fingerprint: str,
         configuration_hash: str,
         parent_hashes: dict[str, str],
+        contract_version: int,
         files: dict[str, str],
         metrics: dict[str, int | float | str | bool],
     ) -> ArtifactManifest:
         manifest = ArtifactManifest(
-            artifact_type=artifact_type,
+            stage_name=artifact_type,
+            fingerprint=fingerprint,
             artifact_version=1,
             status=ArtifactStatus.COMPLETE,
             created_at=_utc_now(),
+            completed_at=_utc_now(),
             configuration_hash=configuration_hash,
-            implementation_version="local",
+            contract_version=contract_version,
             parents=parent_hashes,
             files=files,
             metrics=metrics,
@@ -75,15 +81,21 @@ class ArtifactRegistry:
     def is_compatible(
         self,
         artifact_type: str,
+        fingerprint: str,
         configuration_hash: str,
         parent_hashes: dict[str, str],
+        contract_version: int,
     ) -> bool:
         manifest = self.read_manifest(artifact_type=artifact_type)
         if manifest is None:
             return False
         if manifest.status != ArtifactStatus.COMPLETE:
             return False
+        if manifest.fingerprint != fingerprint:
+            return False
         if manifest.configuration_hash != configuration_hash:
+            return False
+        if manifest.contract_version != contract_version:
             return False
         if manifest.parents != parent_hashes:
             return False
@@ -96,19 +108,26 @@ class ArtifactRegistry:
     def has_matching_fingerprint(
         self,
         artifact_type: str,
+        fingerprint: str,
         configuration_hash: str,
         parent_hashes: dict[str, str],
+        contract_version: int,
     ) -> bool:
         manifest = self.read_manifest(artifact_type=artifact_type)
         if manifest is None:
             return False
         return (
-            manifest.configuration_hash == configuration_hash and manifest.parents == parent_hashes
+            manifest.fingerprint == fingerprint
+            and manifest.configuration_hash == configuration_hash
+            and manifest.parents == parent_hashes
+            and manifest.contract_version == contract_version
         )
 
     def artifact_identifier(self, artifact_type: str) -> str:
-        manifest_path = self.manifest_path(artifact_type=artifact_type)
-        return hash_file(file_path=manifest_path)
+        manifest = self.read_manifest(artifact_type=artifact_type)
+        if manifest is None:
+            raise ValueError(f"No manifest exists for artifact {artifact_type}.")
+        return manifest.fingerprint
 
     def _write_manifest_atomically(self, artifact_type: str, manifest: ArtifactManifest) -> None:
         artifact_directory = self.artifact_directory(artifact_type=artifact_type)

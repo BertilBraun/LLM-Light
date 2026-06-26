@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
@@ -52,6 +54,10 @@ def test_artifact_store_paths_resolve_from_run_directory() -> None:
         ).parent
         == Path("artifact_store") / "raw_dataset"
     )
+    assert store_paths.artifact_directory(
+        stage_name=StageName.RAW_DATASET,
+        fingerprint=raw_artifact.fingerprint,
+    ).name == raw_artifact.fingerprint.value.replace(":", "_")
 
 
 def test_pipeline_writes_resolved_run_and_semantic_manifest(tmp_path: Path) -> None:
@@ -87,3 +93,47 @@ def test_pipeline_writes_resolved_run_and_semantic_manifest(tmp_path: Path) -> N
     assert raw_manifest["fingerprint"].startswith("sha256:")
     assert raw_manifest["parents"] == {}
     assert run_manifest["artifacts"]["raw_dataset"] == raw_manifest["fingerprint"]
+
+
+def test_run_plan_writes_raw_dataset_to_artifact_store(tmp_path: Path) -> None:
+    run_directory = tmp_path / "runs" / "verify_one_sentence"
+    configuration_path = tmp_path / "verify_one_sentence.yaml"
+    configuration_path.write_text(
+        Path("configs/verify_one_sentence.yaml")
+        .read_text(encoding="utf-8")
+        .replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+
+    completed_process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "llm_lite.scripts.run_plan",
+            "--config",
+            str(configuration_path),
+            "--to",
+            StageName.RAW_DATASET.value,
+        ],
+        check=False,
+        cwd=Path.cwd(),
+    )
+
+    run_manifest = json.loads((run_directory / "run_manifest.json").read_text(encoding="utf-8"))
+    raw_fingerprint = run_manifest["artifacts"]["raw_dataset"]
+    artifact_manifest_path = (
+        tmp_path
+        / "artifact_store"
+        / "raw_dataset"
+        / raw_fingerprint.replace(":", "_")
+        / "manifest.json"
+    )
+    artifact_manifest = json.loads(artifact_manifest_path.read_text(encoding="utf-8"))
+
+    assert completed_process.returncode == 0
+    assert (run_directory / "resolved_config.json").exists()
+    assert artifact_manifest["fingerprint"] == raw_fingerprint
+    assert artifact_manifest["status"] == "complete"

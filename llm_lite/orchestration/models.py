@@ -64,7 +64,9 @@ class ArtifactStorePaths(OrchestrationModel):
         return self.root_directory / stage_name.value
 
     def artifact_directory(self, stage_name: StageName, fingerprint: ArtifactFingerprint) -> Path:
-        return self.stage_directory(stage_name=stage_name) / fingerprint.value
+        return self.stage_directory(stage_name=stage_name) / _fingerprint_path_segment(
+            fingerprint=fingerprint,
+        )
 
     def manifest_path(self, stage_name: StageName, fingerprint: ArtifactFingerprint) -> Path:
         return self.artifact_directory(stage_name=stage_name, fingerprint=fingerprint) / (
@@ -181,3 +183,7 @@ def _planned_artifact_for_stage(
 
 def _stage_contract_version(stage: PipelineStage) -> int:
     return stage.contract_version
+
+
+def _fingerprint_path_segment(fingerprint: ArtifactFingerprint) -> str:
+    return fingerprint.value.replace(":", "_")

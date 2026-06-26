@@ -1,4 +1,5 @@
 import os
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -7,19 +8,30 @@ from pydantic import ValidationError
 from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 
 
+@dataclass(frozen=True)
+class ArtifactDirectory:
+    artifact_type: str
+    directory: Path
+
+
 class ArtifactRegistry:
-    def __init__(self, run_directory: Path) -> None:
+    def __init__(
+        self,
+        run_directory: Path,
+        artifact_directories: tuple[ArtifactDirectory, ...] = (),
+    ) -> None:
         self.run_directory = run_directory
         self.artifacts_directory = run_directory / "artifacts"
+        self.artifact_directories = artifact_directories
         self.artifacts_directory.mkdir(parents=True, exist_ok=True)
 
     def artifact_directory(self, artifact_type: str) -> Path:
-        artifact_directory = self.artifacts_directory / artifact_type
+        artifact_directory = self._configured_artifact_directory(artifact_type=artifact_type)
         artifact_directory.mkdir(parents=True, exist_ok=True)
         return artifact_directory
 
     def manifest_path(self, artifact_type: str) -> Path:
-        return self.artifacts_directory / artifact_type / "manifest.json"
+        return self._configured_artifact_directory(artifact_type=artifact_type) / "manifest.json"
 
     def read_manifest(self, artifact_type: str) -> ArtifactManifest | None:
         manifest_path = self.manifest_path(artifact_type=artifact_type)
@@ -78,6 +90,29 @@ class ArtifactRegistry:
         self._write_manifest_atomically(artifact_type=artifact_type, manifest=manifest)
         return manifest
 
+    def write_failed_manifest(
+        self,
+        artifact_type: str,
+        fingerprint: str,
+        configuration_hash: str,
+        parent_hashes: dict[str, str],
+        contract_version: int,
+    ) -> None:
+        manifest = ArtifactManifest(
+            stage_name=artifact_type,
+            fingerprint=fingerprint,
+            artifact_version=1,
+            status=ArtifactStatus.FAILED,
+            created_at=_utc_now(),
+            completed_at=_utc_now(),
+            configuration_hash=configuration_hash,
+            contract_version=contract_version,
+            parents=parent_hashes,
+            files={},
+            metrics={},
+        )
+        self._write_manifest_atomically(artifact_type=artifact_type, manifest=manifest)
+
     def is_compatible(
         self,
         artifact_type: str,
@@ -135,6 +170,12 @@ class ArtifactRegistry:
         final_path = artifact_directory / "manifest.json"
         temporary_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
         os.replace(temporary_path, final_path)
+
+    def _configured_artifact_directory(self, artifact_type: str) -> Path:
+        for artifact_directory in self.artifact_directories:
+            if artifact_directory.artifact_type == artifact_type:
+                return artifact_directory.directory
+        return self.artifacts_directory / artifact_type
 
 
 def _utc_now() -> str:

@@ -28,6 +28,11 @@ generation, multiple evaluation paths, artifact-based pipeline design,
 distributed data-parallel training, throughput logging, TensorBoard
 observability, and run-bundle export.
 
+A future orchestration rewrite is sketched in
+[ORCHESTRATION.md](ORCHESTRATION.md). The intent is to keep YAML configs and
+run-centric TensorBoard inspection while moving artifacts into a canonical
+deduplicated artifact store managed by a local plan executor.
+
 ## Open Documentation Gaps
 
 - Add a concise artifact schema reference if manifest formats stabilize.
@@ -81,6 +86,19 @@ Report parse rate, execution rate, passed checks, total checks, pass rate, and
 representative failures for every serious run.
 
 ## Systems Gaps
+
+### Orchestration
+
+The current runner is sequential and run-directory-local. Future work should
+replace it with the local executor design in [ORCHESTRATION.md](ORCHESTRATION.md):
+
+- Canonical artifact store keyed by stage fingerprints.
+- Small run directories focused on TensorBoard and run manifests.
+- Subprocess jobs that can run CPU stages or launch `torchrun`.
+- Resource-aware local scheduling for one compute node.
+- Artifact locks to prevent duplicate work across submitted runs.
+- Async checkpoint evaluation.
+- Parameter sweeps through generated normal configs.
 
 ### Distributed Scaling
 

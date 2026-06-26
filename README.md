@@ -23,6 +23,8 @@ models.
   the TinyPython MoE run.
 - [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md): future work and open project
   gaps only.
+- [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md): planned artifact-store,
+  local executor, async evaluation, and sweep architecture.
 - [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md): local coding and testing
   standards.
 

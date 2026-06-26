@@ -29,6 +29,7 @@ class PythonCompletionTaskRecord(BaseModel):
     prompt: str | None = None
     task_description: str | None = None
     checks: tuple[str, ...]
+    task_family: str | None = None
 
     @model_validator(mode="after")
     def require_exactly_one_prompt_kind(self) -> PythonCompletionTaskRecord:
@@ -49,6 +50,7 @@ class PythonCompletionTaskResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     task_id: str
+    task_family: str | None
     prompt: str
     generated_completion: str
     parsed: bool
@@ -60,10 +62,23 @@ class PythonCompletionTaskResult(BaseModel):
     stderr: str
 
 
+class PythonCompletionFamilyResult(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    task_family: str
+    tasks: int
+    parsed_tasks: int
+    executed_tasks: int
+    passed_checks: int
+    total_checks: int
+    pass_rate: float
+
+
 class PythonCompletionEvaluationResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     tasks: tuple[PythonCompletionTaskResult, ...]
+    families: tuple[PythonCompletionFamilyResult, ...]
     parsed_tasks: int
     executed_tasks: int
     passed_checks: int
@@ -161,6 +176,7 @@ def evaluate_python_completion_task(
     if not parse_result.parsed:
         return PythonCompletionTaskResult(
             task_id=task.task_id,
+            task_family=task.task_family,
             prompt=prompt,
             generated_completion=generated_completion,
             parsed=False,
@@ -187,6 +203,7 @@ def evaluate_python_completion_task(
     )
     return PythonCompletionTaskResult(
         task_id=task.task_id,
+        task_family=task.task_family,
         prompt=prompt,
         generated_completion=generated_completion,
         parsed=True,
@@ -330,6 +347,53 @@ def aggregate_python_completion_results(
         pass_rate = passed_checks / total_checks
     return PythonCompletionEvaluationResult(
         tasks=task_results,
+        families=_aggregate_python_completion_family_results(task_results=task_results),
+        parsed_tasks=parsed_tasks,
+        executed_tasks=executed_tasks,
+        passed_checks=passed_checks,
+        total_checks=total_checks,
+        pass_rate=pass_rate,
+    )
+
+
+def _aggregate_python_completion_family_results(
+    task_results: tuple[PythonCompletionTaskResult, ...],
+) -> tuple[PythonCompletionFamilyResult, ...]:
+    task_families = sorted(
+        {
+            task_result.task_family
+            for task_result in task_results
+            if task_result.task_family is not None
+        },
+    )
+    family_results: list[PythonCompletionFamilyResult] = []
+    for task_family in task_families:
+        family_task_results = tuple(
+            task_result for task_result in task_results if task_result.task_family == task_family
+        )
+        family_results.append(
+            _aggregate_python_completion_family_result(
+                task_family=task_family,
+                task_results=family_task_results,
+            ),
+        )
+    return tuple(family_results)
+
+
+def _aggregate_python_completion_family_result(
+    task_family: str,
+    task_results: tuple[PythonCompletionTaskResult, ...],
+) -> PythonCompletionFamilyResult:
+    parsed_tasks = sum(1 for task_result in task_results if task_result.parsed)
+    executed_tasks = sum(1 for task_result in task_results if _task_executed(task_result))
+    passed_checks = sum(task_result.passed_checks for task_result in task_results)
+    total_checks = sum(task_result.total_checks for task_result in task_results)
+    pass_rate = 0.0
+    if total_checks > 0:
+        pass_rate = passed_checks / total_checks
+    return PythonCompletionFamilyResult(
+        task_family=task_family,
+        tasks=len(task_results),
         parsed_tasks=parsed_tasks,
         executed_tasks=executed_tasks,
         passed_checks=passed_checks,

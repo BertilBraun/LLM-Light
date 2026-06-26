@@ -13,6 +13,7 @@ def test_evaluation_metrics_write_tensorboard_scalars(tmp_path: Path) -> None:
             "perplexity_loss": 0.4,
             "python_completion_pass_rate": 0.75,
             "python_completion_passed_checks": 3,
+            "python_completion_family_string_parsing_concrete_pass_rate": 0.5,
             "non_numeric": "skip",
         },
         step=42,
@@ -26,6 +27,7 @@ def test_evaluation_metrics_write_tensorboard_scalars(tmp_path: Path) -> None:
         "eval/perplexity_loss",
         "eval/python_completion/pass_rate",
         "eval/python_completion/passed_checks",
+        "eval/python_completion/family/string_parsing_concrete/pass_rate",
     }
     assert tensorboard_events.Scalars("eval/python_completion/pass_rate")[0].step == 42
     assert tensorboard_events.Scalars("eval/python_completion/pass_rate")[0].value == 0.75

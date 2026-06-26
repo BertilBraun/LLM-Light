@@ -1,4 +1,5 @@
 import time
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
@@ -35,6 +36,18 @@ class TrainingMetricRecord(BaseModel):
     distributed_rank_tokens_per_second: float | None = None
     distributed_checkpoint_time: float | None = None
     distributed_strategy: str | None = None
+
+
+@dataclass(frozen=True)
+class RouterLayerMetricSummary:
+    layer_index: int
+    usage_mean: float
+    usage_std: float
+    usage_min: float
+    usage_max: float
+    entropy: float
+    imbalance: float
+    dominance: float
 
 
 class TrainingMetricLogger:
@@ -116,6 +129,7 @@ class TrainingMetricLogger:
         step: int,
         router_usage_summaries: tuple[RouterUsageSummary, ...],
     ) -> None:
+        layer_metric_summaries: list[RouterLayerMetricSummary] = []
         for router_usage_summary in router_usage_summaries:
             histogram_values = _expert_index_histogram_values(
                 expert_counts=router_usage_summary.expert_counts,
@@ -126,13 +140,61 @@ class TrainingMetricLogger:
                 histogram_values,
                 step,
             )
-            total_count = max(float(router_usage_summary.expert_counts.sum().item()), 1.0)
-            for expert_index, expert_count in enumerate(router_usage_summary.expert_counts):
-                self.summary_writer.add_scalar(
-                    f"{tag_prefix}/expert_{expert_index:02d}_fraction",
-                    float(expert_count.item()) / total_count,
-                    step,
-                )
+            layer_metric_summary = _router_layer_metric_summary(
+                router_usage_summary=router_usage_summary,
+            )
+            layer_metric_summaries.append(layer_metric_summary)
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/usage_mean",
+                layer_metric_summary.usage_mean,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/usage_std",
+                layer_metric_summary.usage_std,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/usage_min",
+                layer_metric_summary.usage_min,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/usage_max",
+                layer_metric_summary.usage_max,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/entropy",
+                layer_metric_summary.entropy,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/imbalance",
+                layer_metric_summary.imbalance,
+                step,
+            )
+            self.summary_writer.add_scalar(
+                f"{tag_prefix}/dominance",
+                layer_metric_summary.dominance,
+                step,
+            )
+        if len(layer_metric_summaries) > 0:
+            self.summary_writer.add_scalar(
+                "moe/summary/worst_layer_imbalance",
+                max(summary.imbalance for summary in layer_metric_summaries),
+                step,
+            )
+            self.summary_writer.add_scalar(
+                "moe/summary/worst_layer_dominance",
+                max(summary.dominance for summary in layer_metric_summaries),
+                step,
+            )
+            self.summary_writer.add_scalar(
+                "moe/summary/worst_layer_entropy",
+                min(summary.entropy for summary in layer_metric_summaries),
+                step,
+            )
         self.summary_writer.flush()
 
     def close(self) -> None:
@@ -175,3 +237,39 @@ def _expert_index_histogram_values(expert_counts: torch.Tensor) -> torch.Tensor:
     if int(repeated_counts.sum().item()) == 0:
         return expert_indices
     return torch.repeat_interleave(expert_indices, repeated_counts)
+
+
+def _router_layer_metric_summary(
+    router_usage_summary: RouterUsageSummary,
+) -> RouterLayerMetricSummary:
+    expert_counts = router_usage_summary.expert_counts.to(dtype=torch.float32)
+    total_count = float(expert_counts.sum().item())
+    if total_count == 0.0:
+        usage_fractions = torch.zeros_like(expert_counts)
+    else:
+        usage_fractions = expert_counts / total_count
+    usage_mean = float(usage_fractions.mean().item())
+    usage_std = float(usage_fractions.std(unbiased=False).item())
+    usage_min = float(usage_fractions.min().item())
+    usage_max = float(usage_fractions.max().item())
+    return RouterLayerMetricSummary(
+        layer_index=router_usage_summary.layer_index,
+        usage_mean=usage_mean,
+        usage_std=usage_std,
+        usage_min=usage_min,
+        usage_max=usage_max,
+        entropy=_normalized_entropy(probabilities=usage_fractions),
+        imbalance=usage_max - usage_min,
+        dominance=usage_max,
+    )
+
+
+def _normalized_entropy(probabilities: torch.Tensor) -> float:
+    if probabilities.numel() <= 1:
+        return 0.0
+    nonzero_probabilities = probabilities[probabilities > 0.0]
+    if nonzero_probabilities.numel() == 0:
+        return 0.0
+    entropy = -torch.sum(nonzero_probabilities * torch.log(nonzero_probabilities))
+    normalizer = torch.log(torch.tensor(float(probabilities.numel())))
+    return float((entropy / normalizer).item())

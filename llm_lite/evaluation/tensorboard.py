@@ -32,10 +32,22 @@ def write_evaluation_metrics_to_tensorboard(
             if not isinstance(metric_value, int | float | bool):
                 continue
             summary_writer.add_scalar(
-                EVALUATION_SCALAR_TAGS.get(metric_name, f"eval/{metric_name}"),
+                _tensorboard_tag(metric_name=metric_name),
                 float(metric_value),
                 step,
             )
         summary_writer.flush()
     finally:
         summary_writer.close()
+
+
+def _tensorboard_tag(metric_name: str) -> str:
+    known_tag = EVALUATION_SCALAR_TAGS.get(metric_name)
+    if known_tag is not None:
+        return known_tag
+    family_prefix = "python_completion_family_"
+    family_suffix = "_pass_rate"
+    if metric_name.startswith(family_prefix) and metric_name.endswith(family_suffix):
+        family_name = metric_name.removeprefix(family_prefix).removesuffix(family_suffix)
+        return f"eval/python_completion/family/{family_name}/pass_rate"
+    return f"eval/{metric_name}"

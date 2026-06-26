@@ -25,6 +25,8 @@ models.
   gaps only.
 - [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md): planned artifact-store,
   local executor, async evaluation, and sweep architecture.
+- [docs/EXTENDING.md](docs/EXTENDING.md): short guides for adding evaluators,
+  dataset sources, and model architectures.
 - [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md): local coding and testing
   standards.
 

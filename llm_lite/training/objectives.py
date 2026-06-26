@@ -26,27 +26,27 @@ class CausalLanguageModelingObjectiveRunner:
         self.pad_token_id = pad_token_id
 
     def prepare_batch(self, batch: TrainingBatch, device: torch.device) -> TrainingBatch:
-        match batch:
-            case torch.Tensor():
-                return batch.to(device)
-            case DpoPreferenceBatch():
-                raise ValueError("Causal language modeling requires token tensor batches.")
+        assert isinstance(batch, torch.Tensor), (
+            "Causal language modeling requires token tensor batches."
+        )
+
+        return batch.to(device)
 
     def loss(self, model: nn.Module, batch: TrainingBatch) -> torch.Tensor:
-        match batch:
-            case torch.Tensor():
-                model_output = model(batch)
-                language_modeling_loss = causal_language_modeling_loss(
-                    logits=model_output.logits,
-                    token_ids=batch,
-                    pad_token_id=self.pad_token_id,
-                )
-                auxiliary_loss = model_output.auxiliary_loss
-                if auxiliary_loss is None or self.auxiliary_loss_weight == 0.0:
-                    return language_modeling_loss
-                return language_modeling_loss + self.auxiliary_loss_weight * auxiliary_loss
-            case DpoPreferenceBatch():
-                raise ValueError("Causal language modeling requires token tensor batches.")
+        assert isinstance(batch, torch.Tensor), (
+            "Causal language modeling requires token tensor batches."
+        )
+
+        model_output = model(batch)
+        language_modeling_loss = causal_language_modeling_loss(
+            logits=model_output.logits,
+            token_ids=batch,
+            pad_token_id=self.pad_token_id,
+        )
+        auxiliary_loss = model_output.auxiliary_loss
+        if auxiliary_loss is None or self.auxiliary_loss_weight == 0.0:
+            return language_modeling_loss
+        return language_modeling_loss + self.auxiliary_loss_weight * auxiliary_loss
 
 
 class DirectPreferenceOptimizationObjectiveRunner:
@@ -58,49 +58,45 @@ class DirectPreferenceOptimizationObjectiveRunner:
             parameter.requires_grad_(False)
 
     def prepare_batch(self, batch: TrainingBatch, device: torch.device) -> TrainingBatch:
-        match batch:
-            case torch.Tensor():
-                raise ValueError("DPO requires preference batches.")
-            case DpoPreferenceBatch():
-                self.reference_model.to(device)
-                return DpoPreferenceBatch(
-                    chosen_token_ids=batch.chosen_token_ids.to(device),
-                    rejected_token_ids=batch.rejected_token_ids.to(device),
-                    chosen_completion_mask=batch.chosen_completion_mask.to(device),
-                    rejected_completion_mask=batch.rejected_completion_mask.to(device),
-                )
+        assert isinstance(batch, DpoPreferenceBatch), "DPO requires preference batches."
+
+        self.reference_model.to(device)
+        return DpoPreferenceBatch(
+            chosen_token_ids=batch.chosen_token_ids.to(device),
+            rejected_token_ids=batch.rejected_token_ids.to(device),
+            chosen_completion_mask=batch.chosen_completion_mask.to(device),
+            rejected_completion_mask=batch.rejected_completion_mask.to(device),
+        )
 
     def loss(self, model: nn.Module, batch: TrainingBatch) -> torch.Tensor:
-        match batch:
-            case torch.Tensor():
-                raise ValueError("DPO requires preference batches.")
-            case DpoPreferenceBatch():
-                policy_chosen_log_prob = sequence_completion_log_probability(
-                    model=model,
-                    token_ids=batch.chosen_token_ids,
-                    completion_mask=batch.chosen_completion_mask,
-                )
-                policy_rejected_log_prob = sequence_completion_log_probability(
-                    model=model,
-                    token_ids=batch.rejected_token_ids,
-                    completion_mask=batch.rejected_completion_mask,
-                )
-                with torch.no_grad():
-                    reference_chosen_log_prob = sequence_completion_log_probability(
-                        model=self.reference_model,
-                        token_ids=batch.chosen_token_ids,
-                        completion_mask=batch.chosen_completion_mask,
-                    )
-                    reference_rejected_log_prob = sequence_completion_log_probability(
-                        model=self.reference_model,
-                        token_ids=batch.rejected_token_ids,
-                        completion_mask=batch.rejected_completion_mask,
-                    )
-                policy_log_ratio = policy_chosen_log_prob - policy_rejected_log_prob
-                reference_log_ratio = reference_chosen_log_prob - reference_rejected_log_prob
-                return -nn.functional.logsigmoid(
-                    self.beta * (policy_log_ratio - reference_log_ratio),
-                ).mean()
+        assert isinstance(batch, DpoPreferenceBatch), "DPO requires preference batches."
+
+        policy_chosen_log_prob = sequence_completion_log_probability(
+            model=model,
+            token_ids=batch.chosen_token_ids,
+            completion_mask=batch.chosen_completion_mask,
+        )
+        policy_rejected_log_prob = sequence_completion_log_probability(
+            model=model,
+            token_ids=batch.rejected_token_ids,
+            completion_mask=batch.rejected_completion_mask,
+        )
+        with torch.no_grad():
+            reference_chosen_log_prob = sequence_completion_log_probability(
+                model=self.reference_model,
+                token_ids=batch.chosen_token_ids,
+                completion_mask=batch.chosen_completion_mask,
+            )
+            reference_rejected_log_prob = sequence_completion_log_probability(
+                model=self.reference_model,
+                token_ids=batch.rejected_token_ids,
+                completion_mask=batch.rejected_completion_mask,
+            )
+        policy_log_ratio = policy_chosen_log_prob - policy_rejected_log_prob
+        reference_log_ratio = reference_chosen_log_prob - reference_rejected_log_prob
+        return -nn.functional.logsigmoid(
+            self.beta * (policy_log_ratio - reference_log_ratio),
+        ).mean()
 
 
 def causal_language_modeling_loss(

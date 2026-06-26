@@ -108,6 +108,9 @@ def run_configured_evaluators(
         metrics["python_completion_passed_checks"] = python_completion_result.passed_checks
         metrics["python_completion_total_checks"] = python_completion_result.total_checks
         metrics["python_completion_pass_rate"] = python_completion_result.pass_rate
+        for family_result in python_completion_result.families:
+            family_key = _metric_key_part(text=family_result.task_family)
+            metrics[f"python_completion_family_{family_key}_pass_rate"] = family_result.pass_rate
         console_log(
             "[eval] python_completion "
             f"tasks={len(python_completion_result.tasks)} "
@@ -118,6 +121,14 @@ def run_configured_evaluators(
             f"pass_rate={python_completion_result.pass_rate:.4f}"
         )
     return EvaluationRunResult(report=report, metrics=metrics)
+
+
+def _metric_key_part(text: str) -> str:
+    characters = [character.lower() if character.isalnum() else "_" for character in text]
+    collapsed = "_".join(part for part in "".join(characters).split("_") if part)
+    if collapsed == "":
+        raise ValueError("Metric key part cannot be empty.")
+    return collapsed
 
 
 def _print_fixed_prompt_generation_samples(

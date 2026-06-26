@@ -310,12 +310,46 @@ arguments. Current configs use KV-cache inference for normal generation.
 
 ## TensorBoard
 
+Run-level pipeline summaries are written to:
+
+```text
+runs/<experiment>/tensorboard
+```
+
+These summaries use one text table per completed pipeline stage. The raw,
+processed, tokenizer, and packed-dataset tables include dataset document and
+byte counts, tokenizer vocabulary/training counts, packed sequence and token
+counts, pad fraction, average sequence fill, worker counts, and stage duration.
+
 Inspect pretraining curves:
 
 ```bash
 python -m tensorboard.main \
   --logdir runs/python_moe_full/artifacts/pretraining/tensorboard
 ```
+
+Pretraining TensorBoard includes loss, learning rate, gradient norm, local and
+distributed throughput, distributed world size, checkpoint timing, and
+training-time evaluation scalars when configured.
+
+MoE runs also include router summaries under `moe/`. Each router layer writes
+selected-expert histograms, compact layer summaries for expert usage mean,
+standard deviation, minimum, maximum, normalized entropy, imbalance, and
+dominance, plus `moe/summary` worst-layer imbalance, dominance, and entropy
+scalars. These summaries are intended to make expert collapse visible without
+adding many raw plots.
+
+Final evaluation TensorBoard is written to:
+
+```text
+runs/<experiment>/artifacts/evaluation/tensorboard
+```
+
+Evaluation scalars include perplexity loss, perplexity, document and sequence
+counts, exact-reproduction status, fixed-prompt sample count, and Python
+completion task count, parsed count, executed count, passed checks, total
+checks, pass rate, and per-task-family summaries when the task file provides
+`task_family`.
 
 For the one-sentence smoke run:
 

@@ -36,8 +36,6 @@ deduplicated artifact store managed by a local plan executor.
 ## Open Documentation Gaps
 
 - Add a concise artifact schema reference if manifest formats stabilize.
-- Add a short guide for adding a new evaluator.
-- Add a short guide for adding a new dataset source.
 - Add a result template for future experiment reports.
 
 ## Experiment Gaps
@@ -120,15 +118,12 @@ but those dimensions are not implemented. Future work:
 - Add topology tests for nontrivial process groups.
 - Report expert-parallel memory and throughput tradeoffs.
 
-### Router Observability
+### Evaluation-Time Router Diagnostics
 
-Improve MoE reporting with:
-
-- Per-layer expert utilization.
-- Router entropy.
-- Auxiliary loss trends.
-- Expert load imbalance over time.
-- Routing summaries in evaluation reports.
+Training TensorBoard now reports per-layer MoE expert usage summaries, router
+entropy, load imbalance, dominance, and worst-layer scalars. Future work can add
+routing summaries to evaluation reports when evaluating checkpoints on heldout
+datasets.
 
 ## Post-Training Gaps
 

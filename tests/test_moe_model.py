@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import torch
+from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 from torch import nn
 from torch.optim import AdamW
 
@@ -15,9 +16,10 @@ from llm_lite.model.gpt import DenseGpt
 from llm_lite.model.moe import MoeGpt
 from llm_lite.model.output import ModelOutput
 from llm_lite.model.parameters import model_parameter_summary
-from llm_lite.model.routing import TopKRouter
+from llm_lite.model.routing import RouterUsageSummary, TopKRouter
 from llm_lite.pipeline.runner import run_pipeline
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
+from llm_lite.training.logging import TrainingMetricLogger
 from llm_lite.training.objectives import (
     CausalLanguageModelingObjectiveRunner,
     causal_language_modeling_loss,
@@ -126,6 +128,42 @@ def test_router_usage_counts_selected_experts_and_resets() -> None:
         0.0,
         0.0,
     ]
+
+
+def test_router_usage_tensorboard_includes_compact_summary_scalars(tmp_path: Path) -> None:
+    metrics_logger = TrainingMetricLogger(artifact_directory=tmp_path)
+
+    metrics_logger.write_router_usage(
+        step=7,
+        router_usage_summaries=(
+            RouterUsageSummary(
+                layer_index=0,
+                expert_counts=torch.tensor([8.0, 2.0, 0.0, 0.0]),
+            ),
+            RouterUsageSummary(
+                layer_index=1,
+                expert_counts=torch.tensor([3.0, 3.0, 2.0, 2.0]),
+            ),
+        ),
+    )
+    metrics_logger.close()
+
+    tensorboard_events = EventAccumulator(str(tmp_path / "tensorboard"))
+    tensorboard_events.Reload()
+    scalar_tags = set(tensorboard_events.Tags()["scalars"])
+
+    assert "moe/router_layer_00/usage_mean" in scalar_tags
+    assert "moe/router_layer_00/usage_std" in scalar_tags
+    assert "moe/router_layer_00/usage_min" in scalar_tags
+    assert "moe/router_layer_00/usage_max" in scalar_tags
+    assert "moe/router_layer_00/entropy" in scalar_tags
+    assert "moe/router_layer_00/imbalance" in scalar_tags
+    assert "moe/router_layer_00/dominance" in scalar_tags
+    assert "moe/summary/worst_layer_imbalance" in scalar_tags
+    assert "moe/summary/worst_layer_dominance" in scalar_tags
+    assert "moe/summary/worst_layer_entropy" in scalar_tags
+    assert tensorboard_events.Scalars("moe/router_layer_00/dominance")[0].step == 7
+    assert abs(tensorboard_events.Scalars("moe/router_layer_00/dominance")[0].value - 0.8) < 1e-6
 
 
 def test_causal_lm_objective_includes_auxiliary_loss_when_configured() -> None:

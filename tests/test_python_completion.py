@@ -81,6 +81,15 @@ def test_load_python_completion_tasks_reads_typed_jsonl_records() -> None:
     )
 
 
+def test_load_python_completion_tasks_preserves_optional_task_family() -> None:
+    tasks = load_python_completion_tasks(
+        tasks_path=Path("tests/fixtures/tinypython_completion/tasks.jsonl"),
+        maximum_tasks=1,
+    )
+
+    assert tasks[0].task_family == "optional_lookup_concrete"
+
+
 def test_truncate_at_stop_sequence_uses_first_configured_match() -> None:
     text = "    return 1\n\nclass Extra:\n    pass\n\ndef next_function() -> int:\n    return 2"
 
@@ -267,6 +276,7 @@ def test_evaluator_uses_generate_text_with_configured_inference_settings(
     assert result.passed_checks == 5
     assert result.total_checks == 5
     assert result.pass_rate == 1.0
+    assert result.families == ()
 
 
 def test_evaluator_runs_signature_prefix_records(
@@ -335,6 +345,9 @@ def test_evaluator_runs_signature_prefix_records(
     assert result.passed_checks == 5
     assert result.total_checks == 5
     assert result.pass_rate == 1.0
+    assert len(result.families) == 1
+    assert result.families[0].task_family == "optional_lookup_concrete"
+    assert result.families[0].pass_rate == 1.0
 
 
 def test_runner_includes_python_completion_report_and_metrics(monkeypatch: MonkeyPatch) -> None:

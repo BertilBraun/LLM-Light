@@ -69,7 +69,9 @@ def checks_user_prompt(
     minimum_checks: int,
     maximum_checks: int,
 ) -> str:
-    return f"""Create {minimum_checks} to {maximum_checks} executable check expressions for this task and reference implementation.
+    return (
+        f"Create {minimum_checks} to {maximum_checks} executable check expressions "
+        f"""for this task and reference implementation.
 
 Task:
 {task_description.strip()}
@@ -78,6 +80,7 @@ Reference implementation:
 {code.strip()}
 
 Return only the JSON object."""
+    )
 
 
 def parse_checks_generation(

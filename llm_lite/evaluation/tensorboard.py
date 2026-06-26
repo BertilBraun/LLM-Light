@@ -2,7 +2,6 @@ from pathlib import Path
 
 from torch.utils.tensorboard import SummaryWriter
 
-
 EVALUATION_TENSORBOARD_DIRECTORY_NAME = "tensorboard"
 
 EVALUATION_SCALAR_TAGS = {

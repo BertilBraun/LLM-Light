@@ -233,6 +233,11 @@ Compatible increases to `training.maximum_steps` resume from the latest
 checkpoint. Architecture, tokenizer, packed data, optimizer shape, batch,
 precision, and gradient-clipping changes invalidate pretraining.
 
+The completed TinyPython MoE artifact bundle is published as the
+[Python-Run-V1 GitHub release](https://github.com/BertilBraun/LLM-Light/releases/tag/Python-Run-V1).
+Use that release bundle when inspecting the recorded run on a checkout that does
+not have the full `runs/python_moe_full` directory locally.
+
 For fresh GPU instances, `scripts/train.sh` wraps the same stage sequence for
 any config. `CONFIG_PATH` is required:
 
@@ -342,6 +347,10 @@ The default bundle includes:
 - latest checkpoint only
 - TensorBoard event files
 - `bundle_manifest.json`
+
+The published TinyPython MoE result is available as the `Python-Run-V1` GitHub
+release bundle. Full run directories are intentionally kept out of source
+control.
 
 Exclude TensorBoard event files:
 

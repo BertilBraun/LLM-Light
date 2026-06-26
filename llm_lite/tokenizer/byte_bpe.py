@@ -94,9 +94,7 @@ class ByteBpeTokenizer:
             token_id: byte_token for byte_token, token_id in byte_token_to_id.items()
         }
         self.merge_rules = merge_rules
-        self.merge_rule_to_rank = {
-            merge_rule: rank for rank, merge_rule in enumerate(merge_rules)
-        }
+        self.merge_rule_to_rank = {merge_rule: rank for rank, merge_rule in enumerate(merge_rules)}
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.pad_token = pad_token
@@ -502,8 +500,7 @@ def _read_document_reference_texts(
     texts: list[str | None] = [None] * len(document_references)
     for shard_path, indexed_references in references_by_shard.items():
         member_names = {
-            document_reference.member_name
-            for _, document_reference in indexed_references
+            document_reference.member_name for _, document_reference in indexed_references
         }
         reference_indices_by_member = {
             document_reference.member_name: reference_index
@@ -517,8 +514,8 @@ def _read_document_reference_texts(
                 extracted_file = shard_file.extractfile(member)
                 if extracted_file is None:
                     raise ValueError("Byte BPE training document reference is not readable.")
-                texts[reference_indices_by_member[member.name]] = (
-                    extracted_file.read().decode("utf-8")
+                texts[reference_indices_by_member[member.name]] = extracted_file.read().decode(
+                    "utf-8"
                 )
                 found_member_names.add(member.name)
                 if len(found_member_names) == len(member_names):
@@ -720,10 +717,7 @@ def _document_reference_shard_count(
     document_references: tuple[ByteBpeDocumentReference, ...],
 ) -> int:
     return len(
-        {
-            document_reference.shard_reference.path
-            for document_reference in document_references
-        },
+        {document_reference.shard_reference.path for document_reference in document_references},
     )
 
 

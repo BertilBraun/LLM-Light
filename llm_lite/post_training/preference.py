@@ -43,10 +43,7 @@ def write_dpo_preferences_jsonl(
     output_path: Path,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        preference.model_dump_json()
-        for preference in preference_dataset.preferences
-    ]
+    lines = [preference.model_dump_json() for preference in preference_dataset.preferences]
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 

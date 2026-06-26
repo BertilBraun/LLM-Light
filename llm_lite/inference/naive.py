@@ -37,9 +37,7 @@ def generate_batch(
     with torch.no_grad():
         for _generation_step in range(maximum_new_tokens):
             active_indexes = tuple(
-                sample_index
-                for sample_index, state in enumerate(states)
-                if not state.stopped
+                sample_index for sample_index, state in enumerate(states) if not state.stopped
             )
             if len(active_indexes) == 0:
                 break

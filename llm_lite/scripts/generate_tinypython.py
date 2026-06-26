@@ -535,9 +535,7 @@ FAMILIES = [
             "return the first record whose nested field satisfies the predicate": (
                 "a dictionary or None"
             ),
-            "summarize nested item counts per outer key": (
-                "a dictionary from strings to integers"
-            ),
+            "summarize nested item counts per outer key": ("a dictionary from strings to integers"),
         },
         "conditions": [
             "nested value exists and is not None",
@@ -691,14 +689,21 @@ FAMILIES = [
             "avoid sorted unless the task detail explicitly asks for sorting",
         ],
         "details": [
-            "records use keys id, name, status, amount, and active; ignore inactive records and sum amount by status",
-            "records use keys id, category, score, and tags; return ids whose tags include target_tag and score is nonnegative",
-            "records use keys owner, item, and quantity; group item names by owner after stripping whitespace",
+            "records use keys id, name, status, amount, and active; "
+            "ignore inactive records and sum amount by status",
+            "records use keys id, category, score, and tags; "
+            "return ids whose tags include target_tag and score is nonnegative",
+            "records use keys owner, item, and quantity; "
+            "group item names by owner after stripping whitespace",
             "records use keys id and points; combine duplicate ids by summing integer points",
-            "records use keys name, priority, and done; return the unfinished name with the lowest priority",
-            "records use keys code, region, and count; return total count per region for codes starting with prefix",
-            "records use keys user, enabled, and quota; return users whose enabled flag is true and quota is at least minimum",
-            "records use keys team, member, and active; group active members by team while skipping blank names",
+            "records use keys name, priority, and done; "
+            "return the unfinished name with the lowest priority",
+            "records use keys code, region, and count; "
+            "return total count per region for codes starting with prefix",
+            "records use keys user, enabled, and quota; "
+            "return users whose enabled flag is true and quota is at least minimum",
+            "records use keys team, member, and active; "
+            "group active members by team while skipping blank names",
         ],
     },
     {
@@ -713,9 +718,7 @@ FAMILIES = [
             ),
             "replace selected cells in a copied grid": "a two-dimensional list",
             "flatten selected cells while preserving row-major order": "a list",
-            "find the first coordinate matching a condition": (
-                "a tuple of two integers or None"
-            ),
+            "find the first coordinate matching a condition": ("a tuple of two integers or None"),
         },
         "conditions": [
             "cell is positive",
@@ -751,7 +754,8 @@ FAMILIES = [
             "return the first coordinate whose value is strictly greater than threshold",
             "flatten diagonal cells from a square integer grid",
             "count cells in each row that differ from their left and right neighbors",
-            "return column totals for rows shorter than the widest row by treating missing cells as zero",
+            "return column totals for rows shorter than the widest row "
+            "by treating missing cells as zero",
         ],
     },
     {
@@ -793,8 +797,10 @@ FAMILIES = [
             "avoid changing case unless the detail requests normalization",
         ],
         "details": [
-            "parse comma-separated key=value tokens into a dictionary, keeping the first value for each key",
-            "convert words separated by spaces, underscores, or hyphens into a lowercase hyphen slug",
+            "parse comma-separated key=value tokens into a dictionary, "
+            "keeping the first value for each key",
+            "convert words separated by spaces, underscores, or hyphens "
+            "into a lowercase hyphen slug",
             "extract signed integers from comma-separated tokens, skipping malformed tokens",
             "count lowercase words after stripping periods and commas from their ends",
             "return the first bracketed segment that is nonempty after stripping",
@@ -842,12 +848,15 @@ FAMILIES = [
             "avoid broad exception handling",
         ],
         "details": [
-            "return user display name from profiles[id]['name'] when id exists and the name is nonempty",
+            "return user display name from profiles[id]['name'] "
+            "when id exists and the name is nonempty",
             "return the sum of two optional integer fields only when both are present and integers",
             "merge default settings with override settings, skipping override values that are None",
             "return keys whose values are nonempty strings after stripping whitespace",
-            "fill missing inventory counts from fallback counts while dropping negative final counts",
-            "return changed keys sorted by their first appearance in the primary mapping then the secondary mapping",
+            "fill missing inventory counts from fallback counts "
+            "while dropping negative final counts",
+            "return changed keys sorted by their first appearance "
+            "in the primary mapping then the secondary mapping",
             "return a lowercase email value for a user id when it contains exactly one at sign",
             "build a mapping of requested keys to values found in primary or fallback dictionaries",
         ],
@@ -895,7 +904,8 @@ FAMILIES = [
             "return adjacent integer differences as current minus previous",
             "return indexes of strict local peaks excluding endpoints",
             "return the longest contiguous segment containing only nonnegative values",
-            "collapse case-insensitive adjacent duplicate strings while preserving original spelling of the first item",
+            "collapse case-insensitive adjacent duplicate strings "
+            "while preserving original spelling of the first item",
             "return sums of all complete windows of size width",
             "return segments separated by zero values, excluding the zero separators",
             "return values that are larger than every value seen before them",
@@ -1050,10 +1060,7 @@ def excluded_training_seed_keys(
     count: int,
     rng_seed: int,
 ) -> set[tuple[object, ...]]:
-    return {
-        semantic_seed_key(seed)
-        for seed in generate_seeds(count=count, rng_seed=rng_seed)
-    }
+    return {semantic_seed_key(seed) for seed in generate_seeds(count=count, rng_seed=rng_seed)}
 
 
 def user_prompt(seed: TaskSeed) -> str:
@@ -1262,8 +1269,7 @@ def main() -> int:
     )
     if excluded_keys is not None:
         print(
-            f"excluded_semantic_seeds={len(excluded_keys):,} "
-            f"exclude_seed={args.exclude_seed}",
+            f"excluded_semantic_seeds={len(excluded_keys):,} exclude_seed={args.exclude_seed}",
             flush=True,
         )
     seeds = generate_seeds(
@@ -1271,11 +1277,7 @@ def main() -> int:
         rng_seed=args.seed,
         excluded_semantic_keys=excluded_keys,
     )
-    completed = (
-        completed_seed_attempts([args.output, invalid_path])
-        if args.resume
-        else set()
-    )
+    completed = completed_seed_attempts([args.output, invalid_path]) if args.resume else set()
     pending = [
         seed
         for seed in seeds

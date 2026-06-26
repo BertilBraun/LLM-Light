@@ -77,10 +77,7 @@ class PostTrainingStage(BasePipelineStage):
                     beta=post_training_configuration.beta,
                     generated_artifact_files={},
                 )
-            case (
-                PythonGeneratedDirectPreferenceOptimizationConfiguration()
-                as post_training_configuration
-            ):
+            case PythonGeneratedDirectPreferenceOptimizationConfiguration() as dpo_configuration:
                 tokenizer = load_tokenizer(
                     directory=registry.artifact_directory(StageName.TOKENIZER.value),
                     tokenizer_configuration=experiment_configuration.tokenizer,
@@ -91,21 +88,19 @@ class PostTrainingStage(BasePipelineStage):
                     vocabulary_size=tokenizer.vocabulary_size,
                 )
                 tasks = load_python_completion_tasks(
-                    tasks_path=post_training_configuration.tasks_path,
-                    maximum_tasks=post_training_configuration.maximum_tasks,
+                    tasks_path=dpo_configuration.tasks_path,
+                    maximum_tasks=dpo_configuration.maximum_tasks,
                 )
                 generation_result = generate_python_dpo_data(
                     model=policy_model,
                     tokenizer=tokenizer,
                     tasks=tasks,
-                    samples_per_prompt=post_training_configuration.samples_per_prompt,
+                    samples_per_prompt=dpo_configuration.samples_per_prompt,
                     inference_configuration=_python_generation_inference_configuration(
                         experiment_configuration=experiment_configuration,
-                        post_training_configuration=post_training_configuration,
+                        post_training_configuration=dpo_configuration,
                     ),
-                    execution_timeout_seconds=(
-                        post_training_configuration.execution_timeout_seconds
-                    ),
+                    execution_timeout_seconds=dpo_configuration.execution_timeout_seconds,
                 )
                 write_python_generated_dpo_data(
                     result=generation_result,
@@ -116,9 +111,9 @@ class PostTrainingStage(BasePipelineStage):
                     registry=registry,
                     artifact_directory=artifact_directory,
                     preference_dataset=generation_result.preferences,
-                    maximum_steps=post_training_configuration.maximum_steps,
-                    batch_size_pairs=post_training_configuration.batch_size_pairs,
-                    beta=post_training_configuration.beta,
+                    maximum_steps=dpo_configuration.maximum_steps,
+                    batch_size_pairs=dpo_configuration.batch_size_pairs,
+                    beta=dpo_configuration.beta,
                     generated_artifact_files={
                         "candidates": "candidates.jsonl",
                         "scores": "scores.jsonl",
@@ -202,9 +197,7 @@ def _load_base_models(
         model_configuration=experiment_configuration.model,
         vocabulary_size=vocabulary_size,
     )
-    checkpoint_directory = (
-        registry.artifact_directory(StageName.PRETRAINING.value) / "checkpoints"
-    )
+    checkpoint_directory = registry.artifact_directory(StageName.PRETRAINING.value) / "checkpoints"
     policy_checkpoint_step = load_latest_checkpoint(
         checkpoint_directory=checkpoint_directory,
         model=policy_model,

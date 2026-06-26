@@ -136,11 +136,7 @@ def _selected_stages(
 ) -> tuple[PipelineStage, ...]:
     ordered_stage_names = tuple(stage.name for stage in stages)
     start_index = 0 if from_stage is None else ordered_stage_names.index(from_stage)
-    stop_index = (
-        len(stages) - 1
-        if to_stage is None
-        else ordered_stage_names.index(to_stage)
-    )
+    stop_index = len(stages) - 1 if to_stage is None else ordered_stage_names.index(to_stage)
     if start_index > stop_index:
         raise ValueError("--from stage must not come after --to stage.")
     return stages[start_index : stop_index + 1]
@@ -276,12 +272,8 @@ def _execute_pipeline(
             if matching_fingerprint and not compatible
             else None
         )
-        continue_compatible_stage = (
-            stage.name not in force_stage_names
-            and (
-                (compatible and continuation_action is not None)
-                or interrupted_action is not None
-            )
+        continue_compatible_stage = stage.name not in force_stage_names and (
+            (compatible and continuation_action is not None) or interrupted_action is not None
         )
         if compatible and stage.name not in force_stage_names and not continue_compatible_stage:
             console_log(f"[skip] {stage.name.value}: compatible artifact found")

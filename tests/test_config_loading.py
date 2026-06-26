@@ -44,17 +44,17 @@ def test_load_byte_bpe_verification_configuration() -> None:
 
 def test_load_distributed_data_parallel_smoke_configuration() -> None:
     experiment_configuration = load_experiment_configuration(
-        configuration_path=Path('tests/configs/distributed_data_parallel_smoke.yaml'),
+        configuration_path=Path("tests/configs/distributed_data_parallel_smoke.yaml"),
     )
 
-    assert experiment_configuration.experiment.name == 'distributed_data_parallel_smoke'
+    assert experiment_configuration.experiment.name == "distributed_data_parallel_smoke"
     assert experiment_configuration.training.maximum_steps == 3
     assert experiment_configuration.distributed.enabled is True
-    assert experiment_configuration.distributed.backend.value == 'gloo'
-    assert experiment_configuration.distributed.strategy.value == 'data_parallel'
+    assert experiment_configuration.distributed.backend.value == "gloo"
+    assert experiment_configuration.distributed.strategy.value == "data_parallel"
     assert experiment_configuration.distributed.world_size == 2
     assert experiment_configuration.distributed.parallelism.data == 2
-    assert experiment_configuration.distributed.checkpoint.type.value == 'sharded'
+    assert experiment_configuration.distributed.checkpoint.type.value == "sharded"
 
 
 def test_load_tinystories_huggingface_smoke_configuration() -> None:

@@ -106,9 +106,7 @@ def count_positive(values: list[int]) -> int:
     assert record["operation_tags"] == list(seed.operation_tags)
     assert record["task_detail"] == seed.task_detail
     assert record["signature"] == "def count_positive(values: list[int]) -> int:"
-    assert record["normalized_description"] == (
-        "return the number of positive integers in values."
-    )
+    assert record["normalized_description"] == ("return the number of positive integers in values.")
 
 
 def test_parse_generation_strips_top_level_imports() -> None:
@@ -125,8 +123,7 @@ def count_items(items: list[str]) -> dict[str, int]:
     )
 
     assert parsed.code == (
-        "def count_items(items: list[str]) -> dict[str, int]:\n"
-        "    return dict(Counter(items))"
+        "def count_items(items: list[str]) -> dict[str, int]:\n    return dict(Counter(items))"
     )
 
 

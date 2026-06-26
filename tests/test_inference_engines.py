@@ -578,10 +578,7 @@ def test_candidate_generation_writes_jsonl_artifact(tmp_path) -> None:
 
     lines = output_path.read_text(encoding="utf-8").splitlines()
     parsed_result = CandidateGenerationResult(
-        candidates=tuple(
-            GeneratedCandidateRecord.model_validate_json(line)
-            for line in lines
-        ),
+        candidates=tuple(GeneratedCandidateRecord.model_validate_json(line) for line in lines),
     )
     first_record = json.loads(lines[0])
     assert len(parsed_result.candidates) == 4

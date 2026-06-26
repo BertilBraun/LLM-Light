@@ -152,11 +152,17 @@ contains about 2.19M synthetic task-to-function Python records.
 - Parameters: 24,428,160 total, 9,653,760 active per token.
 - Training: distributed data parallel, world size 2, batch size 512 packed
   sequences per rank.
-- Schedule: 3,750 steps at LR 0.001, then until 7,500 at LR 0.0005, then until 10,000 at
-  LR 0.00025.
+- Schedule: 3,750 steps at LR 0.001, then until 7,500 at LR 0.0005, then until
+  10,000 at LR 0.00025.
 - Final validation: perplexity 1.5516, loss 0.4393.
 - Python completion evaluation: 174 tasks, 172 parsed completions, 157 executed
   completions, 786 / 1012 checks passed, pass rate 0.7767.
+
+The compact artifact bundle for this run is published as the
+[Python-Run-V1 GitHub release](https://github.com/BertilBraun/LLM-Light/releases/tag/Python-Run-V1).
+It contains the resolved config, tokenizer files, latest checkpoint, training
+metrics, performance logs, TensorBoard logs, evaluation reports, and generated
+examples.
 
 Qualitatively, the model learned many simple list, dictionary, numeric, and
 format patterns. It remains weak on exact semantic instruction following,
@@ -182,7 +188,9 @@ def sum_odd_numbers(numbers: list[int]) -> int:
 
 Run directories under `runs/` contain datasets, tokenizer files, packed shards,
 checkpoints, metrics, TensorBoard logs, and evaluation reports. Large artifacts
-and checkpoints should stay out of source control.
+and checkpoints should stay out of source control. The repository may include
+small smoke-run artifacts, but the full TinyPython MoE artifacts are distributed
+through the release bundle rather than committed under `runs/python_moe_full`.
 
 Export a compact run bundle instead:
 

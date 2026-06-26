@@ -33,8 +33,7 @@ def build_dpo_preference_dataset(
     if len(encoded_pairs) == 0:
         raise ValueError("DPO preference dataset requires at least one preference.")
     maximum_length = max(
-        max(len(pair.chosen_token_ids), len(pair.rejected_token_ids))
-        for pair in encoded_pairs
+        max(len(pair.chosen_token_ids), len(pair.rejected_token_ids)) for pair in encoded_pairs
     )
     samples = tuple(
         DpoPreferenceBatch(

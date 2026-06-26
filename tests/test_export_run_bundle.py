@@ -42,13 +42,9 @@ def test_collect_bundle_entries_includes_latest_sharded_checkpoint_only(tmp_path
     assert "resolved_config.json" in archive_paths
     assert "artifacts/tokenizer/tokenizer.json" in archive_paths
     assert "artifacts/pretraining/checkpoints/latest.json" in archive_paths
+    assert "artifacts/pretraining/checkpoints/step_00000020/rank_00000/state.pt" in archive_paths
     assert (
-        "artifacts/pretraining/checkpoints/step_00000020/rank_00000/state.pt"
-        in archive_paths
-    )
-    assert (
-        "artifacts/pretraining/checkpoints/step_00000010/rank_00000/state.pt"
-        not in archive_paths
+        "artifacts/pretraining/checkpoints/step_00000010/rank_00000/state.pt" not in archive_paths
     )
 
 

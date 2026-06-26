@@ -150,8 +150,7 @@ def test_dpo_training_step_updates_policy_not_reference(tmp_path: Path) -> None:
     model = _tiny_model(vocabulary_size=tokenizer.vocabulary_size)
     reference_model = copy.deepcopy(model)
     reference_parameters_before = tuple(
-        parameter.detach().clone()
-        for parameter in reference_model.parameters()
+        parameter.detach().clone() for parameter in reference_model.parameters()
     )
     model_parameters_before = tuple(parameter.detach().clone() for parameter in model.parameters())
     dataset = build_dpo_preference_dataset(

@@ -126,7 +126,7 @@ def _distributed_sampler(
     dataset: Dataset[torch.Tensor] | IterableDataset[torch.Tensor],
     seed: int,
     distributed_data_assignment: DistributedDataAssignment | None,
-    ) -> DistributedSampler[TrainingBatch] | None:
+) -> DistributedSampler[TrainingBatch] | None:
     if distributed_data_assignment is None:
         return None
     if isinstance(dataset, IterableDataset):

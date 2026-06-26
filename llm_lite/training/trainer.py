@@ -465,6 +465,5 @@ def _log_epoch_summary(prefix: str, data_iterator: InfiniteDataIterator) -> None
         console_log(f"{prefix} completed_epochs=unknown batches_seen={data_iterator.batches_seen}")
         return
     console_log(
-        f"{prefix} completed_epochs={epoch_progress:.4f} "
-        f"batches_seen={data_iterator.batches_seen}"
+        f"{prefix} completed_epochs={epoch_progress:.4f} batches_seen={data_iterator.batches_seen}"
     )

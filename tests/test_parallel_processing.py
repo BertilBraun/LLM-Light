@@ -108,6 +108,7 @@ def test_parallel_packing_matches_single_worker(tmp_path: Path) -> None:
         pad_token_id=tokenizer_result.tokenizer.pad_token_id,
         add_bos=True,
         add_eos=True,
+        pack_documents=False,
         maximum_shard_tokens=10,
         workers=1,
     )
@@ -121,6 +122,7 @@ def test_parallel_packing_matches_single_worker(tmp_path: Path) -> None:
         pad_token_id=tokenizer_result.tokenizer.pad_token_id,
         add_bos=True,
         add_eos=True,
+        pack_documents=False,
         maximum_shard_tokens=10,
         workers=2,
     )

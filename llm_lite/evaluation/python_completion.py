@@ -32,9 +32,7 @@ class PythonCompletionTaskRecord(BaseModel):
 
     @model_validator(mode="after")
     def require_exactly_one_prompt_kind(self) -> PythonCompletionTaskRecord:
-        prompt_count = sum(
-            value is not None for value in (self.prompt, self.task_description)
-        )
+        prompt_count = sum(value is not None for value in (self.prompt, self.task_description))
         if prompt_count != 1:
             raise ValueError("Python completion task requires exactly one prompt kind.")
         return self

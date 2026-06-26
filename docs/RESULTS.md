@@ -21,6 +21,12 @@ run-bundle export.
 It should be read as a small systems/project validation and a constrained Python
 baseline, not as a broadly capable code model.
 
+The compact run bundle is published as the
+[Python-Run-V1 GitHub release](https://github.com/BertilBraun/LLM-Light/releases/tag/Python-Run-V1).
+That release is the external artifact record for this run; the full checkpoint,
+TensorBoard, and evaluation files are intentionally not committed under
+`runs/python_moe_full`.
+
 ### Dataset
 
 - Source: `BertilBraun/TinyPython`.
@@ -213,6 +219,10 @@ python -m llm_lite.scripts.export_run_bundle \
   --run-dir runs/python_moe_full \
   --output python_moe_full_bundle.zip
 ```
+
+The published `Python-Run-V1` bundle was produced from this run and should be
+used when the local `runs/python_moe_full` directory is absent or only contains
+placeholder directories.
 
 ## Earlier Validation Runs
 

@@ -119,14 +119,11 @@ def test_pipeline_resumes_interrupted_pretraining_with_checkpoint(
         run_directory=run_directory,
         maximum_steps=4,
     )
-    second_configuration_text = (
-        _training_extension_configuration_text(
-            configuration_text=base_configuration_text,
-            run_directory=run_directory,
-            maximum_steps=6,
-        )
-        .replace("batch_size_sequences: 1", "batch_size_sequences: 2")
-    )
+    second_configuration_text = _training_extension_configuration_text(
+        configuration_text=base_configuration_text,
+        run_directory=run_directory,
+        maximum_steps=6,
+    ).replace("batch_size_sequences: 1", "batch_size_sequences: 2")
     first_configuration_path.write_text(first_configuration_text, encoding="utf-8")
     second_configuration_path.write_text(second_configuration_text, encoding="utf-8")
 

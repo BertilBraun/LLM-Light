@@ -124,8 +124,5 @@ def write_candidate_jsonl(
     output_path: Path,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        candidate.model_dump_json()
-        for candidate in candidate_generation_result.candidates
-    ]
+    lines = [candidate.model_dump_json() for candidate in candidate_generation_result.candidates]
     output_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

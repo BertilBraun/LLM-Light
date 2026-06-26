@@ -260,8 +260,7 @@ def _train_sample(
         pad_token="<pad>" if "<pad>" in special_tokens else None,
     )
     training_tokens = sum(
-        len(backend_tokenizer.encode(text, add_special_tokens=False).ids)
-        for text in sample.texts
+        len(backend_tokenizer.encode(text, add_special_tokens=False).ids) for text in sample.texts
     )
     console_log(
         "[tokenizer] rust_byte_bpe complete "

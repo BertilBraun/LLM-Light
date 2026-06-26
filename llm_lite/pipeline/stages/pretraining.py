@@ -54,7 +54,7 @@ class PretrainingStage(BasePipelineStage):
         return hash_json_value(
             value=_pretraining_reconstruction_contract(
                 experiment_configuration=experiment_configuration,
-            ).model_dump(mode='json'),
+            ).model_dump(mode="json"),
         )
 
     def run(
@@ -91,12 +91,11 @@ class PretrainingStage(BasePipelineStage):
                 seed=experiment_configuration.experiment.seed,
                 evaluation_callback=evaluation_callback,
                 model_configuration_hash=hash_json_value(
-                    value=experiment_configuration.model.model_dump(mode='json'),
+                    value=experiment_configuration.model.model_dump(mode="json"),
                 ),
                 objective_runner=CausalLanguageModelingObjectiveRunner(
                     auxiliary_loss_weight=(
-                        experiment_configuration.training.causal_language_modeling
-                        .auxiliary_loss_weight
+                        experiment_configuration.training.causal_language_modeling.auxiliary_loss_weight
                     ),
                     pad_token_id=tokenizer.pad_token_id,
                 ),
@@ -111,47 +110,46 @@ class PretrainingStage(BasePipelineStage):
                 evaluation_callback=evaluation_callback,
                 objective_runner=CausalLanguageModelingObjectiveRunner(
                     auxiliary_loss_weight=(
-                        experiment_configuration.training.causal_language_modeling
-                        .auxiliary_loss_weight
+                        experiment_configuration.training.causal_language_modeling.auxiliary_loss_weight
                     ),
                     pad_token_id=tokenizer.pad_token_id,
                 ),
             )
         files = {
-            'checkpoint': str(result.checkpoint_path.relative_to(artifact_directory)),
-            'metrics': 'metrics.jsonl',
-            'tensorboard': 'tensorboard',
+            "checkpoint": str(result.checkpoint_path.relative_to(artifact_directory)),
+            "metrics": "metrics.jsonl",
+            "tensorboard": "tensorboard",
         }
         if result.evaluation_path is not None:
-            files['training_evaluations'] = str(
+            files["training_evaluations"] = str(
                 result.evaluation_path.relative_to(artifact_directory),
             )
         return StageOutput(
             files=files,
             metrics={
-                'final_step': result.final_step,
-                'final_loss': result.final_loss,
-                'resumed_from_step': result.resumed_from_step,
-                'model_parameters': parameter_summary.total_parameters,
-                'trainable_model_parameters': parameter_summary.trainable_parameters,
-                'active_model_parameters': parameter_summary.active_parameters,
-                'trainable_active_model_parameters': (
+                "final_step": result.final_step,
+                "final_loss": result.final_loss,
+                "resumed_from_step": result.resumed_from_step,
+                "model_parameters": parameter_summary.total_parameters,
+                "trainable_model_parameters": parameter_summary.trainable_parameters,
+                "active_model_parameters": parameter_summary.active_parameters,
+                "trainable_active_model_parameters": (
                     parameter_summary.trainable_active_parameters
                 ),
-                'requested_maximum_steps': experiment_configuration.training.maximum_steps,
-                'distributed_world_size': experiment_configuration.distributed.world_size,
-                'distributed_strategy': experiment_configuration.distributed.strategy.value,
+                "requested_maximum_steps": experiment_configuration.training.maximum_steps,
+                "distributed_world_size": experiment_configuration.distributed.world_size,
+                "distributed_strategy": experiment_configuration.distributed.strategy.value,
             },
         )
 
     def compatible_action(self, registry: ArtifactRegistry) -> str:
         checkpoint_state = latest_checkpoint(
             checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / 'checkpoints',
+            / "checkpoints",
         )
         if checkpoint_state is not None:
-            return f'complete at step {checkpoint_state.step}, skip'
-        return 'compatible, skip'
+            return f"complete at step {checkpoint_state.step}, skip"
+        return "compatible, skip"
 
     def continuation_action(
         self,
@@ -160,13 +158,13 @@ class PretrainingStage(BasePipelineStage):
     ) -> str | None:
         checkpoint_state = latest_checkpoint(
             checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / 'checkpoints',
+            / "checkpoints",
         )
         if checkpoint_state is None:
             return None
         maximum_steps = experiment_configuration.training.maximum_steps
         if checkpoint_state.step < maximum_steps:
-            return f'resume from step {checkpoint_state.step} to {maximum_steps}'
+            return f"resume from step {checkpoint_state.step} to {maximum_steps}"
         return None
 
     def interrupted_action(
@@ -176,14 +174,14 @@ class PretrainingStage(BasePipelineStage):
     ) -> str | None:
         checkpoint_state = latest_checkpoint(
             checkpoint_directory=registry.artifact_directory(StageName.PRETRAINING.value)
-            / 'checkpoints',
+            / "checkpoints",
         )
         if checkpoint_state is None:
             return None
         maximum_steps = experiment_configuration.training.maximum_steps
         if checkpoint_state.step < maximum_steps:
-            return f'resume from step {checkpoint_state.step} to {maximum_steps}'
-        return f'recover checkpoint at step {checkpoint_state.step}'
+            return f"resume from step {checkpoint_state.step} to {maximum_steps}"
+        return f"recover checkpoint at step {checkpoint_state.step}"
 
 
 def _pretraining_reconstruction_contract(
@@ -207,7 +205,7 @@ def _training_evaluation_callback(
     training_evaluation_configuration = experiment_configuration.training.evaluation
     if training_evaluation_configuration is None:
         return None
-    evaluation_path = artifact_directory / 'training_evaluations.jsonl'
+    evaluation_path = artifact_directory / "training_evaluations.jsonl"
 
     def run_training_evaluation(step: int, model: nn.Module) -> Path:
         evaluation_result = run_configured_evaluators(
@@ -218,17 +216,17 @@ def _training_evaluation_callback(
             inference_configuration=experiment_configuration.inference,
             packing_configuration=experiment_configuration.packing,
         )
-        with evaluation_path.open('a', encoding='utf-8') as evaluation_file:
+        with evaluation_path.open("a", encoding="utf-8") as evaluation_file:
             evaluation_file.write(
                 json.dumps(
                     {
-                        'step': step,
-                        'report': evaluation_result.report,
-                        'metrics': evaluation_result.metrics,
+                        "step": step,
+                        "report": evaluation_result.report,
+                        "metrics": evaluation_result.metrics,
                     },
                     sort_keys=True,
                 )
-                + '\n',
+                + "\n",
             )
         write_evaluation_metrics_to_tensorboard(
             tensorboard_directory=artifact_directory / EVALUATION_TENSORBOARD_DIRECTORY_NAME,
@@ -248,7 +246,7 @@ def _print_training_evaluation(
     if not metrics:
         console_log(f"[train-eval] step={step} no configured evaluator metrics")
         return
-    formatted_metrics = ' '.join(
-        f'{metric_name}={metric_value}' for metric_name, metric_value in sorted(metrics.items())
+    formatted_metrics = " ".join(
+        f"{metric_name}={metric_value}" for metric_name, metric_value in sorted(metrics.items())
     )
     console_log(f"[train-eval] step={step} {formatted_metrics}")

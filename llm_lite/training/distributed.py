@@ -58,11 +58,11 @@ def initialize_distributed_runtime(
         distributed_configuration=distributed_configuration,
         artifact_directory=artifact_directory,
     )
-    rank = _environment_integer(name='RANK')
-    local_rank = _environment_integer(name='LOCAL_RANK')
-    world_size = _environment_integer(name='WORLD_SIZE')
+    rank = _environment_integer(name="RANK")
+    local_rank = _environment_integer(name="LOCAL_RANK")
+    world_size = _environment_integer(name="WORLD_SIZE")
     if world_size != distributed_configuration.world_size:
-        raise ValueError('Runtime WORLD_SIZE must match distributed.world_size.')
+        raise ValueError("Runtime WORLD_SIZE must match distributed.world_size.")
     device = _runtime_device(
         distributed_configuration=distributed_configuration,
         local_rank=local_rank,
@@ -100,7 +100,7 @@ def prepare_model_for_distributed_training(
     find_unused_parameters = _needs_unused_parameter_detection(model=model)
     match distributed_runtime.distributed_configuration.strategy:
         case DistributedStrategy.DATA_PARALLEL:
-            if distributed_runtime.device.type == 'cuda':
+            if distributed_runtime.device.type == "cuda":
                 return DistributedDataParallel(
                     model,
                     device_ids=(distributed_runtime.local_rank,),
@@ -114,7 +114,7 @@ def prepare_model_for_distributed_training(
         case DistributedStrategy.FULLY_SHARDED_DATA_PARALLEL:
             return FullyShardedDataParallel(model)
         case DistributedStrategy.SINGLE_PROCESS:
-            raise ValueError('Distributed runtime cannot use single_process strategy.')
+            raise ValueError("Distributed runtime cannot use single_process strategy.")
 
 
 def unwrap_distributed_model(model: nn.Module) -> nn.Module:
@@ -137,14 +137,14 @@ def _runtime_device(
     distributed_configuration: DistributedConfiguration,
     local_rank: int,
 ) -> torch.device:
-    if distributed_configuration.backend.value == 'nccl':
+    if distributed_configuration.backend.value == "nccl":
         torch.cuda.set_device(local_rank)
-        return torch.device('cuda', local_rank)
-    return torch.device('cpu')
+        return torch.device("cuda", local_rank)
+    return torch.device("cpu")
 
 
 def _environment_integer(name: str) -> int:
     environment_value = os.environ.get(name)
     if environment_value is None:
-        raise ValueError(f'{name} must be set for distributed training.')
+        raise ValueError(f"{name} must be set for distributed training.")
     return int(environment_value)

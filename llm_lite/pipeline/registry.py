@@ -103,8 +103,7 @@ class ArtifactRegistry:
         if manifest is None:
             return False
         return (
-            manifest.configuration_hash == configuration_hash
-            and manifest.parents == parent_hashes
+            manifest.configuration_hash == configuration_hash and manifest.parents == parent_hashes
         )
 
     def artifact_identifier(self, artifact_type: str) -> str:

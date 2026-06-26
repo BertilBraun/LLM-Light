@@ -123,8 +123,7 @@ def _generate_single_with_cache(
             step_start_time = perf_counter()
             _debug_log(
                 debug_generation,
-                "[generation-debug] kv_cache_single_select_start "
-                f"step={generation_step + 1}",
+                f"[generation-debug] kv_cache_single_select_start step={generation_step + 1}",
             )
             next_token_id = select_next_token_id(
                 logits=model_output.logits[0, -1, :],
@@ -149,8 +148,7 @@ def _generate_single_with_cache(
             step_start_time = perf_counter()
             _debug_log(
                 debug_generation,
-                "[generation-debug] kv_cache_single_forward_start "
-                f"step={generation_step + 1}",
+                f"[generation-debug] kv_cache_single_forward_start step={generation_step + 1}",
             )
             model_output = model.forward_with_cache(
                 token_ids=input_tensor,
@@ -206,17 +204,14 @@ def _generate_equal_length_batch_with_cache(
     with torch.inference_mode():
         for generation_step in range(maximum_new_tokens):
             active_indexes = tuple(
-                sample_index
-                for sample_index, state in enumerate(states)
-                if not state.stopped
+                sample_index for sample_index, state in enumerate(states) if not state.stopped
             )
             if len(active_indexes) == 0:
                 break
             step_start_time = perf_counter()
             _debug_log(
                 debug_generation,
-                "[generation-debug] kv_cache_batch_select_start "
-                f"step={generation_step + 1}",
+                f"[generation-debug] kv_cache_batch_select_start step={generation_step + 1}",
             )
             next_token_ids = select_next_token_ids(
                 logits=model_output.logits[:, -1, :],
@@ -254,8 +249,7 @@ def _generate_equal_length_batch_with_cache(
             step_start_time = perf_counter()
             _debug_log(
                 debug_generation,
-                "[generation-debug] kv_cache_batch_forward_start "
-                f"step={generation_step + 1}",
+                f"[generation-debug] kv_cache_batch_forward_start step={generation_step + 1}",
             )
             model_output = model.forward_with_cache(
                 token_ids=input_tensor,

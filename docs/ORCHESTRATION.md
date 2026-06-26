@@ -33,6 +33,11 @@ cluster scheduler such as Slurm, Kubernetes, or Ray.
 - No complex workflow language for arbitrary Python pipeline programs.
 - No hard resource isolation. CPU and GPU requests are a scheduling contract,
   not a sandbox.
+- No compatibility guarantee for stage names, config fields, fingerprints, or
+  artifact layouts while this rewrite is landing. The implementation may rename
+  stages and reshape configs when that produces a simpler runtime.
+- No stage-specific payload validation in the first version. A complete
+  manifest is the completion contract.
 
 ## Core Model
 
@@ -48,6 +53,17 @@ Experiment config -> resolved run -> artifact jobs -> run view
 - A run view records which artifacts were used and exposes TensorBoard logs for
   that experiment.
 
+`run_plan` should resolve the submitted YAML config once at startup and write
+that snapshot to the run directory before launching jobs:
+
+```text
+runs/<experiment>/resolved_config.json
+```
+
+All subprocess jobs should use this resolved config snapshot, not the original
+YAML path. Edits to the external config file after planning must not change an
+active run.
+
 The current stage names remain a good starting point:
 
 ```text
@@ -58,7 +74,6 @@ packed_dataset
 pretraining
 post_training
 evaluation
-export
 ```
 
 Evaluation can remain one stage in the first version. Individual evaluators can
@@ -96,10 +111,19 @@ The manifest should record:
 - status
 - configuration hash
 - parent artifact fingerprints
-- implementation version
 - produced files
 - scalar metrics
 - creation and completion timestamps
+
+The fingerprint is the artifact identity. The manifest is mutable execution
+state for that identity. Timestamps, status, subprocess logs, TensorBoard event
+file names, and other run-time details must not contribute to the fingerprint.
+
+The completion rule is intentionally simple: jobs write the complete manifest
+last. Once `manifest.json` exists with `status: complete` and the expected
+fingerprint, dependent jobs may trust that the stage succeeded and that its
+payload exists. The first implementation does not need a broader atomic
+artifact-publish protocol.
 
 ## Run View
 
@@ -150,12 +174,16 @@ runs/<experiment>/tensorboard/<stage>/
 This should be implemented as a wrapper around the TensorBoard writer rather
 than duplicated stage logic.
 
-For cache hits, the local executor should copy or materialize the existing
-artifact TensorBoard logs into the run view:
+For cache hits, the local executor should copy the existing artifact
+TensorBoard logs into the run view:
 
 ```text
 runs/<experiment>/tensorboard/<stage>/
 ```
+
+Run-view TensorBoard files are disposable copies. The artifact TensorBoard files
+are authoritative. If a run-view copy is missing or stale, it can be recreated
+from the artifact store.
 
 Tags should be stage-relative and reusable across runs:
 
@@ -172,19 +200,20 @@ moe/expert_usage_std/layer_00
 Tags should not include the producing run name, because cached artifacts may be
 viewed from many run directories.
 
-## Fingerprints and Cache Hits
+## Fingerprints, Status, and Cache Hits
 
 A stage fingerprint should use the same idea as the current per-stage
 configuration hashes and parent artifact hashes. The new orchestration should
-standardize that identity and use it as the artifact-store key.
+standardize that identity and use it as the artifact-store key. Parent identity
+must use the parent's semantic fingerprint, not a hash of the parent manifest
+file.
 
 A fingerprint should include:
 
 - stage name
 - relevant configuration subset
 - parent artifact fingerprints
-- implementation version
-- schema version
+- stage contract version
 
 Examples:
 
@@ -198,15 +227,52 @@ post_training = pretraining fingerprint + post-training config
 evaluation = checkpoint or model artifact fingerprint + evaluator/inference config
 ```
 
-If `artifact_store/<stage>/<fingerprint>/manifest.json` exists and is complete,
-the job is a cache hit. The executor should not re-run it. It should record the
-cache hit in the run event log and materialize TensorBoard logs into the run
-view.
+The stage contract version is a small manually updated version for cases where
+the meaning of a stage changes without a YAML config change. It does not need
+to be tied to the package version or Git commit in the first implementation.
+
+Manifest status is mutable execution state:
+
+```text
+pending
+running
+complete
+failed
+interrupted
+```
+
+Only `complete` can be reused. A job is a cache hit only when
+`artifact_store/<stage>/<fingerprint>/manifest.json` exists, has status
+`complete`, and has the expected fingerprint. The executor should not re-run
+cache hits. It should record the cache hit in the run event log and copy
+TensorBoard logs into the run view.
 
 If the directory exists but the manifest is incomplete, the executor should
 inspect the stage lock. If the lock is fresh, another subprocess is producing
 the artifact and dependent jobs wait. If the lock is stale, the artifact is
 interrupted and can be resumed or retried according to stage policy.
+
+Failed, interrupted, or stale-running artifacts are not cache hits. They are
+recovery inputs.
+
+### Training Fingerprints
+
+Pretraining and post-training fingerprints should include the training
+configuration that changes the training trajectory, including optimizer
+settings, precision, distributed configuration, batch size, objective settings,
+model configuration, seed when it affects initialization or data order,
+checkpoint interval when it changes observable artifacts, and requested maximum
+steps. Changing learning rate or similar hyperparameters creates a new artifact
+rather than mutating the old one.
+
+Training may resume only when the recomputed fingerprint matches the incomplete
+artifact. This supports ordinary interruption recovery without supporting
+manual in-place hyperparameter changes.
+
+Training longer should be an explicit config-defined continuation, not an
+in-place change to the old artifact. A longer training run can use a previous
+checkpoint artifact as its initialization input and produce a new pretraining
+artifact with its own fingerprint.
 
 ## Local Plan Executor
 
@@ -234,22 +300,30 @@ python -m llm_lite.scripts.run_plan \
 
 The executor loop is:
 
-1. Resolve all configs.
+1. Resolve all configs and write each run's `resolved_config.json`.
 2. Compute stage fingerprints using existing stage hash logic and parent
    fingerprints.
 3. Build the artifact job DAG.
 4. Mark complete artifacts as cache hits.
 5. Select ready jobs whose dependencies are complete.
 6. Skip jobs blocked by a fresh lock for the same artifact fingerprint.
-7. Start jobs when resource requests fit currently available resources.
+7. Start all ready jobs whose resource requests fit currently available
+   resources, up to `--max-parallel-jobs`.
 8. Run each job as a subprocess.
 9. Stream subprocess output to the console and a job log.
-10. Update run manifests and TensorBoard views when jobs complete.
-11. Repeat until all jobs are complete or a job fails.
+10. Poll running training jobs for new checkpoint manifests and enqueue
+    checkpoint evaluation jobs when configured.
+11. Update run manifests and TensorBoard views when jobs complete.
+12. Repeat until all jobs are complete or a job fails.
 
 This does not require an always-on scheduler. If the executor process dies,
 rerun the same command. Existing manifests and locks determine what is complete,
 what is cacheable, and what needs recovery.
+
+The executor is still a single local parent process, but it may supervise
+multiple subprocess jobs concurrently. For example, if training is running and a
+checkpoint evaluation job becomes ready, the evaluation job can run in parallel
+when GPU and CPU resource limits allow it.
 
 ## Subprocess Jobs
 
@@ -257,7 +331,7 @@ Each job should run through a narrow stage-job entry point:
 
 ```bash
 python -m llm_lite.scripts.run_job \
-  --config configs/python_moe_small.yaml \
+  --resolved-config runs/python_moe_small/resolved_config.json \
   --stage packed_dataset \
   --fingerprint sha256:...
 ```
@@ -267,13 +341,23 @@ For multi-GPU training, the executor launches `torchrun`:
 ```bash
 CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 \
   -m llm_lite.scripts.run_job \
-  --config configs/python_moe_small.yaml \
+  --resolved-config runs/python_moe_small/resolved_config.json \
   --stage pretraining \
   --fingerprint sha256:...
 ```
 
 The executor does not need to understand the internal training loop. It only
-needs to know the stage, artifact fingerprint, dependencies, and resources.
+needs to know the stage, artifact fingerprint, dependencies, resources, and
+checkpoint event contract.
+
+The subprocess job contract is:
+
+- read one resolved config snapshot
+- receive the stage name and expected fingerprint
+- write payload files under the artifact directory for that fingerprint
+- write TensorBoard events to the artifact view and run view when applicable
+- write the complete artifact manifest last
+- exit nonzero on failure
 
 ## Resource Model
 
@@ -314,17 +398,25 @@ Each artifact should have a local lock:
 artifact_store/<stage>/<fingerprint>/.lock
 ```
 
+Lock acquisition must be atomic. The first implementation can use exclusive
+file creation or atomic directory creation for the lock path.
+
 The lock records:
 
+- artifact fingerprint
 - process id
 - hostname
 - command
 - start time
 - heartbeat time
 
-While a subprocess is running, the executor updates the heartbeat. If another
-job needs the same artifact, it waits for the lock to clear and then rechecks
-the manifest.
+While a subprocess is running, the parent executor updates the heartbeat. The
+child job does not need to write heartbeat records. If another job needs the
+same artifact, it waits for the lock to clear and then rechecks the manifest.
+
+On restart, a lock is fresh only when the recorded process is still alive on the
+same host and the heartbeat is recent. If the process is gone or the heartbeat
+is stale, the lock is stale.
 
 If the lock is stale, the executor can apply the stage recovery policy:
 
@@ -350,6 +442,10 @@ On restart, the executor should:
 4. Resume or retry incomplete artifacts according to stage policy.
 5. Continue remaining jobs.
 
+Training stages should resume from their latest valid checkpoint only when the
+requested fingerprint is unchanged. Changed training hyperparameters create a
+new training artifact.
+
 ### Job Failure
 
 If a subprocess exits nonzero, the executor should:
@@ -357,7 +453,6 @@ If a subprocess exits nonzero, the executor should:
 - mark the job failed in the run event log
 - leave the artifact manifest incomplete or failed
 - stop scheduling dependent jobs
-- keep independent jobs configurable: either continue or stop the full plan
 
 The first version can stop the full plan on the first job failure.
 
@@ -384,11 +479,16 @@ The local executor polls the artifact directory while the training subprocess is
 still running. When it sees a new complete checkpoint manifest or checkpoint
 event, it can enqueue an evaluation job for that checkpoint.
 
+Checkpoint events should be written only after the checkpoint payload and
+checkpoint manifest are complete. The event should include the producing
+training fingerprint, checkpoint step, checkpoint manifest path, and checkpoint
+kind such as full or sharded.
+
 The evaluation job needs an explicit checkpoint target:
 
 ```bash
 python -m llm_lite.scripts.run_job \
-  --config configs/python_moe_small.yaml \
+  --resolved-config runs/python_moe_small/resolved_config.json \
   --stage evaluation \
   --fingerprint sha256:... \
   --checkpoint-artifact sha256:... \
@@ -398,10 +498,16 @@ python -m llm_lite.scripts.run_job \
 The exact CLI can change, but the important contract is that evaluation can be
 run for a specific checkpoint artifact rather than only "latest".
 
+Checkpoint evaluation fingerprints should include the producing training
+fingerprint, checkpoint step, evaluator configuration, inference configuration,
+and an evaluation contract version. Final evaluation and checkpoint evaluation
+can share the same stage implementation while still producing distinct
+artifacts.
+
 This lets training continue while evaluation jobs run in parallel when resource
 limits allow.
 
-The same model supports post-training comparisons:
+The same model can later support post-training comparisons:
 
 ```text
 pretraining/base
@@ -445,14 +551,6 @@ The generated configs should be normal experiment configs with unique
 `experiment.name` and `experiment.output_dir` values. Artifact deduplication
 comes from fingerprints, not from sweep-specific logic.
 
-## Export
-
-Export should resolve `run_manifest.json`, copy the referenced artifact store
-entries, include the run TensorBoard view, and write a bundle manifest.
-
-This means export no longer depends on large files living under
-`runs/<experiment>/artifacts`.
-
 ## Migration Plan
 
 The intended migration is a clean rewrite of orchestration, not strict backward
@@ -463,7 +561,8 @@ Suggested phases:
 1. Add this design document and keep the existing runner unchanged.
 2. Add artifact-store path resolution and run-view types.
 3. Add dual TensorBoard writer support.
-4. Implement `run_job` for one stage and one artifact fingerprint.
+4. Implement resolved-run writing and make `run_job` consume
+   `resolved_config.json`.
 5. Implement `run_plan` as a local executor with dependency scheduling.
 6. Move cheap stages to artifact-store-first execution.
 7. Move pretraining and evaluation to job execution.

@@ -8,8 +8,15 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Thread
+from typing import TextIO
 
 from llm_lite.config.loading import load_experiment_configuration
+from llm_lite.orchestration.checkpoint_evaluation import (
+    checkpoint_evaluation_artifact,
+    checkpoint_evaluation_target_from_event,
+    checkpoint_event_is_supported_for_evaluation,
+)
 from llm_lite.orchestration.models import PlannedArtifact, ResolvedRun, resolve_run
 from llm_lite.orchestration.runtime import (
     acquire_artifact_lock,
@@ -33,6 +40,7 @@ from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAME
 from llm_lite.training.checkpoint import latest_checkpoint
 
 LOCK_WAIT_SECONDS = 5.0
+CHECKPOINT_EVENT_POLL_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
@@ -58,6 +66,13 @@ class ResourceRequest:
     cpu_workers: int
     gpu_count: int
     exclusive_gpus: bool
+
+
+@dataclass(frozen=True)
+class AsyncEvaluationSubmission:
+    planned_artifact: PlannedArtifact
+    event_path: Path
+    checkpoint_manifest_path: Path
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -119,6 +134,7 @@ def run_plan(
                 resolved_run=resolved_run,
                 gpu_pool=gpu_pool,
                 selected_stage_names=selected_stage_names,
+                max_parallel_jobs=max_parallel_jobs,
             )
         return 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
@@ -128,6 +144,7 @@ def run_plan(
                 resolved_run,
                 gpu_pool,
                 selected_stage_names,
+                max_parallel_jobs,
             )
             for resolved_run in resolved_runs
         )
@@ -166,6 +183,7 @@ def _execute_resolved_run(
     resolved_run: ResolvedRun,
     gpu_pool: GpuPool,
     selected_stage_names: tuple[StageName, ...],
+    max_parallel_jobs: int,
 ) -> None:
     write_resolved_configuration(resolved_run=resolved_run)
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
@@ -198,6 +216,7 @@ def _execute_resolved_run(
             planned_artifact=planned_artifact,
             gpu_pool=gpu_pool,
             event_logger=event_logger,
+            max_parallel_jobs=max_parallel_jobs,
         )
         completed_stage_names.append(planned_artifact.stage_name)
         copy_stage_tensorboard_to_run_view(
@@ -215,6 +234,7 @@ def _run_missing_artifact(
     planned_artifact: PlannedArtifact,
     gpu_pool: GpuPool,
     event_logger: PipelineEventLogger,
+    max_parallel_jobs: int,
 ) -> None:
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
     artifact_directory = registry.artifact_directory(
@@ -251,15 +271,31 @@ def _run_missing_artifact(
             message="stage job started",
         )
         console_log(f"[start] {planned_artifact.stage_name.value}")
-        _run_subprocess_job(
-            command=command,
-            artifact_directory=artifact_directory,
-            environment=_job_environment(
+        environment = _job_environment(
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+            gpu_pool=gpu_pool,
+        )
+        if _supports_async_checkpoint_evaluation(
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+            max_parallel_jobs=max_parallel_jobs,
+        ):
+            _run_training_job_with_async_evaluations(
                 resolved_run=resolved_run,
                 planned_artifact=planned_artifact,
+                command=command,
+                artifact_directory=artifact_directory,
+                environment=environment,
                 gpu_pool=gpu_pool,
-            ),
-        )
+                max_parallel_jobs=max_parallel_jobs,
+            )
+        else:
+            _run_subprocess_job(
+                command=command,
+                artifact_directory=artifact_directory,
+                environment=environment,
+            )
         completed_manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
         if not complete_manifest_matches(
             manifest=completed_manifest,
@@ -372,6 +408,262 @@ def _run_subprocess_job(
         exit_code = process.wait()
     if exit_code != 0:
         raise subprocess.CalledProcessError(returncode=exit_code, cmd=command)
+
+
+def _supports_async_checkpoint_evaluation(
+    resolved_run: ResolvedRun,
+    planned_artifact: PlannedArtifact,
+    max_parallel_jobs: int,
+) -> bool:
+    return (
+        planned_artifact.stage_name is StageName.PRETRAINING
+        and resolved_run.experiment_configuration.training.evaluation is not None
+        and max_parallel_jobs > 1
+    )
+
+
+def _run_training_job_with_async_evaluations(
+    resolved_run: ResolvedRun,
+    planned_artifact: PlannedArtifact,
+    command: list[str],
+    artifact_directory: Path,
+    environment: dict[str, str],
+    gpu_pool: GpuPool,
+    max_parallel_jobs: int,
+) -> None:
+    seen_event_paths: set[Path] = set()
+    evaluation_futures: list[concurrent.futures.Future[None]] = []
+    log_path = artifact_directory / "job.log"
+    with (
+        log_path.open("a", encoding="utf-8") as log_file,
+        concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs - 1) as executor,
+    ):
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=environment,
+        )
+        if process.stdout is None:
+            raise ValueError("Subprocess stdout was not captured.")
+        try:
+            output_thread = Thread(
+                target=_stream_process_output,
+                kwargs={"process": process, "log_file": log_file},
+                daemon=True,
+            )
+            output_thread.start()
+            while process.poll() is None:
+                _submit_ready_checkpoint_evaluations(
+                    resolved_run=resolved_run,
+                    training_artifact_directory=artifact_directory,
+                    seen_event_paths=seen_event_paths,
+                    evaluation_futures=evaluation_futures,
+                    executor=executor,
+                    gpu_pool=gpu_pool,
+                )
+                _raise_completed_evaluation_failures(evaluation_futures=evaluation_futures)
+                time.sleep(CHECKPOINT_EVENT_POLL_SECONDS)
+            output_thread.join()
+            _submit_ready_checkpoint_evaluations(
+                resolved_run=resolved_run,
+                training_artifact_directory=artifact_directory,
+                seen_event_paths=seen_event_paths,
+                evaluation_futures=evaluation_futures,
+                executor=executor,
+                gpu_pool=gpu_pool,
+            )
+            exit_code = process.wait()
+            _wait_for_async_evaluations(evaluation_futures=evaluation_futures)
+        except Exception:
+            _terminate_process(process=process)
+            raise
+    if exit_code != 0:
+        raise subprocess.CalledProcessError(returncode=exit_code, cmd=command)
+
+
+def _stream_process_output(process: subprocess.Popen[str], log_file: TextIO) -> None:
+    if process.stdout is None:
+        raise ValueError("Subprocess stdout was not captured.")
+    for line in process.stdout:
+        print(line, end="")
+        log_file.write(line)
+
+
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
+def _submit_ready_checkpoint_evaluations(
+    resolved_run: ResolvedRun,
+    training_artifact_directory: Path,
+    seen_event_paths: set[Path],
+    evaluation_futures: list[concurrent.futures.Future[None]],
+    executor: concurrent.futures.ThreadPoolExecutor,
+    gpu_pool: GpuPool,
+) -> None:
+    for submission in _checkpoint_evaluation_submissions(
+        resolved_run=resolved_run,
+        training_artifact_directory=training_artifact_directory,
+        seen_event_paths=seen_event_paths,
+    ):
+        seen_event_paths.add(submission.event_path)
+        evaluation_futures.append(
+            executor.submit(
+                _run_checkpoint_evaluation_job,
+                resolved_run,
+                submission,
+                gpu_pool,
+            ),
+        )
+
+
+def _checkpoint_evaluation_submissions(
+    resolved_run: ResolvedRun,
+    training_artifact_directory: Path,
+    seen_event_paths: set[Path],
+) -> tuple[AsyncEvaluationSubmission, ...]:
+    submissions: list[AsyncEvaluationSubmission] = []
+    events_directory = training_artifact_directory / "events"
+    if not events_directory.exists():
+        return ()
+    training_evaluation_configuration = resolved_run.experiment_configuration.training.evaluation
+    if training_evaluation_configuration is None:
+        return ()
+    for event_path in sorted(events_directory.glob("checkpoint_*.json")):
+        if event_path in seen_event_paths:
+            continue
+        if not checkpoint_event_is_supported_for_evaluation(event_path=event_path):
+            seen_event_paths.add(event_path)
+            continue
+        target = checkpoint_evaluation_target_from_event(
+            resolved_run=resolved_run,
+            event_path=event_path,
+        )
+        if target.checkpoint_step % training_evaluation_configuration.interval_steps != 0:
+            continue
+        planned_artifact = checkpoint_evaluation_artifact(
+            resolved_run=resolved_run,
+            target=target,
+        )
+        submissions.append(
+            AsyncEvaluationSubmission(
+                planned_artifact=planned_artifact,
+                event_path=event_path,
+                checkpoint_manifest_path=target.checkpoint_manifest_path,
+            ),
+        )
+    return tuple(submissions)
+
+
+def _run_checkpoint_evaluation_job(
+    resolved_run: ResolvedRun,
+    submission: AsyncEvaluationSubmission,
+    gpu_pool: GpuPool,
+) -> None:
+    registry = artifact_registry_for_resolved_run(
+        resolved_run=resolved_run,
+        override_artifact=submission.planned_artifact,
+    )
+    manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
+    if complete_manifest_matches(
+        manifest=manifest,
+        planned_artifact=submission.planned_artifact,
+    ):
+        return
+    artifact_directory = registry.artifact_directory(artifact_type=StageName.EVALUATION.value)
+    command = _checkpoint_evaluation_command(
+        resolved_run=resolved_run,
+        submission=submission,
+    )
+    while not acquire_artifact_lock(
+        artifact_directory=artifact_directory,
+        fingerprint=submission.planned_artifact.fingerprint.value,
+        command=" ".join(command),
+    ):
+        time.sleep(LOCK_WAIT_SECONDS)
+        manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
+        if complete_manifest_matches(
+            manifest=manifest,
+            planned_artifact=submission.planned_artifact,
+        ):
+            return
+    try:
+        _clear_incomplete_artifact_payload(
+            artifact_directory=artifact_directory,
+            artifact_store_root=resolved_run.artifact_store_paths.root_directory,
+        )
+        console_log(
+            f"[start] evaluation checkpoint={submission.checkpoint_manifest_path.parent.name}",
+        )
+        _run_subprocess_job(
+            command=command,
+            artifact_directory=artifact_directory,
+            environment=_job_environment(
+                resolved_run=resolved_run,
+                planned_artifact=submission.planned_artifact,
+                gpu_pool=gpu_pool,
+            ),
+        )
+        completed_manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
+        if not complete_manifest_matches(
+            manifest=completed_manifest,
+            planned_artifact=submission.planned_artifact,
+        ):
+            raise ValueError("Checkpoint evaluation exited without a complete manifest.")
+        copy_stage_tensorboard_to_run_view(
+            resolved_run=resolved_run,
+            stage_name=StageName.EVALUATION,
+            planned_artifact_override=submission.planned_artifact,
+        )
+        console_log(
+            f"[done]  evaluation checkpoint={submission.checkpoint_manifest_path.parent.name}",
+        )
+    finally:
+        release_artifact_lock(artifact_directory=artifact_directory)
+
+
+def _checkpoint_evaluation_command(
+    resolved_run: ResolvedRun,
+    submission: AsyncEvaluationSubmission,
+) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "llm_lite.scripts.run_job",
+        "--resolved-config",
+        str(resolved_run.resolved_configuration_path),
+        "--stage",
+        StageName.EVALUATION.value,
+        "--fingerprint",
+        submission.planned_artifact.fingerprint.value,
+        "--checkpoint-manifest",
+        str(submission.checkpoint_manifest_path),
+    ]
+
+
+def _raise_completed_evaluation_failures(
+    evaluation_futures: list[concurrent.futures.Future[None]],
+) -> None:
+    for future in tuple(evaluation_futures):
+        if future.done():
+            future.result()
+            evaluation_futures.remove(future)
+
+
+def _wait_for_async_evaluations(
+    evaluation_futures: list[concurrent.futures.Future[None]],
+) -> None:
+    for future in concurrent.futures.as_completed(tuple(evaluation_futures)):
+        future.result()
 
 
 def _clear_incomplete_artifact_payload(artifact_directory: Path, artifact_store_root: Path) -> None:

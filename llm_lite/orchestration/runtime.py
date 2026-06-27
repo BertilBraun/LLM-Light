@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from llm_lite.config.models import ExperimentFile
+from llm_lite.orchestration.checkpoint_evaluation import CheckpointEvaluationTarget
 from llm_lite.orchestration.models import PlannedArtifact, ResolvedRun, resolve_run
 from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.pipeline.registry import ArtifactDirectory, ArtifactRegistry
@@ -20,6 +21,8 @@ from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.pipeline.tensorboard import RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT
 
 STALE_EMPTY_LOCK_SECONDS = 60.0
+EVALUATION_CHECKPOINT_PATH_ENVIRONMENT = "LLM_LITE_EVALUATION_CHECKPOINT_PATH"
+EVALUATION_CHECKPOINT_STEP_ENVIRONMENT = "LLM_LITE_EVALUATION_CHECKPOINT_STEP"
 
 
 class LockRecord(BaseModel):
@@ -75,7 +78,20 @@ def write_run_manifest(
     )
 
 
-def artifact_registry_for_resolved_run(resolved_run: ResolvedRun) -> ArtifactRegistry:
+def artifact_registry_for_resolved_run(
+    resolved_run: ResolvedRun,
+    override_artifact: PlannedArtifact | None = None,
+) -> ArtifactRegistry:
+    artifacts = (
+        resolved_run.artifacts
+        if override_artifact is None
+        else tuple(
+            artifact
+            for artifact in resolved_run.artifacts
+            if artifact.stage_name is not override_artifact.stage_name
+        )
+        + (override_artifact,)
+    )
     return ArtifactRegistry(
         run_directory=resolved_run.run_directory,
         artifact_directories=tuple(
@@ -86,7 +102,7 @@ def artifact_registry_for_resolved_run(resolved_run: ResolvedRun) -> ArtifactReg
                     fingerprint=artifact.fingerprint,
                 ),
             )
-            for artifact in resolved_run.artifacts
+            for artifact in artifacts
         ),
     )
 
@@ -126,14 +142,23 @@ def run_stage_job(
     resolved_run: ResolvedRun,
     stage_name: StageName,
     expected_fingerprint: str,
+    planned_artifact_override: PlannedArtifact | None = None,
+    checkpoint_evaluation_target: CheckpointEvaluationTarget | None = None,
 ) -> StageExecutionResult:
-    planned_artifact = resolved_run.artifact_for_stage(stage_name=stage_name)
+    planned_artifact = (
+        resolved_run.artifact_for_stage(stage_name=stage_name)
+        if planned_artifact_override is None
+        else planned_artifact_override
+    )
     if planned_artifact.fingerprint.value != expected_fingerprint:
         raise ValueError(
             f"Expected fingerprint {expected_fingerprint} does not match planned "
             f"fingerprint {planned_artifact.fingerprint.value} for {stage_name.value}.",
         )
-    registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
+    registry = artifact_registry_for_resolved_run(
+        resolved_run=resolved_run,
+        override_artifact=planned_artifact_override,
+    )
     stage = stage_by_name(stage_name=stage_name)
     artifact_directory = registry.artifact_directory(artifact_type=stage_name.value)
     artifact_directory.mkdir(parents=True, exist_ok=True)
@@ -145,9 +170,14 @@ def run_stage_job(
         contract_version=planned_artifact.contract_version,
     )
     try:
-        with _stage_run_tensorboard_environment(
-            resolved_run=resolved_run,
-            stage_name=stage_name,
+        with (
+            _stage_run_tensorboard_environment(
+                resolved_run=resolved_run,
+                stage_name=stage_name,
+            ),
+            _evaluation_checkpoint_environment(
+                checkpoint_evaluation_target=checkpoint_evaluation_target,
+            ),
         ):
             stage_output = stage.run(
                 experiment_configuration=resolved_run.experiment_configuration,
@@ -179,8 +209,16 @@ def run_stage_job(
     )
 
 
-def copy_stage_tensorboard_to_run_view(resolved_run: ResolvedRun, stage_name: StageName) -> None:
-    planned_artifact = resolved_run.artifact_for_stage(stage_name=stage_name)
+def copy_stage_tensorboard_to_run_view(
+    resolved_run: ResolvedRun,
+    stage_name: StageName,
+    planned_artifact_override: PlannedArtifact | None = None,
+) -> None:
+    planned_artifact = (
+        resolved_run.artifact_for_stage(stage_name=stage_name)
+        if planned_artifact_override is None
+        else planned_artifact_override
+    )
     source_directory = resolved_run.artifact_store_paths.tensorboard_directory(
         stage_name=stage_name,
         fingerprint=planned_artifact.fingerprint,
@@ -272,6 +310,39 @@ def _stage_run_tensorboard_environment(
             os.environ.pop(RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT, None)
         else:
             os.environ[RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT] = previous_value
+
+
+@contextmanager
+def _evaluation_checkpoint_environment(
+    checkpoint_evaluation_target: CheckpointEvaluationTarget | None,
+) -> Iterator[None]:
+    previous_path = os.environ.get(EVALUATION_CHECKPOINT_PATH_ENVIRONMENT)
+    previous_step = os.environ.get(EVALUATION_CHECKPOINT_STEP_ENVIRONMENT)
+    if checkpoint_evaluation_target is not None:
+        os.environ[EVALUATION_CHECKPOINT_PATH_ENVIRONMENT] = str(
+            checkpoint_evaluation_target.checkpoint_path,
+        )
+        os.environ[EVALUATION_CHECKPOINT_STEP_ENVIRONMENT] = str(
+            checkpoint_evaluation_target.checkpoint_step,
+        )
+    try:
+        yield
+    finally:
+        _restore_environment_value(
+            key=EVALUATION_CHECKPOINT_PATH_ENVIRONMENT,
+            value=previous_path,
+        )
+        _restore_environment_value(
+            key=EVALUATION_CHECKPOINT_STEP_ENVIRONMENT,
+            value=previous_step,
+        )
+
+
+def _restore_environment_value(key: str, value: str | None) -> None:
+    if value is None:
+        os.environ.pop(key, None)
+    else:
+        os.environ[key] = value
 
 
 def _utc_now() -> str:

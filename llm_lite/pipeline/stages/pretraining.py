@@ -1,9 +1,7 @@
-import json
 import math
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
-from torch import nn
 
 from llm_lite.config.models import (
     DistributedConfiguration,
@@ -12,26 +10,16 @@ from llm_lite.config.models import (
     TrainingConfiguration,
 )
 from llm_lite.data.datasets import load_packed_sequence_dataset
-from llm_lite.evaluation.runner import run_configured_evaluators
-from llm_lite.evaluation.tensorboard import (
-    EVALUATION_TENSORBOARD_DIRECTORY_NAME,
-    write_evaluation_metrics_to_tensorboard,
-)
 from llm_lite.model.factory import build_model
 from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.pipeline.hashing import hash_json_value
-from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
-from llm_lite.tokenizer.loading import TextTokenizer, load_tokenizer
+from llm_lite.tokenizer.loading import load_tokenizer
 from llm_lite.training.checkpoint import latest_checkpoint
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
-from llm_lite.training.trainer import (
-    TrainingEvaluationCallback,
-    train_model,
-    train_model_distributed,
-)
+from llm_lite.training.trainer import train_model, train_model_distributed
 
 PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION = 2
 
@@ -75,12 +63,6 @@ class PretrainingStage(BasePipelineStage):
             vocabulary_size=tokenizer.vocabulary_size,
         )
         parameter_summary = model_parameter_summary(model=model)
-        evaluation_callback = _training_evaluation_callback(
-            experiment_configuration=experiment_configuration,
-            registry=registry,
-            tokenizer=tokenizer,
-            artifact_directory=artifact_directory,
-        )
         if experiment_configuration.distributed.enabled:
             result = train_model_distributed(
                 model=model,
@@ -89,7 +71,7 @@ class PretrainingStage(BasePipelineStage):
                 distributed_configuration=experiment_configuration.distributed,
                 artifact_directory=artifact_directory,
                 seed=experiment_configuration.experiment.seed,
-                evaluation_callback=evaluation_callback,
+                evaluation_callback=None,
                 model_configuration_hash=hash_json_value(
                     value=experiment_configuration.model.model_dump(mode="json"),
                 ),
@@ -107,7 +89,7 @@ class PretrainingStage(BasePipelineStage):
                 training_configuration=experiment_configuration.training,
                 artifact_directory=artifact_directory,
                 seed=experiment_configuration.experiment.seed,
-                evaluation_callback=evaluation_callback,
+                evaluation_callback=None,
                 objective_runner=CausalLanguageModelingObjectiveRunner(
                     auxiliary_loss_weight=(
                         experiment_configuration.training.causal_language_modeling.auxiliary_loss_weight
@@ -200,59 +182,3 @@ def _finite_training_loss(final_loss: float) -> float:
     if math.isfinite(final_loss):
         return final_loss
     return 0.0
-
-
-def _training_evaluation_callback(
-    experiment_configuration: ExperimentFile,
-    registry: ArtifactRegistry,
-    tokenizer: TextTokenizer,
-    artifact_directory: Path,
-) -> TrainingEvaluationCallback | None:
-    training_evaluation_configuration = experiment_configuration.training.evaluation
-    if training_evaluation_configuration is None:
-        return None
-    evaluation_path = artifact_directory / "training_evaluations.jsonl"
-
-    def run_training_evaluation(step: int, model: nn.Module) -> Path:
-        evaluation_result = run_configured_evaluators(
-            model=model,
-            tokenizer=tokenizer,
-            registry=registry,
-            evaluation_configuration=training_evaluation_configuration.evaluators,
-            inference_configuration=experiment_configuration.inference,
-            packing_configuration=experiment_configuration.packing,
-        )
-        with evaluation_path.open("a", encoding="utf-8") as evaluation_file:
-            evaluation_file.write(
-                json.dumps(
-                    {
-                        "step": step,
-                        "report": evaluation_result.report,
-                        "metrics": evaluation_result.metrics,
-                    },
-                    sort_keys=True,
-                )
-                + "\n",
-            )
-        write_evaluation_metrics_to_tensorboard(
-            tensorboard_directory=artifact_directory / EVALUATION_TENSORBOARD_DIRECTORY_NAME,
-            metrics=evaluation_result.metrics,
-            step=step,
-        )
-        _print_training_evaluation(step=step, metrics=evaluation_result.metrics)
-        return evaluation_path
-
-    return run_training_evaluation
-
-
-def _print_training_evaluation(
-    step: int,
-    metrics: dict[str, int | float | str | bool],
-) -> None:
-    if not metrics:
-        console_log(f"[train-eval] step={step} no configured evaluator metrics")
-        return
-    formatted_metrics = " ".join(
-        f"{metric_name}={metric_value}" for metric_name, metric_value in sorted(metrics.items())
-    )
-    console_log(f"[train-eval] step={step} {formatted_metrics}")

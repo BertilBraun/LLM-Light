@@ -288,6 +288,21 @@ class PreprocessingConfiguration(Configuration):
     workers: int = Field(default=1, ge=1)
 
 
+class FillInMiddleConfiguration(Configuration):
+    enabled: bool = False
+    probability: float = Field(default=0.0, ge=0.0, le=1.0)
+    minimum_segment_characters: int = Field(default=8, gt=0)
+    prefix_marker: str = "<fim_prefix>"
+    suffix_marker: str = "<fim_suffix>"
+    middle_marker: str = "<fim_middle>"
+
+    @model_validator(mode="after")
+    def require_positive_probability_when_enabled(self) -> FillInMiddleConfiguration:
+        if self.enabled and self.probability == 0.0:
+            raise ValueError("Enabled fill-in-the-middle packing requires probability > 0.")
+        return self
+
+
 class PackingConfiguration(Configuration):
     context_length: int = Field(gt=1)
     add_bos: bool = True
@@ -295,6 +310,7 @@ class PackingConfiguration(Configuration):
     pack_documents: bool = True
     maximum_shard_tokens: int = Field(default=1000000, gt=0)
     workers: int = Field(default=1, ge=1)
+    fill_in_middle: FillInMiddleConfiguration = FillInMiddleConfiguration()
 
 
 class DenseGptConfiguration(Configuration):

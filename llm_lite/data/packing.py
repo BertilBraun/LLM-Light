@@ -1,3 +1,4 @@
+import hashlib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from multiprocessing import get_context
@@ -5,7 +6,7 @@ from pathlib import Path
 
 from tqdm.auto import tqdm
 
-from llm_lite.config.models import TokenizerConfiguration
+from llm_lite.config.models import FillInMiddleConfiguration, TokenizerConfiguration
 from llm_lite.data.datasets import (
     PackedDatasetIndex,
     PackedSequence,
@@ -114,6 +115,7 @@ def pack_text_shards(
     add_bos: bool,
     add_eos: bool,
     pack_documents: bool,
+    fill_in_middle_configuration: FillInMiddleConfiguration,
     maximum_shard_tokens: int,
     workers: int,
 ) -> ParallelPackingResult:
@@ -149,6 +151,7 @@ def pack_text_shards(
             add_bos,
             add_eos,
             pack_documents,
+            fill_in_middle_configuration,
             maximum_shard_tokens,
         )
         for worker_input in worker_inputs
@@ -192,6 +195,7 @@ def _packing_worker(
     add_bos: bool,
     add_eos: bool,
     pack_documents: bool,
+    fill_in_middle_configuration: FillInMiddleConfiguration,
     maximum_shard_tokens: int,
 ) -> PackingWorkerResult:
     tokenizer = load_tokenizer(
@@ -213,6 +217,7 @@ def _packing_worker(
         add_bos=add_bos,
         add_eos=add_eos,
         pack_documents=pack_documents,
+        fill_in_middle_configuration=fill_in_middle_configuration,
     )
     index = writer.close()
     return PackingWorkerResult(
@@ -255,6 +260,7 @@ def _write_packed_worker_shards(
     add_bos: bool,
     add_eos: bool,
     pack_documents: bool,
+    fill_in_middle_configuration: FillInMiddleConfiguration,
 ) -> PackingCounters:
     if worker_input.progress_total_documents is None:
         return _write_packed_worker_documents(
@@ -266,6 +272,7 @@ def _write_packed_worker_shards(
             add_bos=add_bos,
             add_eos=add_eos,
             pack_documents=pack_documents,
+            fill_in_middle_configuration=fill_in_middle_configuration,
             progress=None,
         )
     with progress_bar(
@@ -282,6 +289,7 @@ def _write_packed_worker_shards(
             add_bos=add_bos,
             add_eos=add_eos,
             pack_documents=pack_documents,
+            fill_in_middle_configuration=fill_in_middle_configuration,
             progress=PackingProgress(
                 progress_bar_instance=progress_bar_instance,
                 total_documents=worker_input.progress_total_documents,
@@ -299,6 +307,7 @@ def _write_packed_worker_documents(
     add_bos: bool,
     add_eos: bool,
     pack_documents: bool,
+    fill_in_middle_configuration: FillInMiddleConfiguration,
     progress: PackingProgress | None,
 ) -> PackingCounters:
     if pack_documents:
@@ -310,6 +319,7 @@ def _write_packed_worker_documents(
             pad_token_id=pad_token_id,
             add_bos=add_bos,
             add_eos=add_eos,
+            fill_in_middle_configuration=fill_in_middle_configuration,
             progress=progress,
         )
     input_documents = 0
@@ -318,7 +328,12 @@ def _write_packed_worker_documents(
     for shard_reference in worker_input.shard_references:
         for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
             input_documents += 1
-            token_ids = tokenizer.encode(text=document.text, add_bos=add_bos, add_eos=add_eos)
+            document_text = fill_in_middle_text(
+                text=document.text,
+                document_id=document.document_id,
+                configuration=fill_in_middle_configuration,
+            )
+            token_ids = tokenizer.encode(text=document_text, add_bos=add_bos, add_eos=add_eos)
             for sequence in pack_token_sequences(
                 tokenized_document_stream=(token_ids,),
                 context_length=context_length,
@@ -345,6 +360,7 @@ def _write_cross_document_packed_worker_documents(
     pad_token_id: int,
     add_bos: bool,
     add_eos: bool,
+    fill_in_middle_configuration: FillInMiddleConfiguration,
     progress: PackingProgress | None,
 ) -> PackingCounters:
     row_length = context_length + 1
@@ -357,8 +373,13 @@ def _write_cross_document_packed_worker_documents(
         for shard_reference in worker_input.shard_references:
             for document in iter_text_shard_reference_documents(shard_reference=shard_reference):
                 input_documents += 1
-                token_ids = tokenizer.encode(
+                document_text = fill_in_middle_text(
                     text=document.text,
+                    document_id=document.document_id,
+                    configuration=fill_in_middle_configuration,
+                )
+                token_ids = tokenizer.encode(
+                    text=document_text,
                     add_bos=add_bos,
                     add_eos=add_eos,
                 )
@@ -394,10 +415,81 @@ def _packing_worker_from_arguments(
         bool,
         bool,
         bool,
+        FillInMiddleConfiguration,
         int,
     ],
 ) -> PackingWorkerResult:
     return _packing_worker(*arguments)
+
+
+def fill_in_middle_text(
+    text: str,
+    document_id: str,
+    configuration: FillInMiddleConfiguration,
+) -> str:
+    if not configuration.enabled:
+        return text
+    if not _selected_for_fill_in_middle(
+        document_id=document_id,
+        probability=configuration.probability,
+    ):
+        return text
+    minimum_total_characters = configuration.minimum_segment_characters * 3
+    if len(text) < minimum_total_characters:
+        return text
+    prefix_end, middle_end = _fill_in_middle_boundaries(
+        text=text,
+        document_id=document_id,
+        minimum_segment_characters=configuration.minimum_segment_characters,
+    )
+    prefix_text = text[:prefix_end]
+    middle_text = text[prefix_end:middle_end]
+    suffix_text = text[middle_end:]
+    return (
+        f"{configuration.prefix_marker}{prefix_text}"
+        f"{configuration.suffix_marker}{suffix_text}"
+        f"{configuration.middle_marker}{middle_text}"
+    )
+
+
+def _selected_for_fill_in_middle(document_id: str, probability: float) -> bool:
+    if probability >= 1.0:
+        return True
+    selection_value = _normalized_hash_value(text=f"{document_id}:fill_in_middle")
+    return selection_value < probability
+
+
+def _fill_in_middle_boundaries(
+    text: str,
+    document_id: str,
+    minimum_segment_characters: int,
+) -> tuple[int, int]:
+    first_available_span = len(text) - (minimum_segment_characters * 3)
+    first_offset = _hash_modulo(
+        text=f"{document_id}:fill_in_middle:first",
+        divisor=first_available_span + 1,
+    )
+    prefix_end = minimum_segment_characters + first_offset
+    second_minimum = prefix_end + minimum_segment_characters
+    second_available_span = len(text) - second_minimum - minimum_segment_characters
+    second_offset = _hash_modulo(
+        text=f"{document_id}:fill_in_middle:second",
+        divisor=second_available_span + 1,
+    )
+    middle_end = second_minimum + second_offset
+    return prefix_end, middle_end
+
+
+def _normalized_hash_value(text: str) -> float:
+    hash_integer = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16)
+    return hash_integer / float(16**16 - 1)
+
+
+def _hash_modulo(text: str, divisor: int) -> int:
+    if divisor <= 0:
+        raise ValueError("Hash divisor must be positive.")
+    hash_integer = int(hashlib.sha256(text.encode("utf-8")).hexdigest()[:16], 16)
+    return hash_integer % divisor
 
 
 def _merge_packing_worker_results(

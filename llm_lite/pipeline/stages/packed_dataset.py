@@ -41,6 +41,7 @@ class PackedDatasetStage(BasePipelineStage):
             add_bos=experiment_configuration.packing.add_bos,
             add_eos=experiment_configuration.packing.add_eos,
             pack_documents=experiment_configuration.packing.pack_documents,
+            fill_in_middle_configuration=experiment_configuration.packing.fill_in_middle,
             maximum_shard_tokens=experiment_configuration.packing.maximum_shard_tokens,
             workers=experiment_configuration.packing.workers,
         )

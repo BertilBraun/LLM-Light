@@ -2,13 +2,18 @@ from pathlib import Path
 
 import pytest
 
+from llm_lite.config.models import FillInMiddleConfiguration
 from llm_lite.data.datasets import (
     PackedSequence,
     load_iterable_packed_sequence_dataset,
     load_packed_sequence_dataset,
     write_packed_sequence_stream,
 )
-from llm_lite.data.packing import pack_document_token_sequences, pack_token_sequences
+from llm_lite.data.packing import (
+    fill_in_middle_text,
+    pack_document_token_sequences,
+    pack_token_sequences,
+)
 
 
 def test_pack_token_sequences_pads_to_context_plus_target() -> None:
@@ -192,3 +197,54 @@ def test_iterable_dataset_reshuffles_between_epochs(tmp_path: Path) -> None:
 
     assert sorted(first_epoch_rows) == sorted(second_epoch_rows)
     assert first_epoch_rows != second_epoch_rows
+
+
+def test_fill_in_middle_text_reorders_document_segments() -> None:
+    transformed_text = fill_in_middle_text(
+        text="abcdefghijklmnopqrstuvwxyz",
+        document_id="doc-1",
+        configuration=FillInMiddleConfiguration(
+            enabled=True,
+            probability=1.0,
+            minimum_segment_characters=3,
+        ),
+    )
+
+    assert transformed_text.startswith("<fim_prefix>")
+    assert "<fim_suffix>" in transformed_text
+    assert "<fim_middle>" in transformed_text
+    assert transformed_text != "abcdefghijklmnopqrstuvwxyz"
+    assert _recover_fill_in_middle_text(transformed_text=transformed_text) == (
+        "abcdefghijklmnopqrstuvwxyz"
+    )
+
+
+def test_fill_in_middle_text_skips_short_documents() -> None:
+    transformed_text = fill_in_middle_text(
+        text="short",
+        document_id="doc-1",
+        configuration=FillInMiddleConfiguration(
+            enabled=True,
+            probability=1.0,
+            minimum_segment_characters=3,
+        ),
+    )
+
+    assert transformed_text == "short"
+
+
+def test_fill_in_middle_text_respects_zero_probability_when_disabled() -> None:
+    transformed_text = fill_in_middle_text(
+        text="abcdefghijklmnopqrstuvwxyz",
+        document_id="doc-1",
+        configuration=FillInMiddleConfiguration(),
+    )
+
+    assert transformed_text == "abcdefghijklmnopqrstuvwxyz"
+
+
+def _recover_fill_in_middle_text(transformed_text: str) -> str:
+    without_prefix_marker = transformed_text.removeprefix("<fim_prefix>")
+    prefix_text, suffix_and_middle_text = without_prefix_marker.split("<fim_suffix>")
+    suffix_text, middle_text = suffix_and_middle_text.split("<fim_middle>")
+    return prefix_text + middle_text + suffix_text

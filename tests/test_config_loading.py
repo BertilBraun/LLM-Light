@@ -75,6 +75,46 @@ def test_load_tinystories_moe_full_configuration_uses_fast_tokenizer() -> None:
     assert experiment_configuration.tokenizer.type.value == "rust_byte_bpe"
 
 
+def test_packing_fill_in_middle_configuration_loads_from_yaml(tmp_path: Path) -> None:
+    configuration_path = tmp_path / "fim_config.yaml"
+    configuration_path.write_text(
+        "\n".join(
+            (
+                "experiment:",
+                "  name: fim_config",
+                "  output_dir: runs/fim_config",
+                "dataset:",
+                "  type: inline_text",
+                "  documents: ['abcdefghijklmnopqrstuvwxyz']",
+                "tokenizer:",
+                "  type: character",
+                "packing:",
+                "  context_length: 8",
+                "  fill_in_middle:",
+                "    enabled: true",
+                "    probability: 0.25",
+                "    minimum_segment_characters: 3",
+                "model:",
+                "  type: dense_gpt",
+                "  dimension: 8",
+                "  layers: 1",
+                "  attention_heads: 1",
+                "  feed_forward_dimension: 16",
+                "training:",
+                "  maximum_steps: 1",
+                "  batch_size_sequences: 1",
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    experiment_configuration = load_experiment_configuration(configuration_path=configuration_path)
+
+    assert experiment_configuration.packing.fill_in_middle.enabled
+    assert experiment_configuration.packing.fill_in_middle.probability == 0.25
+    assert experiment_configuration.packing.fill_in_middle.minimum_segment_characters == 3
+
+
 def test_load_python_moe_full_configuration() -> None:
     experiment_configuration = load_experiment_configuration(
         configuration_path=Path("configs/python_moe_full.yaml"),

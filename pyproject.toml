@@ -34,6 +34,7 @@ include = ["llm_lite*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+  "heavy: pipeline, subprocess, and training-heavy tests skipped unless --run-heavy is set",
   "integration: end-to-end pipeline tests",
 ]
 

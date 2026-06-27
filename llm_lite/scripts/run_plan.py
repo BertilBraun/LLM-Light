@@ -1,4 +1,5 @@
 import argparse
+import concurrent.futures
 import glob
 import os
 import shutil
@@ -109,12 +110,26 @@ def run_plan(
         from_stage=from_stage,
         to_stage=to_stage,
     )
-    for resolved_run in resolved_runs:
-        _execute_resolved_run(
-            resolved_run=resolved_run,
-            gpu_pool=gpu_pool,
-            selected_stage_names=selected_stage_names,
+    if max_parallel_jobs == 1 or len(resolved_runs) == 1:
+        for resolved_run in resolved_runs:
+            _execute_resolved_run(
+                resolved_run=resolved_run,
+                gpu_pool=gpu_pool,
+                selected_stage_names=selected_stage_names,
+            )
+        return 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
+        futures = tuple(
+            executor.submit(
+                _execute_resolved_run,
+                resolved_run,
+                gpu_pool,
+                selected_stage_names,
+            )
+            for resolved_run in resolved_runs
         )
+        for future in concurrent.futures.as_completed(futures):
+            future.result()
     return 0
 
 

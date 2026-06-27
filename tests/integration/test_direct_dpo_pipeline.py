@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from llm_lite.pipeline.runner import run_pipeline
+from tests.artifact_helpers import stage_artifact_directory
 
 
 def test_direct_dpo_pipeline_runs_post_training(tmp_path: Path) -> None:
@@ -23,14 +24,19 @@ def test_direct_dpo_pipeline_runs_post_training(tmp_path: Path) -> None:
         dry_run=False,
         force_stages=(),
     )
-    post_training_artifact_directory = run_directory / "artifacts" / "post_training"
+    post_training_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="post_training",
+    )
     post_training_manifest = json.loads(
         (post_training_artifact_directory / "manifest.json").read_text(encoding="utf-8"),
     )
+    evaluation_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="evaluation",
+    )
     evaluation_report = json.loads(
-        (run_directory / "artifacts" / "evaluation" / "report.json").read_text(
-            encoding="utf-8",
-        ),
+        (evaluation_artifact_directory / "report.json").read_text(encoding="utf-8"),
     )
 
     assert exit_code == 0

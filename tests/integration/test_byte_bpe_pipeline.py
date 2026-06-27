@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from llm_lite.pipeline.runner import run_pipeline
+from tests.artifact_helpers import stage_artifact_directory
 
 
 def test_byte_bpe_pipeline_produces_packed_dataset(tmp_path: Path) -> None:
@@ -23,16 +24,18 @@ def test_byte_bpe_pipeline_produces_packed_dataset(tmp_path: Path) -> None:
         dry_run=False,
         force_stages=(),
     )
+    tokenizer_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="tokenizer",
+    )
+    packed_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="packed_dataset",
+    )
     tokenizer_manifest = json.loads(
-        (run_directory / "artifacts" / "tokenizer" / "manifest.json").read_text(
-            encoding="utf-8",
-        ),
+        (tokenizer_artifact_directory / "manifest.json").read_text(encoding="utf-8"),
     )
-    packed_index = json.loads(
-        (run_directory / "artifacts" / "packed_dataset" / "index.json").read_text(
-            encoding="utf-8",
-        ),
-    )
+    packed_index = json.loads((packed_artifact_directory / "index.json").read_text("utf-8"))
 
     assert exit_code == 0
     assert tokenizer_manifest["metrics"]["vocabulary_size"] == 260

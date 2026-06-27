@@ -24,6 +24,7 @@ from llm_lite.training.objectives import (
     CausalLanguageModelingObjectiveRunner,
     causal_language_modeling_loss,
 )
+from tests.artifact_helpers import stage_artifact_directory
 
 
 def test_model_factory_returns_dense_and_moe_models() -> None:
@@ -243,10 +244,12 @@ def test_tiny_pipeline_config_trains_moe_for_a_few_steps(tmp_path: Path) -> None
         dry_run=False,
         force_stages=(),
     )
+    pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
     pretraining_manifest = json.loads(
-        (run_directory / "artifacts" / "pretraining" / "manifest.json").read_text(
-            encoding="utf-8",
-        ),
+        (pretraining_artifact_directory / "manifest.json").read_text(encoding="utf-8"),
     )
 
     assert exit_code == 0
@@ -255,7 +258,7 @@ def test_tiny_pipeline_config_trains_moe_for_a_few_steps(tmp_path: Path) -> None
         pretraining_manifest["metrics"]["model_parameters"]
         > pretraining_manifest["metrics"]["active_model_parameters"]
     )
-    assert (run_directory / "artifacts" / "pretraining" / "checkpoints" / "latest.pt").exists()
+    assert (pretraining_artifact_directory / "checkpoints" / "latest.pt").exists()
 
 
 def _dense_configuration() -> DenseGptConfiguration:

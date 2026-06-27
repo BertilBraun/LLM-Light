@@ -19,6 +19,8 @@ from llm_lite.pipeline.stage import PipelineStage, StageName, StageOutput
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.pipeline.tensorboard import RUN_TENSORBOARD_DIRECTORY_ENVIRONMENT
 
+STALE_EMPTY_LOCK_SECONDS = 60.0
+
 
 class LockRecord(BaseModel):
     model_config = ConfigDict(frozen=True)
@@ -239,7 +241,8 @@ def write_lock_heartbeat(lock_directory: Path, fingerprint: str, command: str) -
 def lock_is_stale(lock_directory: Path) -> bool:
     lock_path = lock_directory / "lock.json"
     if not lock_path.exists():
-        return True
+        lock_age_seconds = datetime.now(timezone.utc).timestamp() - lock_directory.stat().st_mtime
+        return lock_age_seconds > STALE_EMPTY_LOCK_SECONDS
     lock_record = LockRecord.model_validate_json(lock_path.read_text(encoding="utf-8"))
     if lock_record.hostname != socket.gethostname():
         return False

@@ -142,3 +142,58 @@ def test_run_plan_writes_raw_dataset_to_artifact_store(tmp_path: Path) -> None:
     assert (run_directory / "resolved_config.json").exists()
     assert artifact_manifest["fingerprint"] == raw_fingerprint
     assert artifact_manifest["status"] == "complete"
+
+
+def test_run_plan_accepts_parallel_sweep_configs(tmp_path: Path) -> None:
+    first_run_directory = tmp_path / "runs" / "first"
+    second_run_directory = tmp_path / "runs" / "second"
+    first_configuration_path = tmp_path / "first.yaml"
+    second_configuration_path = tmp_path / "second.yaml"
+    base_configuration_text = Path("configs/verify_one_sentence.yaml").read_text(encoding="utf-8")
+    first_configuration_path.write_text(
+        base_configuration_text.replace(
+            "name: verify_one_sentence",
+            "name: first",
+        ).replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(first_run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+    second_configuration_path.write_text(
+        base_configuration_text.replace(
+            "name: verify_one_sentence",
+            "name: second",
+        ).replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(second_run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+
+    completed_process = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "llm_lite.scripts.run_plan",
+            "--config",
+            str(first_configuration_path),
+            str(second_configuration_path),
+            "--to",
+            StageName.RAW_DATASET.value,
+            "--max-parallel-jobs",
+            "2",
+        ],
+        check=False,
+        cwd=Path.cwd(),
+    )
+
+    first_manifest = json.loads(
+        (first_run_directory / "run_manifest.json").read_text(encoding="utf-8"),
+    )
+    second_manifest = json.loads(
+        (second_run_directory / "run_manifest.json").read_text(encoding="utf-8"),
+    )
+
+    assert completed_process.returncode == 0
+    assert first_manifest["artifacts"]["raw_dataset"] == second_manifest["artifacts"]["raw_dataset"]

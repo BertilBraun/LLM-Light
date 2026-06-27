@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from llm_lite.pipeline.runner import run_pipeline
+from tests.artifact_helpers import stage_artifact_directory
 
 
 def test_verify_pipeline_reproduces_sentence(tmp_path: Path) -> None:
@@ -21,9 +22,16 @@ def test_verify_pipeline_reproduces_sentence(tmp_path: Path) -> None:
         dry_run=False,
         force_stages=(),
     )
-    report_path = run_directory / "artifacts" / "evaluation" / "report.json"
+    evaluation_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="evaluation",
+    )
+    report_path = evaluation_artifact_directory / "report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    pretraining_artifact_directory = run_directory / "artifacts" / "pretraining"
+    pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
     pretraining_manifest_path = pretraining_artifact_directory / "manifest.json"
     pretraining_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
     pipeline_events_path = run_directory / "pipeline.jsonl"

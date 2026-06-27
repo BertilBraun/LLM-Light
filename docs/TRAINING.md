@@ -220,8 +220,7 @@ maximum_steps: 3750
 learning_rate: 0.001
 ```
 
-The recorded TinyPython MoE result was continued by editing the same config
-between resumes:
+The recorded TinyPython MoE result used staged training phases:
 
 ```text
 3,750 steps at LR 0.001
@@ -229,9 +228,10 @@ between resumes:
 10,000 steps at LR 0.00025
 ```
 
-Compatible increases to `training.maximum_steps` resume from the latest
-checkpoint. Architecture, tokenizer, packed data, optimizer shape, batch,
-precision, and gradient-clipping changes invalidate pretraining.
+Changing `training.maximum_steps`, optimizer settings, batch size, precision,
+gradient clipping, model configuration, seed, or distributed configuration now
+creates a new pretraining artifact. Interrupted runs resume only when the
+recomputed pretraining fingerprint is unchanged.
 
 The completed TinyPython MoE artifact bundle is published as the
 [Python-Run-V1 GitHub release](https://github.com/BertilBraun/LLM-Light/releases/tag/Python-Run-V1).
@@ -276,13 +276,15 @@ Python completion evaluation trims trailing newlines from signature prompts
 before generation. It counts parse success, subprocess execution success, check
 passes, total checks, and pass rate.
 
-Training-time evaluation metrics are written to:
+Training-time evaluation is scheduled from checkpoint events when
+`training.evaluation` is configured and `run_plan --max-parallel-jobs` leaves a
+free job slot. Checkpoint evaluation artifacts are written under:
 
 ```text
-runs/<experiment>/artifacts/pretraining/training_evaluations.jsonl
+artifact_store/evaluation/<checkpoint-evaluation-fingerprint>/
 ```
 
-and mirrored to TensorBoard.
+and mirrored into the run TensorBoard view.
 
 ## Generation
 
@@ -325,7 +327,7 @@ Inspect pretraining curves:
 
 ```bash
 python -m tensorboard.main \
-  --logdir runs/python_moe_full/artifacts/pretraining/tensorboard
+  --logdir runs/python_moe_full/tensorboard/pretraining
 ```
 
 Pretraining TensorBoard includes loss, learning rate, gradient norm, local and
@@ -342,7 +344,7 @@ adding many raw plots.
 Final evaluation TensorBoard is written to:
 
 ```text
-runs/<experiment>/artifacts/evaluation/tensorboard
+runs/<experiment>/tensorboard/evaluation
 ```
 
 Evaluation scalars include perplexity loss, perplexity, document and sequence
@@ -355,7 +357,7 @@ For the one-sentence smoke run:
 
 ```bash
 python -m tensorboard.main \
-  --logdir runs/verify_one_sentence/artifacts/pretraining/tensorboard
+  --logdir runs/verify_one_sentence/tensorboard/pretraining
 ```
 
 ## Exporting Run Bundles

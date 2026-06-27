@@ -9,6 +9,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from llm_lite.orchestration.models import (
+    ArtifactFingerprint,
+    ArtifactStorePaths,
+    RunManifest,
+)
+from llm_lite.pipeline.stage import StageName
+
 
 @dataclass(frozen=True)
 class BundleEntry:
@@ -24,52 +31,95 @@ def collect_bundle_entries(
 ) -> list[BundleEntry]:
     run_directory = run_directory.resolve()
     entries: list[BundleEntry] = []
+    run_manifest = _read_run_manifest(run_directory=run_directory)
+    artifact_store_paths = ArtifactStorePaths.for_run_directory(run_directory=run_directory)
 
-    _add_existing_files(
+    _add_existing_run_files(
         entries=entries,
         run_directory=run_directory,
-        relative_paths=[
+        relative_paths=(
             Path("resolved_config.json"),
+            Path("run_manifest.json"),
             Path("pipeline.jsonl"),
             Path("performance.jsonl"),
-            Path("artifacts/evaluation/manifest.json"),
-            Path("artifacts/evaluation/report.json"),
-            Path("artifacts/pretraining/manifest.json"),
-            Path("artifacts/pretraining/metrics.jsonl"),
-            Path("artifacts/pretraining/training_evaluations.jsonl"),
-        ],
+        ),
     )
-    _add_existing_tree(
+    _add_stage_file(
         entries=entries,
-        run_directory=run_directory,
-        relative_directory=Path("artifacts/tokenizer"),
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.EVALUATION,
+        relative_path=Path("manifest.json"),
+    )
+    _add_stage_file(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.EVALUATION,
+        relative_path=Path("report.json"),
+    )
+    _add_stage_file(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.PRETRAINING,
+        relative_path=Path("manifest.json"),
+    )
+    _add_stage_file(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.PRETRAINING,
+        relative_path=Path("metrics.jsonl"),
+    )
+    _add_stage_file(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.PRETRAINING,
+        relative_path=Path("training_evaluations.jsonl"),
+    )
+    _add_stage_tree(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=StageName.TOKENIZER,
+        relative_directory=Path("."),
     )
 
-    checkpoint_directory = run_directory / "artifacts" / "pretraining" / "checkpoints"
+    checkpoint_directory = (
+        _stage_artifact_directory(
+            run_manifest=run_manifest,
+            artifact_store_paths=artifact_store_paths,
+            stage_name=StageName.PRETRAINING,
+        )
+        / "checkpoints"
+    )
     if include_all_checkpoints:
-        _add_existing_tree(
+        _add_stage_tree(
             entries=entries,
-            run_directory=run_directory,
-            relative_directory=Path("artifacts/pretraining/checkpoints"),
+            run_manifest=run_manifest,
+            artifact_store_paths=artifact_store_paths,
+            stage_name=StageName.PRETRAINING,
+            relative_directory=Path("checkpoints"),
         )
     else:
-        _add_latest_checkpoint(
-            entries=entries,
-            run_directory=run_directory,
-            checkpoint_directory=checkpoint_directory,
-        )
+        _add_latest_checkpoint(entries=entries, checkpoint_directory=checkpoint_directory)
 
     if include_tensorboard:
-        _add_existing_tree(
+        _add_existing_run_tree(
             entries=entries,
             run_directory=run_directory,
             relative_directory=Path("tensorboard"),
         )
-        _add_existing_tree(
-            entries=entries,
-            run_directory=run_directory,
-            relative_directory=Path("artifacts/pretraining/tensorboard"),
-        )
+        for stage_name in StageName:
+            _add_stage_tree(
+                entries=entries,
+                run_manifest=run_manifest,
+                artifact_store_paths=artifact_store_paths,
+                stage_name=stage_name,
+                relative_directory=Path("tensorboard"),
+            )
 
     return sorted(_deduplicate_entries(entries), key=lambda entry: entry.archive_path.as_posix())
 
@@ -136,67 +186,166 @@ def main() -> int:
     return 0
 
 
-def _add_latest_checkpoint(
-    *,
-    entries: list[BundleEntry],
-    run_directory: Path,
-    checkpoint_directory: Path,
-) -> None:
+def _add_latest_checkpoint(entries: list[BundleEntry], checkpoint_directory: Path) -> None:
     latest_full_checkpoint = checkpoint_directory / "latest.pt"
     if latest_full_checkpoint.exists():
-        _add_file(entries=entries, run_directory=run_directory, path=latest_full_checkpoint)
+        _add_artifact_file(
+            entries=entries,
+            artifact_directory=checkpoint_directory.parent,
+            path=latest_full_checkpoint,
+            stage_name=StageName.PRETRAINING,
+        )
         return
 
     latest_sharded_manifest = checkpoint_directory / "latest.json"
     if not latest_sharded_manifest.exists():
         return
-    _add_file(entries=entries, run_directory=run_directory, path=latest_sharded_manifest)
+    _add_artifact_file(
+        entries=entries,
+        artifact_directory=checkpoint_directory.parent,
+        path=latest_sharded_manifest,
+        stage_name=StageName.PRETRAINING,
+    )
     latest_data = json.loads(latest_sharded_manifest.read_text(encoding="utf-8"))
     checkpoint_name = str(latest_data["checkpoint"])
     checkpoint_path = checkpoint_directory / checkpoint_name
-    _add_tree(entries=entries, run_directory=run_directory, directory=checkpoint_path)
+    _add_artifact_tree(
+        entries=entries,
+        artifact_directory=checkpoint_directory.parent,
+        directory=checkpoint_path,
+        stage_name=StageName.PRETRAINING,
+    )
 
 
-def _add_existing_files(
-    *,
+def _add_existing_run_files(
     entries: list[BundleEntry],
     run_directory: Path,
-    relative_paths: list[Path],
+    relative_paths: tuple[Path, ...],
 ) -> None:
     for relative_path in relative_paths:
         path = run_directory / relative_path
         if path.exists() and path.is_file():
-            _add_file(entries=entries, run_directory=run_directory, path=path)
+            entries.append(
+                BundleEntry(
+                    source_path=path.resolve(),
+                    archive_path=relative_path,
+                ),
+            )
 
 
-def _add_existing_tree(
-    *,
+def _add_existing_run_tree(
     entries: list[BundleEntry],
     run_directory: Path,
     relative_directory: Path,
 ) -> None:
     directory = run_directory / relative_directory
-    if directory.exists() and directory.is_dir():
-        _add_tree(entries=entries, run_directory=run_directory, directory=directory)
-
-
-def _add_tree(*, entries: list[BundleEntry], run_directory: Path, directory: Path) -> None:
+    if not directory.exists() or not directory.is_dir():
+        return
     for path in directory.rglob("*"):
         if path.is_file():
-            _add_file(entries=entries, run_directory=run_directory, path=path)
+            entries.append(
+                BundleEntry(
+                    source_path=path.resolve(),
+                    archive_path=path.relative_to(run_directory),
+                ),
+            )
 
 
-def _add_file(*, entries: list[BundleEntry], run_directory: Path, path: Path) -> None:
-    source_path = path.resolve()
-    archive_path = _relative_to_run(path=source_path, run_directory=run_directory)
-    entries.append(BundleEntry(source_path=source_path, archive_path=archive_path))
+def _add_stage_file(
+    entries: list[BundleEntry],
+    run_manifest: RunManifest,
+    artifact_store_paths: ArtifactStorePaths,
+    stage_name: StageName,
+    relative_path: Path,
+) -> None:
+    artifact_directory = _stage_artifact_directory(
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=stage_name,
+    )
+    path = artifact_directory / relative_path
+    if path.exists() and path.is_file():
+        _add_artifact_file(
+            entries=entries,
+            artifact_directory=artifact_directory,
+            path=path,
+            stage_name=stage_name,
+        )
 
 
-def _relative_to_run(*, path: Path, run_directory: Path) -> Path:
-    try:
-        return path.relative_to(run_directory)
-    except ValueError as error:
-        raise ValueError(f"Refusing to export path outside run directory: {path}") from error
+def _add_stage_tree(
+    entries: list[BundleEntry],
+    run_manifest: RunManifest,
+    artifact_store_paths: ArtifactStorePaths,
+    stage_name: StageName,
+    relative_directory: Path,
+) -> None:
+    artifact_directory = _stage_artifact_directory(
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        stage_name=stage_name,
+    )
+    directory = artifact_directory / relative_directory
+    if directory.exists() and directory.is_dir():
+        _add_artifact_tree(
+            entries=entries,
+            artifact_directory=artifact_directory,
+            directory=directory,
+            stage_name=stage_name,
+        )
+
+
+def _add_artifact_tree(
+    entries: list[BundleEntry],
+    artifact_directory: Path,
+    directory: Path,
+    stage_name: StageName,
+) -> None:
+    for path in directory.rglob("*"):
+        if path.is_file():
+            _add_artifact_file(
+                entries=entries,
+                artifact_directory=artifact_directory,
+                path=path,
+                stage_name=stage_name,
+            )
+
+
+def _add_artifact_file(
+    entries: list[BundleEntry],
+    artifact_directory: Path,
+    path: Path,
+    stage_name: StageName,
+) -> None:
+    entries.append(
+        BundleEntry(
+            source_path=path.resolve(),
+            archive_path=Path("artifacts")
+            / stage_name.value
+            / path.relative_to(artifact_directory),
+        ),
+    )
+
+
+def _stage_artifact_directory(
+    run_manifest: RunManifest,
+    artifact_store_paths: ArtifactStorePaths,
+    stage_name: StageName,
+) -> Path:
+    fingerprint_value = run_manifest.artifacts.get(stage_name.value)
+    if fingerprint_value is None:
+        return Path("__missing_artifact__")
+    return artifact_store_paths.artifact_directory(
+        stage_name=stage_name,
+        fingerprint=ArtifactFingerprint(value=fingerprint_value),
+    )
+
+
+def _read_run_manifest(run_directory: Path) -> RunManifest:
+    run_manifest_path = run_directory / "run_manifest.json"
+    if not run_manifest_path.exists():
+        return RunManifest(experiment=run_directory.name, artifacts={})
+    return RunManifest.model_validate_json(run_manifest_path.read_text(encoding="utf-8"))
 
 
 def _deduplicate_entries(entries: list[BundleEntry]) -> list[BundleEntry]:

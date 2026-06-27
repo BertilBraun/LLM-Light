@@ -7,32 +7,35 @@ from llm_lite.scripts.export_run_bundle import collect_bundle_entries, write_bun
 
 def test_collect_bundle_entries_includes_latest_sharded_checkpoint_only(tmp_path: Path) -> None:
     run_directory = tmp_path / "run"
+    artifact_store_directory = tmp_path / "artifact_store"
+    pretraining_directory = artifact_store_directory / "pretraining" / "sha256_pretraining"
+    tokenizer_directory = artifact_store_directory / "tokenizer" / "sha256_tokenizer"
     _write(run_directory / "resolved_config.json", "{}")
-    _write(run_directory / "pipeline.jsonl", "{}\n")
-    _write(run_directory / "artifacts" / "tokenizer" / "tokenizer.json", "{}")
-    _write(run_directory / "artifacts" / "pretraining" / "metrics.jsonl", "{}\n")
     _write(
-        run_directory / "artifacts" / "pretraining" / "checkpoints" / "latest.json",
+        run_directory / "run_manifest.json",
+        json.dumps(
+            {
+                "experiment": "run",
+                "artifacts": {
+                    "pretraining": "sha256:pretraining",
+                    "tokenizer": "sha256:tokenizer",
+                },
+            },
+        ),
+    )
+    _write(run_directory / "pipeline.jsonl", "{}\n")
+    _write(tokenizer_directory / "tokenizer.json", "{}")
+    _write(pretraining_directory / "metrics.jsonl", "{}\n")
+    _write(
+        pretraining_directory / "checkpoints" / "latest.json",
         json.dumps({"step": 20, "checkpoint": "step_00000020"}),
     )
     _write(
-        run_directory
-        / "artifacts"
-        / "pretraining"
-        / "checkpoints"
-        / "step_00000010"
-        / "rank_00000"
-        / "state.pt",
+        pretraining_directory / "checkpoints" / "step_00000010" / "rank_00000" / "state.pt",
         "old",
     )
     _write(
-        run_directory
-        / "artifacts"
-        / "pretraining"
-        / "checkpoints"
-        / "step_00000020"
-        / "rank_00000"
-        / "state.pt",
+        pretraining_directory / "checkpoints" / "step_00000020" / "rank_00000" / "state.pt",
         "latest",
     )
 
@@ -50,9 +53,20 @@ def test_collect_bundle_entries_includes_latest_sharded_checkpoint_only(tmp_path
 
 def test_write_bundle_creates_zip_with_manifest(tmp_path: Path) -> None:
     run_directory = tmp_path / "run"
+    artifact_store_directory = tmp_path / "artifact_store"
+    pretraining_directory = artifact_store_directory / "pretraining" / "sha256_pretraining"
     output_path = tmp_path / "bundle.zip"
     _write(run_directory / "resolved_config.json", "{}")
-    _write(run_directory / "artifacts" / "pretraining" / "checkpoints" / "latest.pt", "state")
+    _write(
+        run_directory / "run_manifest.json",
+        json.dumps(
+            {
+                "experiment": "run",
+                "artifacts": {"pretraining": "sha256:pretraining"},
+            },
+        ),
+    )
+    _write(pretraining_directory / "checkpoints" / "latest.pt", "state")
 
     write_bundle(run_directory=run_directory, output_path=output_path)
 
@@ -61,9 +75,10 @@ def test_write_bundle_creates_zip_with_manifest(tmp_path: Path) -> None:
         manifest = json.loads(archive.read("bundle_manifest.json"))
 
     assert "resolved_config.json" in names
+    assert "run_manifest.json" in names
     assert "artifacts/pretraining/checkpoints/latest.pt" in names
     assert manifest["include_all_checkpoints"] is False
-    assert manifest["file_count"] == 2
+    assert manifest["file_count"] == 3
 
 
 def _write(path: Path, content: str) -> None:

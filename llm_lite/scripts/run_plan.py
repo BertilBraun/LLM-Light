@@ -16,10 +16,12 @@ from llm_lite.orchestration.runtime import (
     artifact_registry_for_resolved_run,
     complete_manifest_matches,
     copy_stage_tensorboard_to_run_view,
+    parent_fingerprints,
     release_artifact_lock,
     write_resolved_configuration,
     write_run_manifest,
 )
+from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.pipeline.logging import (
     PipelineEventLogger,
     PipelineEventRecord,
@@ -28,6 +30,7 @@ from llm_lite.pipeline.logging import (
 from llm_lite.pipeline.progress import console_log
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
+from llm_lite.training.checkpoint import latest_checkpoint
 
 LOCK_WAIT_SECONDS = 5.0
 
@@ -231,10 +234,16 @@ def _run_missing_artifact(
         if complete_manifest_matches(manifest=manifest, planned_artifact=planned_artifact):
             return
     try:
-        _clear_incomplete_artifact_payload(
+        manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
+        if not _can_reuse_incomplete_payload(
             artifact_directory=artifact_directory,
-            artifact_store_root=resolved_run.artifact_store_paths.root_directory,
-        )
+            manifest=manifest,
+            planned_artifact=planned_artifact,
+        ):
+            _clear_incomplete_artifact_payload(
+                artifact_directory=artifact_directory,
+                artifact_store_root=resolved_run.artifact_store_paths.root_directory,
+            )
         _log_stage_event(
             event_logger=event_logger,
             event_type=PipelineEventType.STAGE_START,
@@ -377,6 +386,28 @@ def _clear_incomplete_artifact_payload(artifact_directory: Path, artifact_store_
             shutil.rmtree(child_path)
         else:
             child_path.unlink()
+
+
+def _can_reuse_incomplete_payload(
+    artifact_directory: Path,
+    manifest: ArtifactManifest | None,
+    planned_artifact: PlannedArtifact,
+) -> bool:
+    if manifest is None:
+        return False
+    if manifest.status is ArtifactStatus.COMPLETE:
+        return False
+    if manifest.fingerprint != planned_artifact.fingerprint.value:
+        return False
+    if manifest.configuration_hash != planned_artifact.configuration_hash:
+        return False
+    if manifest.contract_version != planned_artifact.contract_version:
+        return False
+    if manifest.parents != parent_fingerprints(planned_artifact=planned_artifact):
+        return False
+    if planned_artifact.stage_name is not StageName.PRETRAINING:
+        return False
+    return latest_checkpoint(checkpoint_directory=artifact_directory / "checkpoints") is not None
 
 
 def _log_stage_event(

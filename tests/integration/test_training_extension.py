@@ -4,9 +4,12 @@ from pathlib import Path
 import torch
 
 from llm_lite.pipeline.runner import run_pipeline
+from tests.artifact_helpers import stage_artifact_directory
 
 
-def test_pipeline_extends_compatible_pretraining(tmp_path: Path) -> None:
+def test_pipeline_creates_new_pretraining_artifact_for_longer_training(
+    tmp_path: Path,
+) -> None:
     run_directory = tmp_path / "extend_training"
     first_configuration_path = tmp_path / "extend_training_first.yaml"
     second_configuration_path = tmp_path / "extend_training_second.yaml"
@@ -31,25 +34,41 @@ def test_pipeline_extends_compatible_pretraining(tmp_path: Path) -> None:
         dry_run=False,
         force_stages=(),
     )
+    first_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    first_pretraining_manifest = json.loads(
+        (first_pretraining_artifact_directory / "manifest.json").read_text(
+            encoding="utf-8",
+        ),
+    )
     second_exit_code = run_pipeline(
         configuration_path=second_configuration_path,
         dry_run=False,
         force_stages=(),
     )
-    pretraining_manifest = json.loads(
-        (run_directory / "artifacts" / "pretraining" / "manifest.json").read_text(
+    second_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    second_pretraining_manifest = json.loads(
+        (second_pretraining_artifact_directory / "manifest.json").read_text(
             encoding="utf-8",
         ),
     )
 
     assert first_exit_code == 0
     assert second_exit_code == 0
-    assert pretraining_manifest["metrics"]["final_step"] == 6
-    assert pretraining_manifest["metrics"]["resumed_from_step"] == 4
-    assert pretraining_manifest["metrics"]["requested_maximum_steps"] == 6
+    assert first_pretraining_artifact_directory != second_pretraining_artifact_directory
+    assert first_pretraining_manifest["fingerprint"] != second_pretraining_manifest["fingerprint"]
+    assert first_pretraining_manifest["metrics"]["final_step"] == 4
+    assert second_pretraining_manifest["metrics"]["final_step"] == 6
+    assert second_pretraining_manifest["metrics"]["resumed_from_step"] == 0
+    assert second_pretraining_manifest["metrics"]["requested_maximum_steps"] == 6
 
 
-def test_pipeline_resumes_after_runtime_training_configuration_changes(
+def test_pipeline_creates_new_pretraining_artifact_for_training_configuration_changes(
     tmp_path: Path,
 ) -> None:
     run_directory = tmp_path / "resume_training_configuration"
@@ -82,30 +101,47 @@ def test_pipeline_resumes_after_runtime_training_configuration_changes(
         dry_run=False,
         force_stages=(),
     )
+    first_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    first_pretraining_manifest = json.loads(
+        (first_pretraining_artifact_directory / "manifest.json").read_text(
+            encoding="utf-8",
+        ),
+    )
     second_exit_code = run_pipeline(
         configuration_path=second_configuration_path,
         dry_run=False,
         force_stages=(),
     )
-    pretraining_artifact_directory = run_directory / "artifacts" / "pretraining"
-    pretraining_manifest = json.loads(
-        (pretraining_artifact_directory / "manifest.json").read_text(encoding="utf-8"),
+    second_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    second_pretraining_manifest = json.loads(
+        (second_pretraining_artifact_directory / "manifest.json").read_text(
+            encoding="utf-8",
+        ),
     )
     checkpoint_data = torch.load(
-        pretraining_artifact_directory / "checkpoints" / "latest.pt",
+        second_pretraining_artifact_directory / "checkpoints" / "latest.pt",
         map_location="cpu",
         weights_only=False,
     )
 
     assert first_exit_code == 0
     assert second_exit_code == 0
-    assert pretraining_manifest["metrics"]["final_step"] == 6
-    assert pretraining_manifest["metrics"]["resumed_from_step"] == 4
+    assert first_pretraining_artifact_directory != second_pretraining_artifact_directory
+    assert first_pretraining_manifest["fingerprint"] != second_pretraining_manifest["fingerprint"]
+    assert first_pretraining_manifest["metrics"]["final_step"] == 4
+    assert second_pretraining_manifest["metrics"]["final_step"] == 6
+    assert second_pretraining_manifest["metrics"]["resumed_from_step"] == 0
     assert checkpoint_data["optimizer"]["param_groups"][0]["lr"] == 0.01
     assert checkpoint_data["optimizer"]["param_groups"][0]["weight_decay"] == 0.001
 
 
-def test_pipeline_resumes_interrupted_pretraining_with_checkpoint(
+def test_pipeline_creates_new_artifact_when_interrupted_pretraining_configuration_changes(
     tmp_path: Path,
 ) -> None:
     run_directory = tmp_path / "resume_interrupted_pretraining"
@@ -132,11 +168,17 @@ def test_pipeline_resumes_interrupted_pretraining_with_checkpoint(
         dry_run=False,
         force_stages=(),
     )
-    pretraining_manifest_path = run_directory / "artifacts" / "pretraining" / "manifest.json"
-    pretraining_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
-    pretraining_manifest["status"] = "running"
-    pretraining_manifest_path.write_text(
-        json.dumps(pretraining_manifest, indent=2),
+    first_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    first_pretraining_manifest_path = first_pretraining_artifact_directory / "manifest.json"
+    first_pretraining_manifest = json.loads(
+        first_pretraining_manifest_path.read_text(encoding="utf-8"),
+    )
+    first_pretraining_manifest["status"] = "running"
+    first_pretraining_manifest_path.write_text(
+        json.dumps(first_pretraining_manifest, indent=2),
         encoding="utf-8",
     )
     second_exit_code = run_pipeline(
@@ -144,12 +186,25 @@ def test_pipeline_resumes_interrupted_pretraining_with_checkpoint(
         dry_run=False,
         force_stages=(),
     )
-    resumed_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
+    preserved_interrupted_manifest = json.loads(
+        first_pretraining_manifest_path.read_text(encoding="utf-8"),
+    )
+    second_pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    second_pretraining_manifest = json.loads(
+        (second_pretraining_artifact_directory / "manifest.json").read_text(
+            encoding="utf-8",
+        ),
+    )
 
     assert first_exit_code == 0
     assert second_exit_code == 0
-    assert resumed_manifest["metrics"]["final_step"] == 6
-    assert resumed_manifest["metrics"]["resumed_from_step"] == 4
+    assert first_pretraining_artifact_directory != second_pretraining_artifact_directory
+    assert preserved_interrupted_manifest["status"] == "running"
+    assert second_pretraining_manifest["metrics"]["final_step"] == 6
+    assert second_pretraining_manifest["metrics"]["resumed_from_step"] == 0
 
 
 def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
@@ -172,7 +227,11 @@ def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
         dry_run=False,
         force_stages=(),
     )
-    pretraining_manifest_path = run_directory / "artifacts" / "pretraining" / "manifest.json"
+    pretraining_artifact_directory = stage_artifact_directory(
+        run_directory=run_directory,
+        stage_name="pretraining",
+    )
+    pretraining_manifest_path = pretraining_artifact_directory / "manifest.json"
     pretraining_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
     pretraining_manifest["status"] = "running"
     pretraining_manifest_path.write_text(
@@ -191,6 +250,13 @@ def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
     assert recovered_manifest["status"] == "complete"
     assert recovered_manifest["metrics"]["final_step"] == 4
     assert recovered_manifest["metrics"]["resumed_from_step"] == 4
+    assert (
+        stage_artifact_directory(
+            run_directory=run_directory,
+            stage_name="pretraining",
+        )
+        == pretraining_artifact_directory
+    )
 
 
 def _training_extension_configuration_text(

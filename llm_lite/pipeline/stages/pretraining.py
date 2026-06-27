@@ -1,15 +1,15 @@
 import json
+import math
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 from torch import nn
 
 from llm_lite.config.models import (
-    CausalLanguageModelingObjectiveConfiguration,
     DistributedConfiguration,
     ExperimentFile,
     ModelConfiguration,
-    TrainingObjective,
+    TrainingConfiguration,
 )
 from llm_lite.data.datasets import load_packed_sequence_dataset
 from llm_lite.evaluation.runner import run_configured_evaluators
@@ -41,8 +41,8 @@ class PretrainingReconstructionContract(BaseModel):
 
     contract_version: int
     model: ModelConfiguration
-    objective: TrainingObjective
-    causal_language_modeling: CausalLanguageModelingObjectiveConfiguration
+    experiment_seed: int
+    training: TrainingConfiguration
     distributed: DistributedConfiguration
 
 
@@ -128,7 +128,7 @@ class PretrainingStage(BasePipelineStage):
             files=files,
             metrics={
                 "final_step": result.final_step,
-                "final_loss": result.final_loss,
+                "final_loss": _finite_training_loss(final_loss=result.final_loss),
                 "resumed_from_step": result.resumed_from_step,
                 "model_parameters": parameter_summary.total_parameters,
                 "trainable_model_parameters": parameter_summary.trainable_parameters,
@@ -190,10 +190,16 @@ def _pretraining_reconstruction_contract(
     return PretrainingReconstructionContract(
         contract_version=PRETRAINING_RECONSTRUCTION_CONTRACT_VERSION,
         model=experiment_configuration.model,
-        objective=experiment_configuration.training.objective,
-        causal_language_modeling=experiment_configuration.training.causal_language_modeling,
+        experiment_seed=experiment_configuration.experiment.seed,
+        training=experiment_configuration.training,
         distributed=experiment_configuration.distributed,
     )
+
+
+def _finite_training_loss(final_loss: float) -> float:
+    if math.isfinite(final_loss):
+        return final_loss
+    return 0.0
 
 
 def _training_evaluation_callback(

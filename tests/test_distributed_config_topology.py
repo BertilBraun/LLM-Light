@@ -120,3 +120,55 @@ def test_pretraining_hash_includes_distributed_reconstruction_contract() -> None
     ) != stage.configuration_hash(
         experiment_configuration=distributed_experiment_configuration,
     )
+
+
+def test_pretraining_hash_includes_experiment_seed() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    seeded_experiment_configuration = experiment_configuration.model_copy(
+        update={
+            "experiment": experiment_configuration.experiment.model_copy(
+                update={"seed": experiment_configuration.experiment.seed + 1},
+            ),
+        },
+    )
+    stage = PretrainingStage()
+
+    assert stage.configuration_hash(
+        experiment_configuration=experiment_configuration,
+    ) != stage.configuration_hash(
+        experiment_configuration=seeded_experiment_configuration,
+    )
+
+
+def test_pretraining_hash_includes_training_trajectory_contract() -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    updated_training_configuration = experiment_configuration.training.model_copy(
+        update={
+            "maximum_steps": experiment_configuration.training.maximum_steps + 1,
+            "batch_size_sequences": experiment_configuration.training.batch_size_sequences + 1,
+            "optimizer": experiment_configuration.training.optimizer.model_copy(
+                update={
+                    "learning_rate": (
+                        experiment_configuration.training.optimizer.learning_rate / 2
+                    ),
+                },
+            ),
+            "dataloader": experiment_configuration.training.dataloader.model_copy(
+                update={"pin_memory": not experiment_configuration.training.dataloader.pin_memory},
+            ),
+        },
+    )
+    updated_experiment_configuration = experiment_configuration.model_copy(
+        update={"training": updated_training_configuration},
+    )
+    stage = PretrainingStage()
+
+    assert stage.configuration_hash(
+        experiment_configuration=experiment_configuration,
+    ) != stage.configuration_hash(
+        experiment_configuration=updated_experiment_configuration,
+    )

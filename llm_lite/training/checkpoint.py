@@ -85,7 +85,10 @@ def save_checkpoint(
         "optimizer": optimizer.state_dict(),
     }
     torch.save(checkpoint_data, checkpoint_path)
-    torch.save(checkpoint_data, checkpoint_directory / "latest.pt")
+    latest_path = checkpoint_directory / "latest.pt"
+    pending_latest_path = checkpoint_directory / "latest.pt.pending"
+    torch.save(checkpoint_data, pending_latest_path)
+    os.replace(pending_latest_path, latest_path)
     _write_checkpoint_completion(
         checkpoint_directory=checkpoint_directory,
         step=step,
@@ -220,7 +223,9 @@ def save_rank_zero_full_checkpoint_bridge(
         "optimizer": optimizer.state_dict(),
     }
     bridge_path = checkpoint_directory / "latest.pt"
-    torch.save(checkpoint_data, bridge_path)
+    pending_bridge_path = checkpoint_directory / "latest.pt.pending"
+    torch.save(checkpoint_data, pending_bridge_path)
+    os.replace(pending_bridge_path, bridge_path)
     return bridge_path
 
 

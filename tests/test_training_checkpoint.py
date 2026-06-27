@@ -13,7 +13,11 @@ from llm_lite.data.datasets import (
 from llm_lite.model.gpt import DenseGpt
 from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.tokenizer.character import train_character_tokenizer
-from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
+from llm_lite.training.checkpoint import (
+    load_latest_checkpoint,
+    save_checkpoint,
+    save_rank_zero_full_checkpoint_bridge,
+)
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
 from llm_lite.training.trainer import train_model
 
@@ -108,6 +112,8 @@ def test_load_latest_checkpoint_loads_model_and_returns_step(tmp_path: Path) -> 
     )
 
     assert loaded_step == 7
+    assert (checkpoint_directory / "latest.pt").exists()
+    assert not (checkpoint_directory / "latest.pt.pending").exists()
 
 
 def test_save_checkpoint_writes_checkpoint_manifest_and_event(tmp_path: Path) -> None:
@@ -156,3 +162,20 @@ def test_save_checkpoint_writes_checkpoint_manifest_and_event(tmp_path: Path) ->
     assert checkpoint_event["checkpoint_manifest_path"] == (
         "checkpoints/step_00000007/manifest.json"
     )
+
+
+def test_rank_zero_full_checkpoint_bridge_writes_latest_atomically(tmp_path: Path) -> None:
+    model = nn.Linear(1, 1)
+    optimizer = AdamW(model.parameters(), lr=0.1)
+    checkpoint_directory = tmp_path / "checkpoints"
+
+    bridge_path = save_rank_zero_full_checkpoint_bridge(
+        checkpoint_directory=checkpoint_directory,
+        model=model,
+        optimizer=optimizer,
+        step=7,
+    )
+
+    assert bridge_path == checkpoint_directory / "latest.pt"
+    assert bridge_path.exists()
+    assert not (checkpoint_directory / "latest.pt.pending").exists()

@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -7,7 +8,7 @@ from pathlib import Path
 from typing import TypeAlias
 
 import torch
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 from torch import nn
 from torch.optim import Optimizer
 
@@ -20,6 +21,7 @@ from llm_lite.pipeline.artifact import ArtifactManifest
 from llm_lite.training.topology import DistributedTopology
 
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
+TopologyManifestValue: TypeAlias = int | str | list[dict[str, int | str]] | list[list[int]]
 
 
 @dataclass(frozen=True)
@@ -42,6 +44,24 @@ class CheckpointManifest(BaseModel):
     checkpoint_path: str
     completion_status: str
     created_at: str
+
+
+class ShardedCheckpointManifest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    step: int
+    producing_artifact_fingerprint: str
+    world_size: int
+    backend: str
+    strategy: str
+    checkpoint_type: str
+    topology: dict[str, TopologyManifestValue]
+    model_configuration_hash: str
+    optimizer_present: bool
+    expected_rank_shards: tuple[str, ...]
+    completion_status: str
+    created_at: str
+    rank_zero_full_checkpoint_path: str | None = None
 
 
 class CheckpointEvent(BaseModel):
@@ -96,6 +116,21 @@ def save_checkpoint(
         checkpoint_kind=CheckpointKind.FULL,
     )
     return checkpoint_path
+
+
+def retain_recent_checkpoints(checkpoint_directory: Path, max_checkpoints: int | None) -> None:
+    if max_checkpoints is None:
+        return
+    latest_state = latest_checkpoint(checkpoint_directory=checkpoint_directory)
+    if latest_state is None:
+        return
+    completed_steps = _completed_checkpoint_steps(checkpoint_directory=checkpoint_directory)
+    older_completed_steps = tuple(step for step in completed_steps if step != latest_state.step)
+    retained_interval_steps = set(older_completed_steps[-max_checkpoints:])
+    retained_steps = retained_interval_steps | {latest_state.step}
+    for step in completed_steps:
+        if step not in retained_steps:
+            _delete_checkpoint_step(checkpoint_directory=checkpoint_directory, step=step)
 
 
 def load_checkpoint(
@@ -173,6 +208,7 @@ def finalize_sharded_checkpoint(
     strategy: DistributedStrategy,
     topology: DistributedTopology,
     model_configuration_hash: str,
+    rank_zero_full_checkpoint_path: Path | None = None,
 ) -> Path:
     step_directory = checkpoint_directory / f"step_{step:08d}"
     _validate_rank_shards(
@@ -181,6 +217,9 @@ def finalize_sharded_checkpoint(
     )
     manifest = {
         "step": step,
+        "producing_artifact_fingerprint": _artifact_fingerprint(
+            artifact_directory=checkpoint_directory.parent,
+        ),
         "world_size": world_size,
         "backend": backend.value,
         "strategy": strategy.value,
@@ -191,6 +230,11 @@ def finalize_sharded_checkpoint(
         "expected_rank_shards": [f"rank_{rank_index:05d}" for rank_index in range(world_size)],
         "completion_status": "complete",
         "created_at": _utc_now(),
+        "rank_zero_full_checkpoint_path": (
+            None
+            if rank_zero_full_checkpoint_path is None
+            else Path(os.path.relpath(rank_zero_full_checkpoint_path, step_directory)).as_posix()
+        ),
     }
     _write_json_atomically(path=step_directory / "manifest.json", value=manifest)
     _write_json_atomically(
@@ -222,6 +266,12 @@ def save_rank_zero_full_checkpoint_bridge(
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
     }
+    step_directory = checkpoint_directory / f"step_{step:08d}"
+    step_directory.mkdir(parents=True, exist_ok=True)
+    step_bridge_path = step_directory / "rank_zero_full.pt"
+    pending_step_bridge_path = step_directory / "rank_zero_full.pt.pending"
+    torch.save(checkpoint_data, pending_step_bridge_path)
+    os.replace(pending_step_bridge_path, step_bridge_path)
     bridge_path = checkpoint_directory / "latest.pt"
     pending_bridge_path = checkpoint_directory / "latest.pt.pending"
     torch.save(checkpoint_data, pending_bridge_path)
@@ -269,6 +319,51 @@ def _validate_rank_shards(step_directory: Path, world_size: int) -> None:
             missing_ranks.append(rank)
     if missing_ranks:
         raise ValueError(f"Missing sharded checkpoint ranks: {missing_ranks}")
+
+
+def _completed_checkpoint_steps(checkpoint_directory: Path) -> tuple[int, ...]:
+    completed_steps: list[int] = []
+    for manifest_path in checkpoint_directory.glob("step_*/manifest.json"):
+        step_directory = manifest_path.parent
+        step = _checkpoint_step_from_name(step_directory.name)
+        if step is None:
+            continue
+        if _checkpoint_manifest_is_complete(manifest_path=manifest_path):
+            completed_steps.append(step)
+    return tuple(sorted(completed_steps))
+
+
+def _checkpoint_manifest_is_complete(manifest_path: Path) -> bool:
+    manifest_text = manifest_path.read_text(encoding="utf-8")
+    try:
+        manifest = CheckpointManifest.model_validate_json(manifest_text)
+        return manifest.completion_status == "complete"
+    except ValidationError:
+        sharded_manifest = ShardedCheckpointManifest.model_validate_json(manifest_text)
+        return sharded_manifest.completion_status == "complete"
+
+
+def _checkpoint_step_from_name(name: str) -> int | None:
+    prefix = "step_"
+    if not name.startswith(prefix):
+        return None
+    step_text = name[len(prefix) :]
+    if not step_text.isdecimal():
+        return None
+    return int(step_text)
+
+
+def _delete_checkpoint_step(checkpoint_directory: Path, step: int) -> None:
+    checkpoint_name = f"step_{step:08d}"
+    step_directory = checkpoint_directory / checkpoint_name
+    checkpoint_file = checkpoint_directory / f"{checkpoint_name}.pt"
+    event_path = checkpoint_directory.parent / "events" / f"checkpoint_{step:08d}.json"
+    if step_directory.exists():
+        shutil.rmtree(step_directory)
+    if checkpoint_file.exists():
+        checkpoint_file.unlink()
+    if event_path.exists():
+        event_path.unlink()
 
 
 def _write_json_atomically(path: Path, value: dict[str, JsonValue]) -> None:

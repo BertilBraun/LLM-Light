@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import TypeAlias
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
+from llm_lite.config.models import DistributedStrategy
 from llm_lite.orchestration.models import (
     ArtifactFingerprint,
     PlannedArtifact,
@@ -12,7 +13,12 @@ from llm_lite.orchestration.models import (
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages.evaluation import EvaluationStage
-from llm_lite.training.checkpoint import CheckpointEvent, CheckpointKind, CheckpointManifest
+from llm_lite.training.checkpoint import (
+    CheckpointEvent,
+    CheckpointKind,
+    CheckpointManifest,
+    ShardedCheckpointManifest,
+)
 
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -31,9 +37,20 @@ def checkpoint_evaluation_target_from_manifest(
     resolved_run: ResolvedRun,
     checkpoint_manifest_path: Path,
 ) -> CheckpointEvaluationTarget:
-    manifest = CheckpointManifest.model_validate_json(
-        checkpoint_manifest_path.read_text(encoding="utf-8"),
-    )
+    manifest_text = checkpoint_manifest_path.read_text(encoding="utf-8")
+    try:
+        manifest = CheckpointManifest.model_validate_json(manifest_text)
+    except ValidationError:
+        sharded_manifest = ShardedCheckpointManifest.model_validate_json(manifest_text)
+        producing_stage_name = _producing_stage_name(
+            resolved_run=resolved_run,
+            producing_artifact_fingerprint=sharded_manifest.producing_artifact_fingerprint,
+        )
+        return _ddp_sharded_checkpoint_evaluation_target(
+            checkpoint_manifest_path=checkpoint_manifest_path,
+            sharded_manifest=sharded_manifest,
+            producing_stage_name=producing_stage_name,
+        )
     producing_stage_name = _producing_stage_name(
         resolved_run=resolved_run,
         producing_artifact_fingerprint=manifest.producing_artifact_fingerprint,
@@ -62,10 +79,21 @@ def checkpoint_evaluation_target_from_event(
         stage_name=producing_stage_name,
         fingerprint=producing_artifact.fingerprint,
     )
-    return checkpoint_evaluation_target_from_manifest(
-        resolved_run=resolved_run,
-        checkpoint_manifest_path=producing_artifact_directory / event.checkpoint_manifest_path,
-    )
+    checkpoint_manifest_path = producing_artifact_directory / event.checkpoint_manifest_path
+    match event.checkpoint_kind:
+        case CheckpointKind.FULL:
+            return checkpoint_evaluation_target_from_manifest(
+                resolved_run=resolved_run,
+                checkpoint_manifest_path=checkpoint_manifest_path,
+            )
+        case CheckpointKind.SHARDED:
+            return _ddp_sharded_checkpoint_evaluation_target(
+                checkpoint_manifest_path=checkpoint_manifest_path,
+                sharded_manifest=ShardedCheckpointManifest.model_validate_json(
+                    checkpoint_manifest_path.read_text(encoding="utf-8"),
+                ),
+                producing_stage_name=producing_stage_name,
+            )
 
 
 def checkpoint_evaluation_artifact(
@@ -128,7 +156,49 @@ def _checkpoint_evaluation_configuration_json(resolved_run: ResolvedRun) -> dict
 
 def checkpoint_event_is_supported_for_evaluation(event_path: Path) -> bool:
     event = CheckpointEvent.model_validate_json(event_path.read_text(encoding="utf-8"))
-    return event.checkpoint_kind is CheckpointKind.FULL
+    match event.checkpoint_kind:
+        case CheckpointKind.FULL:
+            return True
+        case CheckpointKind.SHARDED:
+            checkpoint_manifest_path = event_path.parent.parent / event.checkpoint_manifest_path
+            return _sharded_checkpoint_event_uses_ddp_full_bridge(
+                checkpoint_manifest_path=checkpoint_manifest_path,
+            )
+
+
+def _ddp_sharded_checkpoint_evaluation_target(
+    checkpoint_manifest_path: Path,
+    sharded_manifest: ShardedCheckpointManifest,
+    producing_stage_name: StageName,
+) -> CheckpointEvaluationTarget:
+    if sharded_manifest.strategy != DistributedStrategy.DATA_PARALLEL.value:
+        raise ValueError("Only DDP sharded checkpoints can be evaluated via a full bridge.")
+    if sharded_manifest.rank_zero_full_checkpoint_path is None:
+        raise ValueError("DDP sharded checkpoint manifest is missing rank-zero full checkpoint.")
+    checkpoint_path = (
+        checkpoint_manifest_path.parent / sharded_manifest.rank_zero_full_checkpoint_path
+    )
+    if not checkpoint_path.exists():
+        raise ValueError("DDP sharded checkpoint rank-zero full checkpoint is missing.")
+    return CheckpointEvaluationTarget(
+        checkpoint_manifest_path=checkpoint_manifest_path,
+        checkpoint_path=checkpoint_path.resolve(),
+        checkpoint_step=sharded_manifest.step,
+        producing_stage_name=producing_stage_name,
+        producing_artifact_fingerprint=sharded_manifest.producing_artifact_fingerprint,
+    )
+
+
+def _sharded_checkpoint_event_uses_ddp_full_bridge(checkpoint_manifest_path: Path) -> bool:
+    if not checkpoint_manifest_path.exists():
+        return False
+    manifest = ShardedCheckpointManifest.model_validate_json(
+        checkpoint_manifest_path.read_text(encoding="utf-8"),
+    )
+    return (
+        manifest.strategy == DistributedStrategy.DATA_PARALLEL.value
+        and manifest.rank_zero_full_checkpoint_path is not None
+    )
 
 
 def _producing_stage_name(

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from torch import nn
 
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.modern import ModernDenseGpt, ModernMoeGpt
 from llm_lite.model.moe import MoeGpt
 
 
@@ -26,6 +27,22 @@ def model_parameter_summary(model: nn.Module) -> ModelParameterSummary:
                 trainable_active_parameters=trainable_parameters,
             )
         case MoeGpt():
+            return ModelParameterSummary(
+                total_parameters=_parameter_count(model=model),
+                trainable_parameters=_trainable_parameter_count(model=model),
+                active_parameters=model.active_parameter_count(),
+                trainable_active_parameters=model.trainable_active_parameter_count(),
+            )
+        case ModernDenseGpt():
+            total_parameters = _parameter_count(model=model)
+            trainable_parameters = _trainable_parameter_count(model=model)
+            return ModelParameterSummary(
+                total_parameters=total_parameters,
+                trainable_parameters=trainable_parameters,
+                active_parameters=total_parameters,
+                trainable_active_parameters=trainable_parameters,
+            )
+        case ModernMoeGpt():
             return ModelParameterSummary(
                 total_parameters=_parameter_count(model=model),
                 trainable_parameters=_trainable_parameter_count(model=model),

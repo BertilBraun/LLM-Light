@@ -36,14 +36,15 @@ deduplicated artifact store managed by a local plan executor.
 ## Open Documentation Gaps
 
 - Add a concise artifact schema reference if manifest formats stabilize.
-- Add a result template for future experiment reports.
 
 ## Experiment Gaps
 
 ### Dense-Versus-MoE Comparison
 
-Create a dense GPT baseline against the TinyPython MoE result with a comparable
-active parameter count or compute budget.
+The planned TinyPython sweep is documented in
+[PYTHON_MODEL_SWEEP.md](PYTHON_MODEL_SWEEP.md). It creates dense GPT baselines
+against small MoE variants and one dense model with an active parameter count
+near the existing TinyPython MoE result.
 
 Compare:
 

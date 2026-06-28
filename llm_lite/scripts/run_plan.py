@@ -8,7 +8,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Thread
+from threading import Condition, Thread
 from typing import TextIO
 
 from llm_lite.config.loading import load_experiment_configuration
@@ -44,8 +44,25 @@ CHECKPOINT_EVENT_POLL_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
-class GpuPool:
+class GpuAllocation:
     visible_devices: tuple[str, ...]
+
+    def environment_value(self) -> str | None:
+        if not self.visible_devices:
+            return None
+        return ",".join(self.visible_devices)
+
+    def first_device(self) -> "GpuAllocation":
+        if not self.visible_devices:
+            return self
+        return GpuAllocation(visible_devices=(self.visible_devices[0],))
+
+
+class GpuPool:
+    def __init__(self, visible_devices: tuple[str, ...]) -> None:
+        self.visible_devices = visible_devices
+        self._available_devices = list(visible_devices)
+        self._condition = Condition()
 
     @classmethod
     def from_argument(cls, gpus: str | None) -> "GpuPool":
@@ -53,12 +70,33 @@ class GpuPool:
             return cls(visible_devices=())
         return cls(visible_devices=tuple(gpu.strip() for gpu in gpus.split(",") if gpu.strip()))
 
-    def environment_value(self, gpu_count: int) -> str | None:
+    def acquire(self, gpu_count: int) -> GpuAllocation:
         if gpu_count == 0:
-            return None
+            return GpuAllocation(visible_devices=())
         if not self.visible_devices:
-            return None
-        return ",".join(self.visible_devices[:gpu_count])
+            return GpuAllocation(visible_devices=())
+        if gpu_count > len(self.visible_devices):
+            raise ValueError(
+                f"Stage requires {gpu_count} GPU(s), but only "
+                f"{len(self.visible_devices)} device(s) were provided by --gpus.",
+            )
+        with self._condition:
+            while len(self._available_devices) < gpu_count:
+                self._condition.wait()
+            allocated_devices = tuple(self._available_devices[:gpu_count])
+            del self._available_devices[:gpu_count]
+            return GpuAllocation(visible_devices=allocated_devices)
+
+    def release(self, gpu_allocation: GpuAllocation) -> None:
+        if not gpu_allocation.visible_devices:
+            return
+        with self._condition:
+            for visible_device in gpu_allocation.visible_devices:
+                assert visible_device in self.visible_devices
+                assert visible_device not in self._available_devices
+            self._available_devices.extend(gpu_allocation.visible_devices)
+            self._available_devices.sort(key=self.visible_devices.index)
+            self._condition.notify_all()
 
 
 @dataclass(frozen=True)
@@ -271,31 +309,37 @@ def _run_missing_artifact(
             message="stage job started",
         )
         console_log(f"[start] {planned_artifact.stage_name.value}")
-        environment = _job_environment(
+        resource_request = _resource_request(
             resolved_run=resolved_run,
             planned_artifact=planned_artifact,
-            gpu_pool=gpu_pool,
         )
-        if _supports_async_checkpoint_evaluation(
-            resolved_run=resolved_run,
-            planned_artifact=planned_artifact,
-            max_parallel_jobs=max_parallel_jobs,
-        ):
-            _run_training_job_with_async_evaluations(
+        gpu_allocation = gpu_pool.acquire(gpu_count=resource_request.gpu_count)
+        environment = _job_environment(
+            gpu_allocation=gpu_allocation,
+        )
+        try:
+            if _supports_async_checkpoint_evaluation(
                 resolved_run=resolved_run,
                 planned_artifact=planned_artifact,
-                command=command,
-                artifact_directory=artifact_directory,
-                environment=environment,
-                gpu_pool=gpu_pool,
                 max_parallel_jobs=max_parallel_jobs,
-            )
-        else:
-            _run_subprocess_job(
-                command=command,
-                artifact_directory=artifact_directory,
-                environment=environment,
-            )
+            ):
+                _run_training_job_with_async_evaluations(
+                    resolved_run=resolved_run,
+                    planned_artifact=planned_artifact,
+                    command=command,
+                    artifact_directory=artifact_directory,
+                    environment=environment,
+                    gpu_allocation=gpu_allocation,
+                    max_parallel_jobs=max_parallel_jobs,
+                )
+            else:
+                _run_subprocess_job(
+                    command=command,
+                    artifact_directory=artifact_directory,
+                    environment=environment,
+                )
+        finally:
+            gpu_pool.release(gpu_allocation=gpu_allocation)
         completed_manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
         if not complete_manifest_matches(
             manifest=completed_manifest,
@@ -346,18 +390,9 @@ def _job_command(resolved_run: ResolvedRun, planned_artifact: PlannedArtifact) -
     ]
 
 
-def _job_environment(
-    resolved_run: ResolvedRun,
-    planned_artifact: PlannedArtifact,
-    gpu_pool: GpuPool,
-) -> dict[str, str]:
+def _job_environment(gpu_allocation: GpuAllocation) -> dict[str, str]:
     environment = os.environ.copy()
-    gpu_environment = gpu_pool.environment_value(
-        gpu_count=_resource_request(
-            resolved_run=resolved_run,
-            planned_artifact=planned_artifact,
-        ).gpu_count,
-    )
+    gpu_environment = gpu_allocation.environment_value()
     if gpu_environment is not None:
         environment["CUDA_VISIBLE_DEVICES"] = gpu_environment
     return environment
@@ -374,7 +409,7 @@ def _resource_request(
                 gpu_count=(
                     resolved_run.experiment_configuration.distributed.world_size
                     if resolved_run.experiment_configuration.distributed.enabled
-                    else 0
+                    else 1
                 ),
                 exclusive_gpus=True,
             )
@@ -428,7 +463,7 @@ def _run_training_job_with_async_evaluations(
     command: list[str],
     artifact_directory: Path,
     environment: dict[str, str],
-    gpu_pool: GpuPool,
+    gpu_allocation: GpuAllocation,
     max_parallel_jobs: int,
 ) -> None:
     seen_event_paths: set[Path] = set()
@@ -461,7 +496,7 @@ def _run_training_job_with_async_evaluations(
                     seen_event_paths=seen_event_paths,
                     evaluation_futures=evaluation_futures,
                     executor=executor,
-                    gpu_pool=gpu_pool,
+                    gpu_allocation=gpu_allocation,
                 )
                 _raise_completed_evaluation_failures(evaluation_futures=evaluation_futures)
                 time.sleep(CHECKPOINT_EVENT_POLL_SECONDS)
@@ -472,7 +507,7 @@ def _run_training_job_with_async_evaluations(
                 seen_event_paths=seen_event_paths,
                 evaluation_futures=evaluation_futures,
                 executor=executor,
-                gpu_pool=gpu_pool,
+                gpu_allocation=gpu_allocation,
             )
             exit_code = process.wait()
             _wait_for_async_evaluations(evaluation_futures=evaluation_futures)
@@ -508,7 +543,7 @@ def _submit_ready_checkpoint_evaluations(
     seen_event_paths: set[Path],
     evaluation_futures: list[concurrent.futures.Future[None]],
     executor: concurrent.futures.ThreadPoolExecutor,
-    gpu_pool: GpuPool,
+    gpu_allocation: GpuAllocation,
 ) -> None:
     for submission in _checkpoint_evaluation_submissions(
         resolved_run=resolved_run,
@@ -521,7 +556,7 @@ def _submit_ready_checkpoint_evaluations(
                 _run_checkpoint_evaluation_job,
                 resolved_run,
                 submission,
-                gpu_pool,
+                gpu_allocation.first_device(),
             ),
         )
 
@@ -567,7 +602,7 @@ def _checkpoint_evaluation_submissions(
 def _run_checkpoint_evaluation_job(
     resolved_run: ResolvedRun,
     submission: AsyncEvaluationSubmission,
-    gpu_pool: GpuPool,
+    gpu_allocation: GpuAllocation,
 ) -> None:
     registry = artifact_registry_for_resolved_run(
         resolved_run=resolved_run,
@@ -607,11 +642,7 @@ def _run_checkpoint_evaluation_job(
         _run_subprocess_job(
             command=command,
             artifact_directory=artifact_directory,
-            environment=_job_environment(
-                resolved_run=resolved_run,
-                planned_artifact=submission.planned_artifact,
-                gpu_pool=gpu_pool,
-            ),
+            environment=_job_environment(gpu_allocation=gpu_allocation),
         )
         completed_manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
         if not complete_manifest_matches(

@@ -286,6 +286,35 @@ artifact_store/evaluation/<checkpoint-evaluation-fingerprint>/
 
 and mirrored into the run TensorBoard view.
 
+## Python Model Sweep
+
+The planned dense-versus-MoE TinyPython sweep is described in:
+
+```text
+docs/PYTHON_MODEL_SWEEP.md
+```
+
+Generate the four-config pilot set:
+
+```bash
+uv run python scripts/generate_python_model_sweep.py
+```
+
+Generate the full set:
+
+```bash
+uv run python scripts/generate_python_model_sweep.py --mode full
+```
+
+Run either set with `run_plan`:
+
+```bash
+uv run python -m llm_lite.scripts.run_plan \
+  --config configs/generated/python_model_sweep/*.yaml \
+  --max-parallel-jobs 2 \
+  --gpus 0,1,2,3
+```
+
 ## Generation
 
 Generate from the latest checkpoint of a completed run:
@@ -363,7 +392,10 @@ python -m tensorboard.main \
 ## Exporting Run Bundles
 
 Do not commit full run directories, checkpoints, packed shards, or TensorBoard
-event logs to source control. Export a compact bundle:
+event logs to source control. `run_plan` includes `export` as the final stage
+and writes the default bundle to `runs/<experiment>/export/bundle.zip`.
+
+Export an existing run explicitly:
 
 ```bash
 python -m llm_lite.scripts.export_run_bundle \
@@ -374,8 +406,10 @@ python -m llm_lite.scripts.export_run_bundle \
 The default bundle includes:
 
 - `resolved_config.json`
+- `run_manifest.json`
 - `pipeline.jsonl`
 - `performance.jsonl`, when present
+- stage manifests and job logs
 - tokenizer artifact files
 - pretraining manifest and metrics
 - training-evaluation logs

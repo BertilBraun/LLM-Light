@@ -5,6 +5,7 @@ from tensorboard.backend.event_processing.event_accumulator import EventAccumula
 
 from llm_lite.config.models import (
     ByteBpeTokenizerConfiguration,
+    FillInMiddleConfiguration,
     LowerCaseTransformConfiguration,
     PreprocessingTransformType,
     TokenizerType,
@@ -110,6 +111,7 @@ def test_parallel_packing_matches_single_worker(tmp_path: Path) -> None:
         add_eos=True,
         pack_documents=False,
         maximum_shard_tokens=10,
+        fill_in_middle_configuration=FillInMiddleConfiguration(),
         workers=1,
     )
     parallel_result = pack_text_shards(
@@ -124,6 +126,7 @@ def test_parallel_packing_matches_single_worker(tmp_path: Path) -> None:
         add_eos=True,
         pack_documents=False,
         maximum_shard_tokens=10,
+        fill_in_middle_configuration=FillInMiddleConfiguration(),
         workers=2,
     )
 

@@ -1,5 +1,6 @@
 from llm_lite.pipeline.stage import PipelineStage, StageName
 from llm_lite.pipeline.stages.evaluation import EvaluationStage
+from llm_lite.pipeline.stages.export import ExportStage
 from llm_lite.pipeline.stages.packed_dataset import PackedDatasetStage
 from llm_lite.pipeline.stages.post_training import PostTrainingStage
 from llm_lite.pipeline.stages.pretraining import PretrainingStage
@@ -15,6 +16,7 @@ ORDERED_PIPELINE_STAGES: tuple[PipelineStage, ...] = (
     PretrainingStage(),
     PostTrainingStage(),
     EvaluationStage(),
+    ExportStage(),
 )
 
 ORDERED_STAGE_NAMES: tuple[StageName, ...] = tuple(stage.name for stage in ORDERED_PIPELINE_STAGES)

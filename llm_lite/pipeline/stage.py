@@ -15,6 +15,7 @@ class StageName(str, Enum):
     PRETRAINING = "pretraining"
     POST_TRAINING = "post_training"
     EVALUATION = "evaluation"
+    EXPORT = "export"
 
 
 @dataclass(frozen=True)

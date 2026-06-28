@@ -5,6 +5,7 @@ from llm_lite.config.export import (
     dense_model,
     export_experiment_configs,
     export_experiment_variant,
+    modern_moe_model,
     moe_model,
     training,
 )
@@ -111,3 +112,30 @@ def test_export_experiment_variant_can_be_called_repeatedly(tmp_path: Path) -> N
     assert output_paths == [tmp_path / "dense_d16.yaml", tmp_path / "dense_d24.yaml"]
     assert first_configuration.model.dimension == 16
     assert second_configuration.model.dimension == 24
+
+
+def test_export_experiment_configs_writes_modern_moe_config(tmp_path: Path) -> None:
+    output_paths = export_experiment_configs(
+        base_configuration_path=Path("configs/verify_one_sentence.yaml"),
+        output_directory=tmp_path,
+        overrides=(
+            ExperimentOverrides(
+                name="modern_moe",
+                model=modern_moe_model(
+                    dimension=16,
+                    layers=2,
+                    attention_heads=4,
+                    expert_feed_forward_dimension=32,
+                    expert_count=4,
+                    router_top_k=2,
+                    dropout=0.05,
+                ),
+            ),
+        ),
+    )
+
+    configuration = load_experiment_configuration(configuration_path=output_paths[0])
+
+    assert configuration.model.type.value == "modern_moe_gpt"
+    assert configuration.model.dimension == 16
+    assert configuration.model.expert_count == 4

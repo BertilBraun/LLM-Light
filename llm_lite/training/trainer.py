@@ -15,6 +15,7 @@ from llm_lite.training.checkpoint import (
     finalize_sharded_checkpoint,
     load_latest_checkpoint,
     load_latest_sharded_checkpoint,
+    retain_recent_checkpoints,
     save_checkpoint,
     save_rank_zero_full_checkpoint_bridge,
     save_sharded_rank_checkpoint,
@@ -31,6 +32,7 @@ from llm_lite.training.distributed import (
     unwrap_distributed_model,
 )
 from llm_lite.training.logging import TrainingMetricLogger, create_training_metric_record
+from llm_lite.training.lr_schedule import learning_rate_for_step
 from llm_lite.training.objectives import TrainingBatch, TrainingObjectiveRunner
 
 
@@ -112,6 +114,11 @@ def train_model(
                 model.parameters(),
                 max_norm=training_configuration.gradient_clip_norm,
             )
+            _apply_learning_rate_for_step(
+                optimizer=optimizer,
+                training_configuration=training_configuration,
+                step=step,
+            )
             optimizer.step()
             tokens_processed += _batch_token_count(batch=prepared_batch)
             final_loss = float(loss.detach().cpu().item())
@@ -120,7 +127,7 @@ def train_model(
                     metric_record=create_training_metric_record(
                         step=step,
                         loss=final_loss,
-                        learning_rate=training_configuration.optimizer.learning_rate,
+                        learning_rate=_optimizer_learning_rate(optimizer=optimizer),
                         gradient_norm=float(gradient_norm.detach().cpu().item()),
                         started_at_seconds=started_at_seconds,
                         tokens_processed=tokens_processed,
@@ -147,12 +154,20 @@ def train_model(
                     optimizer=optimizer,
                     step=step,
                 )
+                retain_recent_checkpoints(
+                    checkpoint_directory=checkpoint_directory,
+                    max_checkpoints=training_configuration.max_checkpoints,
+                )
         if not checkpoint_path.exists() or training_configuration.maximum_steps != start_step:
             checkpoint_path = save_checkpoint(
                 checkpoint_directory=checkpoint_directory,
                 model=model,
                 optimizer=optimizer,
                 step=training_configuration.maximum_steps,
+            )
+            retain_recent_checkpoints(
+                checkpoint_directory=checkpoint_directory,
+                max_checkpoints=training_configuration.max_checkpoints,
             )
     finally:
         metrics_logger.close()
@@ -281,6 +296,11 @@ def _train_model_distributed_initialized(
                 model.parameters(),
                 max_norm=training_configuration.gradient_clip_norm,
             )
+            _apply_learning_rate_for_step(
+                optimizer=optimizer,
+                training_configuration=training_configuration,
+                step=step,
+            )
             optimizer.step()
             tokens_processed += _batch_token_count(batch=prepared_batch)
             final_loss = distributed_runtime.reduce_mean(float(loss.detach().cpu().item()))
@@ -298,6 +318,7 @@ def _train_model_distributed_initialized(
                     distributed_configuration=distributed_configuration,
                     distributed_runtime=distributed_runtime,
                     model_configuration_hash=model_configuration_hash,
+                    max_checkpoints=training_configuration.max_checkpoints,
                 )
                 latest_checkpoint_seconds = perf_counter() - checkpoint_started_seconds
             if step % training_configuration.log_interval_steps == 0 and metrics_logger is not None:
@@ -306,7 +327,7 @@ def _train_model_distributed_initialized(
                     metric_record=create_training_metric_record(
                         step=step,
                         loss=final_loss,
-                        learning_rate=training_configuration.optimizer.learning_rate,
+                        learning_rate=_optimizer_learning_rate(optimizer=optimizer),
                         gradient_norm=global_gradient_norm,
                         started_at_seconds=started_at_seconds,
                         tokens_processed=tokens_processed,
@@ -352,6 +373,7 @@ def _train_model_distributed_initialized(
                 distributed_configuration=distributed_configuration,
                 distributed_runtime=distributed_runtime,
                 model_configuration_hash=model_configuration_hash,
+                max_checkpoints=training_configuration.max_checkpoints,
             )
             latest_checkpoint_seconds = perf_counter() - checkpoint_started_seconds
         distributed_runtime.barrier()
@@ -377,6 +399,7 @@ def _save_distributed_checkpoint(
     distributed_configuration: DistributedConfiguration,
     distributed_runtime: DistributedRuntime,
     model_configuration_hash: str,
+    max_checkpoints: int | None,
 ) -> Path:
     save_sharded_rank_checkpoint(
         checkpoint_directory=checkpoint_directory,
@@ -389,6 +412,12 @@ def _save_distributed_checkpoint(
     distributed_runtime.barrier()
     checkpoint_path = checkpoint_directory / f"step_{step:08d}"
     if distributed_runtime.is_coordinator:
+        save_rank_zero_full_checkpoint_bridge(
+            checkpoint_directory=checkpoint_directory,
+            model=unwrap_distributed_model(model=model),
+            optimizer=optimizer,
+            step=step,
+        )
         checkpoint_path = finalize_sharded_checkpoint(
             checkpoint_directory=checkpoint_directory,
             step=step,
@@ -397,12 +426,13 @@ def _save_distributed_checkpoint(
             strategy=distributed_configuration.strategy,
             topology=distributed_runtime.topology,
             model_configuration_hash=model_configuration_hash,
+            rank_zero_full_checkpoint_path=checkpoint_directory
+            / f"step_{step:08d}"
+            / "rank_zero_full.pt",
         )
-        save_rank_zero_full_checkpoint_bridge(
+        retain_recent_checkpoints(
             checkpoint_directory=checkpoint_directory,
-            model=unwrap_distributed_model(model=model),
-            optimizer=optimizer,
-            step=step,
+            max_checkpoints=max_checkpoints,
         )
     distributed_runtime.barrier()
     return checkpoint_path
@@ -413,8 +443,27 @@ def _apply_current_optimizer_configuration(
     training_configuration: TrainingConfiguration,
 ) -> None:
     for parameter_group in optimizer.param_groups:
-        parameter_group["lr"] = training_configuration.optimizer.learning_rate
         parameter_group["weight_decay"] = training_configuration.optimizer.weight_decay
+
+
+def _apply_learning_rate_for_step(
+    optimizer: Optimizer,
+    training_configuration: TrainingConfiguration,
+    step: int,
+) -> None:
+    learning_rate = learning_rate_for_step(
+        base_learning_rate=training_configuration.optimizer.learning_rate,
+        schedule_configuration=training_configuration.optimizer.learning_rate_schedule,
+        step=step,
+        maximum_steps=training_configuration.maximum_steps,
+    )
+    for parameter_group in optimizer.param_groups:
+        parameter_group["lr"] = learning_rate
+
+
+def _optimizer_learning_rate(optimizer: Optimizer) -> float:
+    first_parameter_group = optimizer.param_groups[0]
+    return float(first_parameter_group["lr"])
 
 
 def _single_process_training_device() -> torch.device:

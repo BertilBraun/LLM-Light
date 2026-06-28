@@ -33,6 +33,8 @@ class PreprocessingTransformType(str, Enum):
 class ModelType(str, Enum):
     DENSE_GPT = "dense_gpt"
     MOE_GPT = "moe_gpt"
+    MODERN_DENSE_GPT = "modern_dense_gpt"
+    MODERN_MOE_GPT = "modern_moe_gpt"
 
 
 class TrainingObjective(str, Enum):
@@ -90,6 +92,12 @@ class DistributedStrategy(str, Enum):
 class DistributedCheckpointType(str, Enum):
     FULL = "full"
     SHARDED = "sharded"
+
+
+class LearningRateScheduleType(str, Enum):
+    FIXED = "fixed"
+    LINEAR_WARMUP_DECAY = "linear_warmup_decay"
+    COSINE_WARMUP_DECAY = "cosine_warmup_decay"
 
 
 class Configuration(BaseModel):
@@ -344,8 +352,43 @@ class MoeGptConfiguration(Configuration):
         return self
 
 
+class ModernDenseGptConfiguration(Configuration):
+    type: Literal[ModelType.MODERN_DENSE_GPT]
+    dimension: int = Field(gt=0)
+    layers: int = Field(gt=0)
+    attention_heads: int = Field(gt=0)
+    feed_forward_dimension: int = Field(gt=0)
+    rope_base: float = Field(default=10000.0, gt=0.0)
+    normalization_epsilon: float = Field(default=1e-5, gt=0.0)
+    dropout: float = Field(default=0.0, ge=0.0, le=1.0)
+    tie_embeddings: bool = True
+
+
+class ModernMoeGptConfiguration(Configuration):
+    type: Literal[ModelType.MODERN_MOE_GPT]
+    dimension: int = Field(gt=0)
+    layers: int = Field(gt=0)
+    attention_heads: int = Field(gt=0)
+    expert_feed_forward_dimension: int = Field(gt=0)
+    expert_count: int = Field(gt=1)
+    router_top_k: int = Field(ge=1)
+    rope_base: float = Field(default=10000.0, gt=0.0)
+    normalization_epsilon: float = Field(default=1e-5, gt=0.0)
+    dropout: float = Field(default=0.0, ge=0.0, le=1.0)
+    tie_embeddings: bool = True
+
+    @model_validator(mode="after")
+    def require_top_k_not_greater_than_experts(self) -> ModernMoeGptConfiguration:
+        if self.router_top_k > self.expert_count:
+            raise ValueError("Modern MoE router_top_k must not be greater than expert_count.")
+        return self
+
+
 ModelConfiguration = Annotated[
-    DenseGptConfiguration | MoeGptConfiguration,
+    DenseGptConfiguration
+    | MoeGptConfiguration
+    | ModernDenseGptConfiguration
+    | ModernMoeGptConfiguration,
     Field(discriminator="type"),
 ]
 
@@ -354,9 +397,36 @@ class CausalLanguageModelingObjectiveConfiguration(Configuration):
     auxiliary_loss_weight: float = Field(default=0.0, ge=0.0)
 
 
+class FixedLearningRateScheduleConfiguration(Configuration):
+    type: Literal[LearningRateScheduleType.FIXED] = LearningRateScheduleType.FIXED
+
+
+class LinearWarmupDecayLearningRateScheduleConfiguration(Configuration):
+    type: Literal[LearningRateScheduleType.LINEAR_WARMUP_DECAY]
+    warmup_steps: int = Field(ge=0)
+    minimum_learning_rate_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+class CosineWarmupDecayLearningRateScheduleConfiguration(Configuration):
+    type: Literal[LearningRateScheduleType.COSINE_WARMUP_DECAY]
+    warmup_steps: int = Field(ge=0)
+    minimum_learning_rate_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
+
+
+LearningRateScheduleConfiguration = Annotated[
+    FixedLearningRateScheduleConfiguration
+    | LinearWarmupDecayLearningRateScheduleConfiguration
+    | CosineWarmupDecayLearningRateScheduleConfiguration,
+    Field(discriminator="type"),
+]
+
+
 class OptimizerConfiguration(Configuration):
     learning_rate: float = Field(default=0.0003, gt=0.0)
     weight_decay: float = Field(default=0.01, ge=0.0)
+    learning_rate_schedule: LearningRateScheduleConfiguration = (
+        FixedLearningRateScheduleConfiguration()
+    )
 
 
 class DataLoaderConfiguration(Configuration):
@@ -391,8 +461,28 @@ class TrainingConfiguration(Configuration):
     precision: Precision = Precision.FP32
     gradient_clip_norm: float = Field(default=1.0, gt=0.0)
     checkpoint_interval_steps: int = Field(default=1000, gt=0)
+    max_checkpoints: int | None = Field(default=None, gt=0)
     log_interval_steps: int = Field(default=10, gt=0)
     evaluation: TrainingEvaluationConfiguration | None = None
+
+    @model_validator(mode="after")
+    def require_schedule_fits_training_steps(self) -> TrainingConfiguration:
+        match self.optimizer.learning_rate_schedule:
+            case FixedLearningRateScheduleConfiguration():
+                return self
+            case (
+                LinearWarmupDecayLearningRateScheduleConfiguration(
+                    warmup_steps=warmup_steps,
+                )
+                | CosineWarmupDecayLearningRateScheduleConfiguration(
+                    warmup_steps=warmup_steps,
+                )
+            ):
+                if warmup_steps >= self.maximum_steps:
+                    raise ValueError(
+                        "Learning rate warmup_steps must be less than training.maximum_steps.",
+                    )
+                return self
 
 
 class NoPostTrainingConfiguration(Configuration):
@@ -455,6 +545,12 @@ class EvaluationConfiguration(Configuration):
     perplexity: PerplexityEvaluationConfiguration | None = None
     fixed_prompt_generation: FixedPromptGenerationEvaluationConfiguration | None = None
     python_completion: PythonCompletionEvaluationConfiguration | None = None
+
+
+class ExportConfiguration(Configuration):
+    bundle_path: Path = Path("export/bundle.zip")
+    include_tensorboard: bool = True
+    include_all_checkpoints: bool = False
 
 
 class InferenceConfiguration(Configuration):
@@ -541,6 +637,7 @@ class ExperimentFile(Configuration):
     training: TrainingConfiguration
     post_training: PostTrainingConfiguration = NoPostTrainingConfiguration()
     evaluation: EvaluationConfiguration = EvaluationConfiguration()
+    export: ExportConfiguration = ExportConfiguration()
     inference: InferenceConfiguration = InferenceConfiguration()
     distributed: DistributedConfiguration = DistributedConfiguration()
 

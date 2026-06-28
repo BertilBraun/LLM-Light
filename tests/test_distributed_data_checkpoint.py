@@ -14,6 +14,8 @@ from llm_lite.data.datasets import (
 from llm_lite.training.checkpoint import (
     finalize_sharded_checkpoint,
     load_latest_sharded_checkpoint,
+    retain_recent_checkpoints,
+    save_rank_zero_full_checkpoint_bridge,
     save_sharded_rank_checkpoint,
     validate_sharded_checkpoint,
 )
@@ -107,6 +109,7 @@ def test_sharded_checkpoint_manifest_latest_and_missing_shard_rejection(tmp_path
     latest = json.loads((checkpoint_directory / "latest.json").read_text(encoding="utf-8"))
     assert manifest["step"] == 3
     assert manifest["world_size"] == 2
+    assert manifest["producing_artifact_fingerprint"] == "unknown"
     assert manifest["backend"] == "gloo"
     assert manifest["strategy"] == "data_parallel"
     assert manifest["expected_rank_shards"] == ["rank_00000", "rank_00001"]
@@ -162,3 +165,61 @@ def test_load_latest_sharded_checkpoint_restores_rank_state(tmp_path: Path) -> N
     )
 
     assert loaded_step == 5
+
+
+def test_retain_recent_checkpoints_keeps_latest_sharded_checkpoint(tmp_path: Path) -> None:
+    distributed_configuration = DistributedConfiguration.model_validate(
+        {
+            "enabled": True,
+            "strategy": "data_parallel",
+            "world_size": 1,
+            "parallelism": {"data": 1},
+        },
+    )
+    topology = build_distributed_topology(
+        distributed_configuration=distributed_configuration,
+        artifact_directory=tmp_path,
+    )
+    checkpoint_directory = tmp_path / "checkpoints"
+    for step in range(1, 5):
+        model = nn.Linear(2, 2)
+        optimizer = AdamW(model.parameters(), lr=0.01)
+        save_sharded_rank_checkpoint(
+            checkpoint_directory=checkpoint_directory,
+            model=model,
+            optimizer=optimizer,
+            step=step,
+            rank=0,
+            world_size=1,
+        )
+        save_rank_zero_full_checkpoint_bridge(
+            checkpoint_directory=checkpoint_directory,
+            model=model,
+            optimizer=optimizer,
+            step=step,
+        )
+        finalize_sharded_checkpoint(
+            checkpoint_directory=checkpoint_directory,
+            step=step,
+            world_size=1,
+            backend=distributed_configuration.backend,
+            strategy=distributed_configuration.strategy,
+            topology=topology,
+            model_configuration_hash="model-hash",
+            rank_zero_full_checkpoint_path=checkpoint_directory
+            / f"step_{step:08d}"
+            / "rank_zero_full.pt",
+        )
+
+    retain_recent_checkpoints(checkpoint_directory=checkpoint_directory, max_checkpoints=2)
+
+    assert not (checkpoint_directory / "step_00000001").exists()
+    assert not (checkpoint_directory.parent / "events" / "checkpoint_00000001.json").exists()
+    assert (checkpoint_directory / "step_00000002" / "rank_00000" / "state.pt").exists()
+    assert (checkpoint_directory / "step_00000002" / "rank_zero_full.pt").exists()
+    assert (checkpoint_directory / "step_00000003" / "rank_00000" / "state.pt").exists()
+    assert (checkpoint_directory / "step_00000003" / "rank_zero_full.pt").exists()
+    assert (checkpoint_directory / "step_00000004" / "rank_00000" / "state.pt").exists()
+    assert (checkpoint_directory / "step_00000004" / "rank_zero_full.pt").exists()
+    assert (checkpoint_directory / "latest.json").exists()
+    assert (checkpoint_directory / "latest.pt").exists()

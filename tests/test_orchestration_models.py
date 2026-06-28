@@ -8,11 +8,58 @@ from llm_lite.config.models import TrainingEvaluationConfiguration
 from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_evaluation_artifact,
     checkpoint_evaluation_target_from_event,
+    checkpoint_evaluation_target_from_manifest,
+    checkpoint_event_is_supported_for_evaluation,
 )
 from llm_lite.orchestration.models import ArtifactStorePaths, resolve_run
 from llm_lite.pipeline.runner import run_pipeline
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
+from llm_lite.scripts.run_plan import GpuAllocation, GpuPool, _job_environment
+
+
+def test_gpu_pool_allocates_non_overlapping_devices() -> None:
+    gpu_pool = GpuPool.from_argument(gpus="0,1,2,3")
+
+    first_allocation = gpu_pool.acquire(gpu_count=2)
+    second_allocation = gpu_pool.acquire(gpu_count=2)
+
+    assert first_allocation.environment_value() == "0,1"
+    assert second_allocation.environment_value() == "2,3"
+
+
+def test_gpu_pool_reuses_released_devices_in_pool_order() -> None:
+    gpu_pool = GpuPool.from_argument(gpus="0,1,2,3")
+    first_allocation = gpu_pool.acquire(gpu_count=2)
+    second_allocation = gpu_pool.acquire(gpu_count=2)
+
+    gpu_pool.release(gpu_allocation=first_allocation)
+    third_allocation = gpu_pool.acquire(gpu_count=1)
+
+    assert second_allocation.environment_value() == "2,3"
+    assert third_allocation.environment_value() == "0"
+
+
+def test_gpu_pool_rejects_requests_larger_than_configured_pool() -> None:
+    gpu_pool = GpuPool.from_argument(gpus="0,1")
+
+    try:
+        gpu_pool.acquire(gpu_count=3)
+    except ValueError as error:
+        assert "requires 3 GPU(s)" in str(error)
+        assert "only 2 device(s)" in str(error)
+    else:
+        raise AssertionError("Expected oversized GPU request to fail.")
+
+
+def test_checkpoint_evaluation_uses_first_training_gpu() -> None:
+    training_allocation = GpuAllocation(visible_devices=("2", "3"))
+
+    evaluation_environment = _job_environment(
+        gpu_allocation=training_allocation.first_device(),
+    )
+
+    assert evaluation_environment["CUDA_VISIBLE_DEVICES"] == "2"
 
 
 def test_resolved_run_uses_semantic_parent_fingerprints() -> None:
@@ -274,6 +321,57 @@ def test_checkpoint_evaluation_artifact_uses_checkpoint_step_fingerprint(
     }
 
 
+def test_ddp_sharded_checkpoint_event_resolves_to_rank_zero_full_checkpoint(
+    tmp_path: Path,
+) -> None:
+    base_experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    experiment_configuration = base_experiment_configuration.model_copy(
+        update={
+            "experiment": base_experiment_configuration.experiment.model_copy(
+                update={"output_dir": tmp_path / "run"},
+            ),
+            "training": base_experiment_configuration.training.model_copy(
+                update={
+                    "evaluation": TrainingEvaluationConfiguration(
+                        interval_steps=2,
+                        evaluators=base_experiment_configuration.evaluation,
+                    ),
+                },
+            ),
+        },
+    )
+    resolved_run = resolve_run(
+        experiment_configuration=experiment_configuration,
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+    pretraining_artifact = resolved_run.artifact_for_stage(stage_name=StageName.PRETRAINING)
+    pretraining_artifact_directory = resolved_run.artifact_store_paths.artifact_directory(
+        stage_name=StageName.PRETRAINING,
+        fingerprint=pretraining_artifact.fingerprint,
+    )
+    event_path = _write_sharded_checkpoint_event(
+        artifact_directory=pretraining_artifact_directory,
+        producing_artifact_fingerprint=pretraining_artifact.fingerprint.value,
+        checkpoint_step=2,
+    )
+
+    target_from_event = checkpoint_evaluation_target_from_event(
+        resolved_run=resolved_run,
+        event_path=event_path,
+    )
+    target_from_manifest = checkpoint_evaluation_target_from_manifest(
+        resolved_run=resolved_run,
+        checkpoint_manifest_path=target_from_event.checkpoint_manifest_path,
+    )
+
+    assert checkpoint_event_is_supported_for_evaluation(event_path=event_path)
+    assert target_from_event.checkpoint_path.name == "rank_zero_full.pt"
+    assert target_from_event.checkpoint_path == target_from_manifest.checkpoint_path
+    assert target_from_event.checkpoint_step == 2
+
+
 def _write_checkpoint_event(
     artifact_directory: Path,
     producing_artifact_fingerprint: str,
@@ -310,6 +408,57 @@ def _write_checkpoint_event(
                     f"checkpoints/step_{checkpoint_step:08d}/manifest.json"
                 ),
                 "checkpoint_kind": "full",
+                "created_at": "2026-06-28T00:00:00Z",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return event_path
+
+
+def _write_sharded_checkpoint_event(
+    artifact_directory: Path,
+    producing_artifact_fingerprint: str,
+    checkpoint_step: int,
+) -> Path:
+    checkpoint_directory = artifact_directory / "checkpoints"
+    step_directory = checkpoint_directory / f"step_{checkpoint_step:08d}"
+    step_directory.mkdir(parents=True)
+    (step_directory / "rank_zero_full.pt").write_text("checkpoint", encoding="utf-8")
+    (step_directory / "manifest.json").write_text(
+        json.dumps(
+            {
+                "step": checkpoint_step,
+                "producing_artifact_fingerprint": producing_artifact_fingerprint,
+                "world_size": 2,
+                "backend": "gloo",
+                "strategy": "data_parallel",
+                "checkpoint_type": "sharded",
+                "topology": {},
+                "model_configuration_hash": "model-hash",
+                "optimizer_present": True,
+                "expected_rank_shards": ["rank_00000", "rank_00001"],
+                "completion_status": "complete",
+                "created_at": "2026-06-28T00:00:00Z",
+                "rank_zero_full_checkpoint_path": "rank_zero_full.pt",
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    event_directory = artifact_directory / "events"
+    event_directory.mkdir(parents=True, exist_ok=True)
+    event_path = event_directory / f"checkpoint_{checkpoint_step:08d}.json"
+    event_path.write_text(
+        json.dumps(
+            {
+                "producing_artifact_fingerprint": producing_artifact_fingerprint,
+                "checkpoint_step": checkpoint_step,
+                "checkpoint_manifest_path": (
+                    f"checkpoints/step_{checkpoint_step:08d}/manifest.json"
+                ),
+                "checkpoint_kind": "sharded",
                 "created_at": "2026-06-28T00:00:00Z",
             },
             indent=2,

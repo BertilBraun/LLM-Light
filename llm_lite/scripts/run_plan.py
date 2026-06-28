@@ -576,13 +576,17 @@ def _checkpoint_evaluation_submissions(
     for event_path in sorted(events_directory.glob("checkpoint_*.json")):
         if event_path in seen_event_paths:
             continue
-        if not checkpoint_event_is_supported_for_evaluation(event_path=event_path):
+        try:
+            if not checkpoint_event_is_supported_for_evaluation(event_path=event_path):
+                seen_event_paths.add(event_path)
+                continue
+            target = checkpoint_evaluation_target_from_event(
+                resolved_run=resolved_run,
+                event_path=event_path,
+            )
+        except FileNotFoundError:
             seen_event_paths.add(event_path)
             continue
-        target = checkpoint_evaluation_target_from_event(
-            resolved_run=resolved_run,
-            event_path=event_path,
-        )
         if target.checkpoint_step % training_evaluation_configuration.interval_steps != 0:
             continue
         planned_artifact = checkpoint_evaluation_artifact(
@@ -614,6 +618,9 @@ def _run_checkpoint_evaluation_job(
         planned_artifact=submission.planned_artifact,
     ):
         return
+    if not submission.checkpoint_manifest_path.exists():
+        _log_pruned_checkpoint_evaluation(submission=submission)
+        return
     artifact_directory = registry.artifact_directory(artifact_type=StageName.EVALUATION.value)
     command = _checkpoint_evaluation_command(
         resolved_run=resolved_run,
@@ -631,7 +638,13 @@ def _run_checkpoint_evaluation_job(
             planned_artifact=submission.planned_artifact,
         ):
             return
+        if not submission.checkpoint_manifest_path.exists():
+            _log_pruned_checkpoint_evaluation(submission=submission)
+            return
     try:
+        if not submission.checkpoint_manifest_path.exists():
+            _log_pruned_checkpoint_evaluation(submission=submission)
+            return
         _clear_incomplete_artifact_payload(
             artifact_directory=artifact_directory,
             artifact_store_root=resolved_run.artifact_store_paths.root_directory,
@@ -658,8 +671,20 @@ def _run_checkpoint_evaluation_job(
         console_log(
             f"[done]  evaluation checkpoint={submission.checkpoint_manifest_path.parent.name}",
         )
+    except subprocess.CalledProcessError:
+        if not submission.checkpoint_manifest_path.exists():
+            _log_pruned_checkpoint_evaluation(submission=submission)
+            return
+        raise
     finally:
         release_artifact_lock(artifact_directory=artifact_directory)
+
+
+def _log_pruned_checkpoint_evaluation(submission: AsyncEvaluationSubmission) -> None:
+    console_log(
+        f"[skip] evaluation checkpoint={submission.checkpoint_manifest_path.parent.name} "
+        "was pruned before evaluation",
+    )
 
 
 def _checkpoint_evaluation_command(

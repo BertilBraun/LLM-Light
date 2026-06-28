@@ -11,10 +11,18 @@ from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_evaluation_target_from_manifest,
     checkpoint_event_is_supported_for_evaluation,
 )
-from llm_lite.orchestration.models import ArtifactStorePaths, resolve_run
+from llm_lite.orchestration.models import ArtifactStorePaths, ResolvedRun, resolve_run
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
-from llm_lite.scripts.run_plan import GpuAllocation, GpuPool, _job_environment, run_plan
+from llm_lite.scripts.run_plan import (
+    AsyncEvaluationSubmission,
+    GpuAllocation,
+    GpuPool,
+    _checkpoint_evaluation_submissions,
+    _job_environment,
+    _run_checkpoint_evaluation_job,
+    run_plan,
+)
 
 
 def test_gpu_pool_allocates_non_overlapping_devices() -> None:
@@ -369,6 +377,96 @@ def test_ddp_sharded_checkpoint_event_resolves_to_rank_zero_full_checkpoint(
     assert target_from_event.checkpoint_path.name == "rank_zero_full.pt"
     assert target_from_event.checkpoint_path == target_from_manifest.checkpoint_path
     assert target_from_event.checkpoint_step == 2
+
+
+def test_pruned_checkpoint_event_is_not_submitted_for_evaluation(tmp_path: Path) -> None:
+    resolved_run, pretraining_artifact_directory = _resolved_run_with_training_evaluation(
+        tmp_path=tmp_path,
+    )
+    event_path = _write_checkpoint_event(
+        artifact_directory=pretraining_artifact_directory,
+        producing_artifact_fingerprint=resolved_run.artifact_for_stage(
+            stage_name=StageName.PRETRAINING,
+        ).fingerprint.value,
+        checkpoint_step=2,
+    )
+    target = checkpoint_evaluation_target_from_event(
+        resolved_run=resolved_run,
+        event_path=event_path,
+    )
+    target.checkpoint_manifest_path.unlink()
+
+    submissions = _checkpoint_evaluation_submissions(
+        resolved_run=resolved_run,
+        training_artifact_directory=pretraining_artifact_directory,
+        seen_event_paths=set(),
+    )
+
+    assert submissions == ()
+
+
+def test_pruned_queued_checkpoint_evaluation_is_skipped(tmp_path: Path) -> None:
+    resolved_run, pretraining_artifact_directory = _resolved_run_with_training_evaluation(
+        tmp_path=tmp_path,
+    )
+    event_path = _write_checkpoint_event(
+        artifact_directory=pretraining_artifact_directory,
+        producing_artifact_fingerprint=resolved_run.artifact_for_stage(
+            stage_name=StageName.PRETRAINING,
+        ).fingerprint.value,
+        checkpoint_step=2,
+    )
+    target = checkpoint_evaluation_target_from_event(
+        resolved_run=resolved_run,
+        event_path=event_path,
+    )
+    planned_artifact = checkpoint_evaluation_artifact(
+        resolved_run=resolved_run,
+        target=target,
+    )
+    submission = AsyncEvaluationSubmission(
+        planned_artifact=planned_artifact,
+        event_path=event_path,
+        checkpoint_manifest_path=target.checkpoint_manifest_path,
+    )
+    target.checkpoint_manifest_path.unlink()
+
+    _run_checkpoint_evaluation_job(
+        resolved_run=resolved_run,
+        submission=submission,
+        gpu_allocation=GpuAllocation(visible_devices=()),
+    )
+
+
+def _resolved_run_with_training_evaluation(tmp_path: Path) -> tuple[ResolvedRun, Path]:
+    base_experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    experiment_configuration = base_experiment_configuration.model_copy(
+        update={
+            "experiment": base_experiment_configuration.experiment.model_copy(
+                update={"output_dir": tmp_path / "run"},
+            ),
+            "training": base_experiment_configuration.training.model_copy(
+                update={
+                    "evaluation": TrainingEvaluationConfiguration(
+                        interval_steps=2,
+                        evaluators=base_experiment_configuration.evaluation,
+                    ),
+                },
+            ),
+        },
+    )
+    resolved_run = resolve_run(
+        experiment_configuration=experiment_configuration,
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+    pretraining_artifact = resolved_run.artifact_for_stage(stage_name=StageName.PRETRAINING)
+    pretraining_artifact_directory = resolved_run.artifact_store_paths.artifact_directory(
+        stage_name=StageName.PRETRAINING,
+        fingerprint=pretraining_artifact.fingerprint,
+    )
+    return resolved_run, pretraining_artifact_directory
 
 
 def _write_checkpoint_event(

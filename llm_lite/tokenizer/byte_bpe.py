@@ -87,6 +87,7 @@ class ByteBpeTokenizer:
         bos_token: str | None,
         eos_token: str | None,
         pad_token: str | None,
+        additional_special_tokens: tuple[str, ...] = (),
     ) -> None:
         self.token_to_id = token_to_id
         self.byte_token_to_id = byte_token_to_id
@@ -98,6 +99,7 @@ class ByteBpeTokenizer:
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.pad_token = pad_token
+        self.additional_special_tokens = additional_special_tokens
 
     @property
     def vocabulary_size(self) -> int:
@@ -126,15 +128,18 @@ class ByteBpeTokenizer:
         return self.token_to_id[self.pad_token]
 
     def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]:
-        byte_tokens = _byte_tokens(text=text)
-        byte_tokens = _apply_ranked_merge_rules(
-            byte_tokens=byte_tokens,
-            merge_rule_to_rank=self.merge_rule_to_rank,
-        )
         token_ids: list[int] = []
         if add_bos:
             token_ids.append(self.bos_token_id)
-        token_ids.extend(self.byte_token_to_id[byte_token] for byte_token in byte_tokens)
+        token_ids.extend(
+            _encode_text_with_special_tokens(
+                text=text,
+                token_to_id=self.token_to_id,
+                byte_token_to_id=self.byte_token_to_id,
+                merge_rule_to_rank=self.merge_rule_to_rank,
+                special_tokens=self.additional_special_tokens,
+            ),
+        )
         if add_eos:
             token_ids.append(self.eos_token_id)
         return token_ids
@@ -143,7 +148,12 @@ class ByteBpeTokenizer:
         output_bytes = bytearray()
         special_token_ids = {
             self.token_to_id[special_token]
-            for special_token in (self.bos_token, self.eos_token, self.pad_token)
+            for special_token in (
+                self.bos_token,
+                self.eos_token,
+                self.pad_token,
+                *self.additional_special_tokens,
+            )
             if special_token is not None
         }
         for token_id in token_ids:
@@ -171,6 +181,7 @@ class ByteBpeTokenizer:
             "bos_token": self.bos_token,
             "eos_token": self.eos_token,
             "pad_token": self.pad_token,
+            "additional_special_tokens": self.additional_special_tokens,
         }
         (directory / "tokenizer.json").write_text(
             json.dumps(tokenizer_data, indent=2, sort_keys=True),
@@ -198,6 +209,7 @@ class ByteBpeTokenizer:
             bos_token=tokenizer_data["bos_token"],
             eos_token=tokenizer_data["eos_token"],
             pad_token=tokenizer_data["pad_token"],
+            additional_special_tokens=tuple(tokenizer_data.get("additional_special_tokens", ())),
         )
 
 
@@ -210,6 +222,7 @@ def train_byte_bpe_tokenizer(
     add_eos_token: bool,
     add_pad_token: bool,
     workers: int,
+    additional_special_tokens: tuple[str, ...] = (),
 ) -> ByteBpeTrainingResult:
     if workers < 1:
         raise ValueError("Worker count must be positive.")
@@ -217,6 +230,7 @@ def train_byte_bpe_tokenizer(
         add_bos_token=add_bos_token,
         add_eos_token=add_eos_token,
         add_pad_token=add_pad_token,
+        additional_special_tokens=additional_special_tokens,
     )
     minimum_vocabulary_size = len(token_to_id) + 256
     if vocabulary_size < minimum_vocabulary_size:
@@ -254,6 +268,7 @@ def train_byte_bpe_tokenizer(
         bos_token="<bos>" if add_bos_token else None,
         eos_token="<eos>" if add_eos_token else None,
         pad_token="<pad>" if add_pad_token else None,
+        additional_special_tokens=additional_special_tokens,
     )
     return ByteBpeTrainingResult(
         tokenizer=tokenizer,
@@ -278,11 +293,13 @@ def train_byte_bpe_tokenizer_from_text_shards(
     add_eos_token: bool,
     add_pad_token: bool,
     workers: int,
+    additional_special_tokens: tuple[str, ...] = (),
 ) -> ByteBpeTrainingResult:
     token_to_id = _special_token_to_id(
         add_bos_token=add_bos_token,
         add_eos_token=add_eos_token,
         add_pad_token=add_pad_token,
+        additional_special_tokens=additional_special_tokens,
     )
     minimum_vocabulary_size = len(token_to_id) + 256
     if vocabulary_size < minimum_vocabulary_size:
@@ -321,6 +338,7 @@ def train_byte_bpe_tokenizer_from_text_shards(
             add_bos_token=add_bos_token,
             add_eos_token=add_eos_token,
             add_pad_token=add_pad_token,
+            additional_special_tokens=additional_special_tokens,
             workers=1,
         )
     worker_inputs = _bpe_worker_inputs(
@@ -339,6 +357,7 @@ def train_byte_bpe_tokenizer_from_text_shards(
         bos_token="<bos>" if add_bos_token else None,
         eos_token="<eos>" if add_eos_token else None,
         pad_token="<pad>" if add_pad_token else None,
+        additional_special_tokens=additional_special_tokens,
     )
     return ByteBpeTrainingResult(
         tokenizer=tokenizer,
@@ -367,12 +386,14 @@ def _special_token_to_id(
     add_bos_token: bool,
     add_eos_token: bool,
     add_pad_token: bool,
+    additional_special_tokens: tuple[str, ...],
 ) -> dict[str, int]:
     token_to_id: dict[str, int] = {}
     for special_token in (
         "<bos>" if add_bos_token else None,
         "<eos>" if add_eos_token else None,
         "<pad>" if add_pad_token else None,
+        *additional_special_tokens,
     ):
         if special_token is not None:
             token_to_id[special_token] = len(token_to_id)
@@ -385,6 +406,70 @@ def _initial_byte_token_to_id(starting_index: int) -> dict[ByteToken, int]:
 
 def _byte_tokens(text: str) -> list[ByteToken]:
     return [(byte_value,) for byte_value in text.encode("utf-8")]
+
+
+def _encode_text_with_special_tokens(
+    text: str,
+    token_to_id: dict[str, int],
+    byte_token_to_id: dict[ByteToken, int],
+    merge_rule_to_rank: dict[BytePair, int],
+    special_tokens: tuple[str, ...],
+) -> list[int]:
+    token_ids: list[int] = []
+    ordered_special_tokens = tuple(sorted(special_tokens, key=len, reverse=True))
+    text_index = 0
+    plain_text_start = 0
+    while text_index < len(text):
+        matched_special_token = _matching_special_token(
+            text=text,
+            text_index=text_index,
+            special_tokens=ordered_special_tokens,
+        )
+        if matched_special_token is None:
+            text_index += 1
+            continue
+        token_ids.extend(
+            _encode_plain_text(
+                text=text[plain_text_start:text_index],
+                byte_token_to_id=byte_token_to_id,
+                merge_rule_to_rank=merge_rule_to_rank,
+            ),
+        )
+        token_ids.append(token_to_id[matched_special_token])
+        text_index += len(matched_special_token)
+        plain_text_start = text_index
+    token_ids.extend(
+        _encode_plain_text(
+            text=text[plain_text_start:],
+            byte_token_to_id=byte_token_to_id,
+            merge_rule_to_rank=merge_rule_to_rank,
+        ),
+    )
+    return token_ids
+
+
+def _encode_plain_text(
+    text: str,
+    byte_token_to_id: dict[ByteToken, int],
+    merge_rule_to_rank: dict[BytePair, int],
+) -> list[int]:
+    byte_tokens = _byte_tokens(text=text)
+    byte_tokens = _apply_ranked_merge_rules(
+        byte_tokens=byte_tokens,
+        merge_rule_to_rank=merge_rule_to_rank,
+    )
+    return [byte_token_to_id[byte_token] for byte_token in byte_tokens]
+
+
+def _matching_special_token(
+    text: str,
+    text_index: int,
+    special_tokens: tuple[str, ...],
+) -> str | None:
+    for special_token in special_tokens:
+        if text.startswith(special_token, text_index):
+            return special_token
+    return None
 
 
 def _bounded_training_corpus(

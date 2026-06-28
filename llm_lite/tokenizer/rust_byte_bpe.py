@@ -50,11 +50,13 @@ class RustByteBpeTokenizer:
         bos_token: str | None,
         eos_token: str | None,
         pad_token: str | None,
+        additional_special_tokens: tuple[str, ...],
     ) -> None:
         self.backend_tokenizer = backend_tokenizer
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.pad_token = pad_token
+        self.additional_special_tokens = additional_special_tokens
 
     @property
     def vocabulary_size(self) -> int:
@@ -84,8 +86,10 @@ class RustByteBpeTokenizer:
         return self._token_id(self.pad_token)
 
     def encode(self, text: str, add_bos: bool, add_eos: bool) -> list[int]:
-        token_ids = list(
-            self.backend_tokenizer.encode(text, add_special_tokens=False).ids,
+        token_ids = _encode_text_with_special_tokens(
+            text=text,
+            backend_tokenizer=self.backend_tokenizer,
+            special_tokens=self.additional_special_tokens,
         )
         if add_bos:
             token_ids.insert(0, self.bos_token_id)
@@ -107,6 +111,7 @@ class RustByteBpeTokenizer:
             "bos_token": self.bos_token,
             "eos_token": self.eos_token,
             "pad_token": self.pad_token,
+            "additional_special_tokens": self.additional_special_tokens,
         }
         (directory / "tokenizer.json").write_text(
             json.dumps(tokenizer_data, indent=2, sort_keys=True),
@@ -126,6 +131,7 @@ class RustByteBpeTokenizer:
             bos_token=tokenizer_data["bos_token"],
             eos_token=tokenizer_data["eos_token"],
             pad_token=tokenizer_data["pad_token"],
+            additional_special_tokens=tuple(tokenizer_data.get("additional_special_tokens", ())),
         )
 
     def _token_id(self, token: str) -> int:
@@ -144,6 +150,7 @@ def train_rust_byte_bpe_tokenizer(
     add_eos_token: bool,
     add_pad_token: bool,
     workers: int,
+    additional_special_tokens: tuple[str, ...] = (),
 ) -> RustByteBpeTrainingResult:
     if workers < 1:
         raise ValueError("Worker count must be positive.")
@@ -151,6 +158,7 @@ def train_rust_byte_bpe_tokenizer(
         add_bos_token=add_bos_token,
         add_eos_token=add_eos_token,
         add_pad_token=add_pad_token,
+        additional_special_tokens=additional_special_tokens,
     )
     minimum_vocabulary_size = len(special_tokens) + 256
     if vocabulary_size < minimum_vocabulary_size:
@@ -180,6 +188,7 @@ def train_rust_byte_bpe_tokenizer_from_text_shards(
     add_eos_token: bool,
     add_pad_token: bool,
     workers: int,
+    additional_special_tokens: tuple[str, ...] = (),
 ) -> RustByteBpeTrainingResult:
     if workers < 1:
         raise ValueError("Worker count must be positive.")
@@ -187,6 +196,7 @@ def train_rust_byte_bpe_tokenizer_from_text_shards(
         add_bos_token=add_bos_token,
         add_eos_token=add_eos_token,
         add_pad_token=add_pad_token,
+        additional_special_tokens=additional_special_tokens,
     )
     minimum_vocabulary_size = len(special_tokens) + 256
     if vocabulary_size < minimum_vocabulary_size:
@@ -258,6 +268,11 @@ def _train_sample(
         bos_token="<bos>" if "<bos>" in special_tokens else None,
         eos_token="<eos>" if "<eos>" in special_tokens else None,
         pad_token="<pad>" if "<pad>" in special_tokens else None,
+        additional_special_tokens=tuple(
+            special_token
+            for special_token in special_tokens
+            if special_token not in {"<bos>", "<eos>", "<pad>"}
+        ),
     )
     training_tokens = sum(
         len(backend_tokenizer.encode(text, add_special_tokens=False).ids) for text in sample.texts
@@ -309,10 +324,61 @@ def _bounded_training_text_sample(
     return RustByteBpeTrainingSample(texts=tuple(sampled_texts), bytes=sampled_bytes)
 
 
+def _encode_text_with_special_tokens(
+    text: str,
+    backend_tokenizer: Tokenizer,
+    special_tokens: tuple[str, ...],
+) -> list[int]:
+    token_ids: list[int] = []
+    ordered_special_tokens = tuple(sorted(special_tokens, key=len, reverse=True))
+    text_index = 0
+    plain_text_start = 0
+    while text_index < len(text):
+        matched_special_token = _matching_special_token(
+            text=text,
+            text_index=text_index,
+            special_tokens=ordered_special_tokens,
+        )
+        if matched_special_token is None:
+            text_index += 1
+            continue
+        token_ids.extend(
+            backend_tokenizer.encode(
+                text[plain_text_start:text_index],
+                add_special_tokens=False,
+            ).ids,
+        )
+        matched_token_id = backend_tokenizer.token_to_id(matched_special_token)
+        if matched_token_id is None:
+            raise ValueError(f"Token is not in vocabulary: {matched_special_token}")
+        token_ids.append(matched_token_id)
+        text_index += len(matched_special_token)
+        plain_text_start = text_index
+    token_ids.extend(
+        backend_tokenizer.encode(
+            text[plain_text_start:],
+            add_special_tokens=False,
+        ).ids,
+    )
+    return list(token_ids)
+
+
+def _matching_special_token(
+    text: str,
+    text_index: int,
+    special_tokens: tuple[str, ...],
+) -> str | None:
+    for special_token in special_tokens:
+        if text.startswith(special_token, text_index):
+            return special_token
+    return None
+
+
 def _special_tokens(
     add_bos_token: bool,
     add_eos_token: bool,
     add_pad_token: bool,
+    additional_special_tokens: tuple[str, ...],
 ) -> tuple[str, ...]:
     return tuple(
         token
@@ -320,6 +386,7 @@ def _special_tokens(
             "<bos>" if add_bos_token else None,
             "<eos>" if add_eos_token else None,
             "<pad>" if add_pad_token else None,
+            *additional_special_tokens,
         )
         if token is not None
     )

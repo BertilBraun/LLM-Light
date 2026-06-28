@@ -81,6 +81,27 @@ def test_byte_bpe_tokenizer_save_load_roundtrip(tmp_path: Path) -> None:
     )
 
 
+def test_byte_bpe_tokenizer_encodes_additional_special_token_atomically() -> None:
+    training_result = train_byte_bpe_tokenizer(
+        texts=["prefixsuffix"],
+        vocabulary_size=270,
+        max_training_documents=1,
+        max_training_bytes=None,
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+        workers=1,
+        additional_special_tokens=("<fim_middle>",),
+    )
+    tokenizer = training_result.tokenizer
+
+    token_ids = tokenizer.encode(text="prefix<fim_middle>suffix", add_bos=False, add_eos=False)
+
+    assert tokenizer.token_to_id["<fim_middle>"] in token_ids
+    assert token_ids.count(tokenizer.token_to_id["<fim_middle>"]) == 1
+    assert tokenizer.decode(token_ids) == "prefixsuffix"
+
+
 def test_byte_bpe_encode_applies_ranked_merges() -> None:
     tokenizer = ByteBpeTokenizer(
         token_to_id={"<eos>": 0},

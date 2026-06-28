@@ -88,6 +88,10 @@ def test_packing_fill_in_middle_configuration_loads_from_yaml(tmp_path: Path) ->
                 "  documents: ['abcdefghijklmnopqrstuvwxyz']",
                 "tokenizer:",
                 "  type: character",
+                "  additional_special_tokens:",
+                "    - <fim_prefix>",
+                "    - <fim_suffix>",
+                "    - <fim_middle>",
                 "packing:",
                 "  context_length: 8",
                 "  fill_in_middle:",
@@ -113,6 +117,42 @@ def test_packing_fill_in_middle_configuration_loads_from_yaml(tmp_path: Path) ->
     assert experiment_configuration.packing.fill_in_middle.enabled
     assert experiment_configuration.packing.fill_in_middle.probability == 0.25
     assert experiment_configuration.packing.fill_in_middle.minimum_segment_characters == 3
+
+
+def test_packing_fill_in_middle_requires_tokenizer_special_tokens(tmp_path: Path) -> None:
+    configuration_path = tmp_path / "invalid_fim_config.yaml"
+    configuration_path.write_text(
+        "\n".join(
+            (
+                "experiment:",
+                "  name: invalid_fim_config",
+                "  output_dir: runs/invalid_fim_config",
+                "dataset:",
+                "  type: inline_text",
+                "  documents: ['abcdefghijklmnopqrstuvwxyz']",
+                "tokenizer:",
+                "  type: character",
+                "packing:",
+                "  context_length: 8",
+                "  fill_in_middle:",
+                "    enabled: true",
+                "    probability: 0.25",
+                "model:",
+                "  type: dense_gpt",
+                "  dimension: 8",
+                "  layers: 1",
+                "  attention_heads: 1",
+                "  feed_forward_dimension: 16",
+                "training:",
+                "  maximum_steps: 1",
+                "  batch_size_sequences: 1",
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError, match="additional_special_tokens"):
+        load_experiment_configuration(configuration_path=configuration_path)
 
 
 def test_load_python_moe_full_configuration() -> None:

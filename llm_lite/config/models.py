@@ -165,6 +165,7 @@ class CharacterTokenizerConfiguration(Configuration):
     add_bos_token: bool = True
     add_eos_token: bool = True
     add_pad_token: bool = True
+    additional_special_tokens: tuple[str, ...] = ()
 
 
 class ByteBpeTokenizerConfiguration(Configuration):
@@ -176,6 +177,7 @@ class ByteBpeTokenizerConfiguration(Configuration):
     add_bos_token: bool = True
     add_eos_token: bool = True
     add_pad_token: bool = True
+    additional_special_tokens: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def require_training_sample_bound(self) -> ByteBpeTokenizerConfiguration:
@@ -195,6 +197,7 @@ class RustByteBpeTokenizerConfiguration(Configuration):
     add_bos_token: bool = True
     add_eos_token: bool = True
     add_pad_token: bool = True
+    additional_special_tokens: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def require_training_sample_bound(self) -> RustByteBpeTokenizerConfiguration:
@@ -540,3 +543,22 @@ class ExperimentFile(Configuration):
     evaluation: EvaluationConfiguration = EvaluationConfiguration()
     inference: InferenceConfiguration = InferenceConfiguration()
     distributed: DistributedConfiguration = DistributedConfiguration()
+
+    @model_validator(mode="after")
+    def require_fill_in_middle_tokenizer_tokens(self) -> ExperimentFile:
+        if not self.packing.fill_in_middle.enabled:
+            return self
+        required_special_tokens = {
+            self.packing.fill_in_middle.prefix_marker,
+            self.packing.fill_in_middle.suffix_marker,
+            self.packing.fill_in_middle.middle_marker,
+        }
+        configured_special_tokens = set(self.tokenizer.additional_special_tokens)
+        missing_special_tokens = required_special_tokens - configured_special_tokens
+        if missing_special_tokens:
+            missing_token_list = ", ".join(sorted(missing_special_tokens))
+            raise ValueError(
+                "Fill-in-the-middle packing requires tokenizer.additional_special_tokens "
+                f"to include: {missing_token_list}.",
+            )
+        return self

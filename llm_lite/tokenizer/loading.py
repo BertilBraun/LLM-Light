@@ -51,6 +51,7 @@ def train_tokenizer(
                 add_bos_token=tokenizer_configuration.add_bos_token,
                 add_eos_token=tokenizer_configuration.add_eos_token,
                 add_pad_token=tokenizer_configuration.add_pad_token,
+                additional_special_tokens=tokenizer_configuration.additional_special_tokens,
             )
             return TrainedTokenizer(
                 tokenizer=tokenizer,
@@ -66,6 +67,7 @@ def train_tokenizer(
                 add_eos_token=tokenizer_configuration.add_eos_token,
                 add_pad_token=tokenizer_configuration.add_pad_token,
                 workers=tokenizer_configuration.training_workers,
+                additional_special_tokens=tokenizer_configuration.additional_special_tokens,
             )
             return TrainedTokenizer(
                 tokenizer=training_result.tokenizer,
@@ -97,6 +99,7 @@ def train_tokenizer(
                 add_eos_token=tokenizer_configuration.add_eos_token,
                 add_pad_token=tokenizer_configuration.add_pad_token,
                 workers=tokenizer_configuration.training_workers,
+                additional_special_tokens=tokenizer_configuration.additional_special_tokens,
             )
             return TrainedTokenizer(
                 tokenizer=training_result.tokenizer,

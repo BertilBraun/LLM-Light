@@ -141,10 +141,9 @@ def train_model(
             training_evaluation_configuration = training_configuration.evaluation
             if (
                 training_evaluation_configuration is not None
+                and evaluation_callback is not None
                 and step % training_evaluation_configuration.interval_steps == 0
             ):
-                if evaluation_callback is None:
-                    raise ValueError("Training evaluation requires an evaluation callback.")
                 evaluation_path = evaluation_callback(step=step, model=model)
                 model.train()
             if step % training_configuration.checkpoint_interval_steps == 0:
@@ -351,12 +350,11 @@ def _train_model_distributed_initialized(
             training_evaluation_configuration = training_configuration.evaluation
             should_run_training_evaluation = (
                 training_evaluation_configuration is not None
+                and evaluation_callback is not None
                 and step % training_evaluation_configuration.interval_steps == 0
             )
             if should_run_training_evaluation:
                 if distributed_runtime.is_coordinator:
-                    if evaluation_callback is None:
-                        raise ValueError("Training evaluation requires an evaluation callback.")
                     evaluation_path = evaluation_callback(
                         step=step,
                         model=unwrap_distributed_model(model=model),

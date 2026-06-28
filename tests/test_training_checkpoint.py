@@ -10,6 +10,7 @@ from llm_lite.config.models import (
     LearningRateScheduleType,
     LinearWarmupDecayLearningRateScheduleConfiguration,
     OptimizerConfiguration,
+    TrainingEvaluationConfiguration,
 )
 from llm_lite.data.datasets import (
     PackedSequence,
@@ -153,6 +154,58 @@ def test_training_metrics_log_scheduled_learning_rate(tmp_path: Path) -> None:
             0.010000000000000002,
         ],
     )
+
+
+def test_training_evaluation_configuration_without_callback_does_not_run_inline(
+    tmp_path: Path,
+) -> None:
+    experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    training_configuration = experiment_configuration.training.model_copy(
+        update={
+            "maximum_steps": 2,
+            "checkpoint_interval_steps": 1,
+            "log_interval_steps": 1,
+            "evaluation": TrainingEvaluationConfiguration(
+                interval_steps=1,
+                evaluators=experiment_configuration.evaluation,
+            ),
+        },
+    )
+    tokenizer = train_character_tokenizer(
+        texts=["hello world\n"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    token_ids = tokenizer.encode(text="hello world\n", add_bos=True, add_eos=True)
+    packed_artifact_directory = tmp_path / "packed"
+    packed_artifact_directory.mkdir()
+    write_packed_sequence_stream(
+        sequences=[PackedSequence(token_ids=tuple(token_ids))],
+        artifact_directory=packed_artifact_directory,
+        row_length=len(token_ids),
+        maximum_shard_tokens=1024,
+    )
+    dataset = load_packed_sequence_dataset(artifact_directory=packed_artifact_directory)
+    model = DenseGpt(
+        model_configuration=experiment_configuration.model,
+        vocabulary_size=tokenizer.vocabulary_size,
+    )
+
+    result = train_model(
+        model=model,
+        dataset=dataset,
+        training_configuration=training_configuration,
+        artifact_directory=tmp_path,
+        seed=experiment_configuration.experiment.seed,
+        evaluation_callback=None,
+        objective_runner=CausalLanguageModelingObjectiveRunner(auxiliary_loss_weight=0.0),
+    )
+
+    assert result.final_step == 2
+    assert result.evaluation_path is None
 
 
 def test_load_latest_checkpoint_returns_none_when_missing(tmp_path: Path) -> None:

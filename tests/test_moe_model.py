@@ -17,7 +17,7 @@ from llm_lite.model.moe import MoeGpt
 from llm_lite.model.output import ModelOutput
 from llm_lite.model.parameters import model_parameter_summary
 from llm_lite.model.routing import RouterUsageSummary, TopKRouter
-from llm_lite.pipeline.runner import run_pipeline
+from llm_lite.scripts.run_plan import run_plan
 from llm_lite.training.checkpoint import load_latest_checkpoint, save_checkpoint
 from llm_lite.training.logging import TrainingMetricLogger
 from llm_lite.training.objectives import (
@@ -239,11 +239,7 @@ def test_tiny_pipeline_config_trains_moe_for_a_few_steps(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    exit_code = run_pipeline(
-        configuration_path=configuration_path,
-        dry_run=False,
-        force_stages=(),
-    )
+    exit_code = run_plan(configuration_paths=(configuration_path,), max_parallel_jobs=1, gpus=None)
     pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
         stage_name="pretraining",

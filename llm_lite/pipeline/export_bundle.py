@@ -1,8 +1,7 @@
-"""Export a compact, download-friendly bundle from a pipeline run."""
+"""Build compact, download-friendly bundles from completed runs."""
 
 from __future__ import annotations
 
-import argparse
 import json
 import zipfile
 from dataclasses import dataclass
@@ -216,37 +215,6 @@ def write_bundle(
         manifest_output_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_output_path.write_text(manifest_text, encoding="utf-8")
     return manifest
-
-
-def build_argument_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument(
-        "--include-all-checkpoints",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Include every pretraining checkpoint instead of only the latest one.",
-    )
-    parser.add_argument(
-        "--include-tensorboard",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Include TensorBoard event files.",
-    )
-    return parser
-
-
-def main() -> int:
-    args = build_argument_parser().parse_args()
-    write_bundle(
-        run_directory=args.run_dir,
-        output_path=args.output,
-        include_all_checkpoints=args.include_all_checkpoints,
-        include_tensorboard=args.include_tensorboard,
-    )
-    print(f"wrote {args.output}")
-    return 0
 
 
 def _add_latest_checkpoint(
@@ -528,7 +496,3 @@ def _bundle_artifact_records(entries: list[BundleEntry]) -> tuple[BundleArtifact
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

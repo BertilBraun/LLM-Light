@@ -3,7 +3,7 @@ from pathlib import Path
 
 import torch
 
-from llm_lite.pipeline.runner import run_pipeline
+from llm_lite.scripts.run_plan import run_plan
 from tests.artifact_helpers import stage_artifact_directory
 
 
@@ -29,10 +29,10 @@ def test_pipeline_creates_new_pretraining_artifact_for_longer_training(
     first_configuration_path.write_text(first_configuration_text, encoding="utf-8")
     second_configuration_path.write_text(second_configuration_text, encoding="utf-8")
 
-    first_exit_code = run_pipeline(
-        configuration_path=first_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    first_exit_code = run_plan(
+        configuration_paths=(first_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     first_pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -43,10 +43,10 @@ def test_pipeline_creates_new_pretraining_artifact_for_longer_training(
             encoding="utf-8",
         ),
     )
-    second_exit_code = run_pipeline(
-        configuration_path=second_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    second_exit_code = run_plan(
+        configuration_paths=(second_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     second_pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -96,10 +96,10 @@ def test_pipeline_creates_new_pretraining_artifact_for_training_configuration_ch
     first_configuration_path.write_text(first_configuration_text, encoding="utf-8")
     second_configuration_path.write_text(second_configuration_text, encoding="utf-8")
 
-    first_exit_code = run_pipeline(
-        configuration_path=first_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    first_exit_code = run_plan(
+        configuration_paths=(first_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     first_pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -110,10 +110,10 @@ def test_pipeline_creates_new_pretraining_artifact_for_training_configuration_ch
             encoding="utf-8",
         ),
     )
-    second_exit_code = run_pipeline(
-        configuration_path=second_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    second_exit_code = run_plan(
+        configuration_paths=(second_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     second_pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -163,10 +163,10 @@ def test_pipeline_creates_new_artifact_when_interrupted_pretraining_configuratio
     first_configuration_path.write_text(first_configuration_text, encoding="utf-8")
     second_configuration_path.write_text(second_configuration_text, encoding="utf-8")
 
-    first_exit_code = run_pipeline(
-        configuration_path=first_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    first_exit_code = run_plan(
+        configuration_paths=(first_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     first_pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -181,10 +181,10 @@ def test_pipeline_creates_new_artifact_when_interrupted_pretraining_configuratio
         json.dumps(first_pretraining_manifest, indent=2),
         encoding="utf-8",
     )
-    second_exit_code = run_pipeline(
-        configuration_path=second_configuration_path,
-        dry_run=False,
-        force_stages=(),
+    second_exit_code = run_plan(
+        configuration_paths=(second_configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     preserved_interrupted_manifest = json.loads(
         first_pretraining_manifest_path.read_text(encoding="utf-8"),
@@ -222,10 +222,10 @@ def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
     )
     configuration_path.write_text(configuration_text, encoding="utf-8")
 
-    first_exit_code = run_pipeline(
-        configuration_path=configuration_path,
-        dry_run=False,
-        force_stages=(),
+    first_exit_code = run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     pretraining_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
@@ -238,10 +238,10 @@ def test_pipeline_recovers_interrupted_pretraining_at_requested_step(
         json.dumps(pretraining_manifest, indent=2),
         encoding="utf-8",
     )
-    second_exit_code = run_pipeline(
-        configuration_path=configuration_path,
-        dry_run=False,
-        force_stages=(),
+    second_exit_code = run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
     )
     recovered_manifest = json.loads(pretraining_manifest_path.read_text(encoding="utf-8"))
 

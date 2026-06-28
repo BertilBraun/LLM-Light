@@ -10,7 +10,7 @@ HEAVY_TEST_IDS = frozenset(
         "tests/test_distributed_training.py::test_two_process_gloo_data_parallel_tiny_training_and_resume",
         "tests/test_orchestration_models.py::test_pipeline_writes_resolved_run_and_semantic_manifest",
         "tests/test_orchestration_models.py::test_run_plan_writes_raw_dataset_to_artifact_store",
-        "tests/test_orchestration_models.py::test_run_plan_accepts_parallel_sweep_configs",
+        "tests/test_orchestration_models.py::test_run_plan_accepts_parallel_configurations",
     },
 )
 

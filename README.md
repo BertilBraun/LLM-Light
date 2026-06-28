@@ -23,8 +23,8 @@ models.
   the TinyPython MoE run.
 - [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md): future work and open project
   gaps only.
-- [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md): planned artifact-store,
-  local executor, async evaluation, and sweep architecture.
+- [docs/ORCHESTRATION.md](docs/ORCHESTRATION.md): artifact-store execution,
+  local subprocess jobs, and async evaluation architecture.
 - [docs/EXTENDING.md](docs/EXTENDING.md): short guides for adding evaluators,
   dataset sources, and model architectures.
 - [docs/CODING_STANDARDS.md](docs/CODING_STANDARDS.md): local coding and testing
@@ -90,7 +90,7 @@ uv run python -m pytest
 Run the one-sentence smoke pipeline:
 
 ```bash
-uv run python -m llm_lite.scripts.run_pipeline \
+uv run python -m llm_lite.scripts.run_plan \
   --config configs/verify_one_sentence.yaml
 ```
 
@@ -103,14 +103,17 @@ uv run python -m llm_lite.scripts.generate \
   --maximum-new-tokens 20
 ```
 
-For a fresh GPU instance or reusable config-driven launch, use the training
-helper with any experiment config:
+For a fresh GPU instance, use the training helper to generate and run the
+TinyPython model sweep pilot:
 
 ```bash
-CONFIG_PATH=configs/python_moe_full.yaml \
-NPROC_PER_NODE=2 \
-GPU_IDS=0,1 \
 bash scripts/train.sh
+```
+
+To run the pilot and then the full sweep, reusing completed pilot artifacts:
+
+```bash
+SWEEP_MODE=pilot_then_full bash scripts/train.sh
 ```
 
 See [docs/TRAINING.md](docs/TRAINING.md) for full commands, including the
@@ -199,7 +202,8 @@ through the release bundle rather than committed under `runs/python_moe_full`.
 Export a compact run bundle instead:
 
 ```bash
-uv run python -m llm_lite.scripts.export_run_bundle \
-  --run-dir runs/python_moe_full \
-  --output python_moe_full_bundle.zip
+uv run python -m llm_lite.scripts.run_plan \
+  --config configs/python_moe_full.yaml \
+  --from export \
+  --to export
 ```

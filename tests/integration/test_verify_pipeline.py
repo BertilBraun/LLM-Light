@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from llm_lite.pipeline.runner import run_pipeline
+from llm_lite.scripts.run_plan import run_plan
 from tests.artifact_helpers import stage_artifact_directory
 
 
@@ -17,11 +17,7 @@ def test_verify_pipeline_reproduces_sentence(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    exit_code = run_pipeline(
-        configuration_path=configuration_path,
-        dry_run=False,
-        force_stages=(),
-    )
+    exit_code = run_plan(configuration_paths=(configuration_path,), max_parallel_jobs=1, gpus=None)
     evaluation_artifact_directory = stage_artifact_directory(
         run_directory=run_directory,
         stage_name="evaluation",

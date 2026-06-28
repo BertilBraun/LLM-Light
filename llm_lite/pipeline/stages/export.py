@@ -2,11 +2,11 @@ import shutil
 from pathlib import Path
 
 from llm_lite.config.models import ExperimentFile
+from llm_lite.pipeline.export_bundle import write_bundle
 from llm_lite.pipeline.hashing import hash_json_value
 from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName, StageOutput
 from llm_lite.pipeline.stages.base import BasePipelineStage
-from llm_lite.scripts.export_run_bundle import write_bundle
 
 EXPORT_BUNDLE_FILENAME = "bundle.zip"
 EXPORT_BUNDLE_MANIFEST_FILENAME = "bundle_manifest.json"

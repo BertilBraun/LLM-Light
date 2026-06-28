@@ -115,30 +115,17 @@ The smallest complete run trains a character-level dense GPT to reproduce
 `hello world\n`:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/verify_one_sentence.yaml
 ```
 
-Review the planned stages without execution:
-
-```bash
-python -m llm_lite.scripts.run_pipeline \
-  --config configs/verify_one_sentence.yaml \
-  --dry-run
-```
-
-Force recomputation from a stage and all downstream stages:
-
-```bash
-python -m llm_lite.scripts.run_pipeline \
-  --config configs/verify_one_sentence.yaml \
-  --force pretraining
-```
+To recompute a stage under the artifact-store executor, remove that stage's
+artifact directory and rerun the same `run_plan` command.
 
 Run only part of the pipeline:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/verify_one_sentence.yaml \
   --from tokenizer \
   --to pretraining
@@ -147,25 +134,23 @@ python -m llm_lite.scripts.run_pipeline \
 Useful integration smoke configs:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config tests/configs/verify_local_text.yaml
 
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config tests/configs/verify_byte_bpe.yaml
 ```
 
-Distributed CPU smoke, using two local `gloo` processes:
+Distributed CPU smoke, using the config's local `gloo` world size:
 
 ```bash
-torchrun --standalone --nproc_per_node=2 \
-  -m llm_lite.scripts.run_pipeline \
-  --config tests/configs/distributed_data_parallel_smoke.yaml \
-  --force
+python -m llm_lite.scripts.run_plan \
+  --config tests/configs/distributed_data_parallel_smoke.yaml
 ```
 
 Some Windows CPU-only PyTorch builds can fail in the launcher before project
 code starts because of `TCPStore` or `use_libuv` support. Linux GPU/NCCL
-training should use the same `torchrun` shape.
+training uses the same `run_plan` entry point.
 
 ## TinyPython MoE Pipeline
 
@@ -188,7 +173,7 @@ and trains a top-1 MoE GPT with a 6000-token Rust byte-level BPE tokenizer.
 Prepare all data artifacts without starting pretraining:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --to packed_dataset
 ```
@@ -196,21 +181,21 @@ python -m llm_lite.scripts.run_pipeline \
 Launch the distributed pretraining stage on two GPUs:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 \
-  -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --from pretraining \
-  --to pretraining
+  --to pretraining \
+  --gpus 0,1
 ```
 
 With `uv`:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 uv run torchrun --standalone --nproc_per_node=2 \
-  -m llm_lite.scripts.run_pipeline \
+uv run python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --from pretraining \
-  --to pretraining
+  --to pretraining \
+  --gpus 0,1
 ```
 
 The committed config represents the first training phase:
@@ -238,20 +223,32 @@ The completed TinyPython MoE artifact bundle is published as the
 Use that release bundle when inspecting the recorded run on a checkout that does
 not have the full `runs/python_moe_full` directory locally.
 
-For fresh GPU instances, `scripts/train.sh` wraps the same stage sequence for
-any config. `CONFIG_PATH` is required:
+For fresh GPU instances, `scripts/train.sh` wraps the TinyPython model sweep
+workflow. By default it checks the checkout, installs `uv` if needed, syncs
+dependencies, verifies CUDA visibility, generates the four-config pilot, and
+runs it through `run_plan` with two concurrent world-size-2 jobs on four GPUs:
 
 ```bash
-CONFIG_PATH=configs/python_moe_full.yaml \
-NPROC_PER_NODE=2 \
-GPU_IDS=0,1 \
 bash scripts/train.sh
+```
+
+Run the full sweep directly:
+
+```bash
+SWEEP_MODE=full bash scripts/train.sh
+```
+
+Run the pilot first, then regenerate the full sweep and rerun `run_plan` so the
+completed pilot artifacts are reused:
+
+```bash
+SWEEP_MODE=pilot_then_full bash scripts/train.sh
 ```
 
 Useful overrides:
 
 ```bash
-PREPARE_DATA=0 RUN_EVALUATION=0 CONFIG_PATH=configs/python_moe_full.yaml bash scripts/train.sh
+GPU_IDS=0,1,2,3 MAX_PARALLEL_JOBS=2 SWEEP_MODE=pilot_then_full bash scripts/train.sh
 ```
 
 ## Evaluation
@@ -259,11 +256,10 @@ PREPARE_DATA=0 RUN_EVALUATION=0 CONFIG_PATH=configs/python_moe_full.yaml bash sc
 Run the configured evaluation stage for an existing run:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --from evaluation \
-  --to evaluation \
-  --force evaluation
+  --to evaluation
 ```
 
 The Python MoE config evaluates:
@@ -288,7 +284,7 @@ and mirrored into the run TensorBoard view.
 
 ## Python Model Sweep
 
-The planned dense-versus-MoE TinyPython sweep is described in:
+The dense-versus-MoE TinyPython sweep is described in:
 
 ```text
 docs/PYTHON_MODEL_SWEEP.md
@@ -395,14 +391,6 @@ Do not commit full run directories, checkpoints, packed shards, or TensorBoard
 event logs to source control. `run_plan` includes `export` as the final stage
 and writes the default bundle to `runs/<experiment>/export/bundle.zip`.
 
-Export an existing run explicitly:
-
-```bash
-python -m llm_lite.scripts.export_run_bundle \
-  --run-dir runs/python_moe_full \
-  --output python_moe_full_bundle.zip
-```
-
 The default bundle includes:
 
 - `resolved_config.json`
@@ -422,23 +410,10 @@ The published TinyPython MoE result is available as the `Python-Run-V1` GitHub
 release bundle. Full run directories are intentionally kept out of source
 control.
 
-Exclude TensorBoard event files:
-
-```bash
-python -m llm_lite.scripts.export_run_bundle \
-  --run-dir runs/python_moe_full \
-  --output python_moe_full_bundle.zip \
-  --no-include-tensorboard
-```
-
-Include every checkpoint instead of only the latest checkpoint:
-
-```bash
-python -m llm_lite.scripts.export_run_bundle \
-  --run-dir runs/python_moe_full \
-  --output python_moe_full_all_checkpoints.zip \
-  --include-all-checkpoints
-```
+Control bundle contents in the experiment config's `export` block:
+`include_tensorboard` controls TensorBoard event files, and
+`include_all_checkpoints` controls whether every checkpoint or only the latest
+checkpoint is bundled.
 
 ## Packed Dataset Benchmark
 

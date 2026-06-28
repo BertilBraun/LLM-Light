@@ -4,11 +4,11 @@ from pathlib import Path
 
 from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.orchestration.models import resolve_run
+from llm_lite.pipeline.export_bundle import collect_bundle_entries, write_bundle
 from llm_lite.pipeline.registry import ArtifactDirectory, ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.pipeline.stages.export import ExportStage
-from llm_lite.scripts.export_run_bundle import collect_bundle_entries, write_bundle
 
 
 def test_collect_bundle_entries_includes_latest_sharded_checkpoint_only(tmp_path: Path) -> None:

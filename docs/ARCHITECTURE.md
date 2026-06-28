@@ -25,7 +25,8 @@ evaluation
 
 Each stage receives validated configuration, checks upstream artifacts, writes
 its own manifest, and can be skipped when its existing output is compatible.
-`--force <stage>` recomputes that stage and every downstream stage.
+Recomputation is handled by removing the relevant artifact directory and
+rerunning the same plan.
 
 `--from` and `--to` make it possible to run a subset of stages, for example
 preparing packed data before a GPU training launch.
@@ -56,10 +57,9 @@ runs/<experiment>/
       report.json
 ```
 
-Large artifacts stay in `runs/` or external storage. Use
-`llm_lite.scripts.export_run_bundle` to produce a compact archive containing
-the config, manifests, tokenizer, metrics, evaluation reports, TensorBoard logs,
-and latest checkpoint.
+Large artifacts stay in `runs/` or external storage. The `export` stage writes
+a compact archive containing the config, manifests, tokenizer, metrics,
+evaluation reports, TensorBoard logs, and latest checkpoint.
 
 ## Configuration
 

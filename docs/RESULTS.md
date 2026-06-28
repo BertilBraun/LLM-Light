@@ -177,7 +177,7 @@ This parses and executes, but it preserves digits instead of replacing them with
 Prepare data artifacts:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --to packed_dataset
 ```
@@ -185,21 +185,20 @@ python -m llm_lite.scripts.run_pipeline \
 Run distributed pretraining on two GPUs:
 
 ```bash
-CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc_per_node=2 \
-  -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --from pretraining \
-  --to pretraining
+  --to pretraining \
+  --gpus 0,1
 ```
 
 Run final evaluation:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/python_moe_full.yaml \
   --from evaluation \
-  --to evaluation \
-  --force evaluation
+  --to evaluation
 ```
 
 Generate a sample:
@@ -215,9 +214,10 @@ python -m llm_lite.scripts.generate \
 Export the run:
 
 ```bash
-python -m llm_lite.scripts.export_run_bundle \
-  --run-dir runs/python_moe_full \
-  --output python_moe_full_bundle.zip
+python -m llm_lite.scripts.run_plan \
+  --config configs/python_moe_full.yaml \
+  --from export \
+  --to export
 ```
 
 The published `Python-Run-V1` bundle was produced from this run and should be
@@ -243,7 +243,7 @@ Purpose:
 Command:
 
 ```bash
-python -m llm_lite.scripts.run_pipeline \
+python -m llm_lite.scripts.run_plan \
   --config configs/verify_one_sentence.yaml
 ```
 

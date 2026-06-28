@@ -12,10 +12,9 @@ from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_event_is_supported_for_evaluation,
 )
 from llm_lite.orchestration.models import ArtifactStorePaths, resolve_run
-from llm_lite.pipeline.runner import run_pipeline
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
-from llm_lite.scripts.run_plan import GpuAllocation, GpuPool, _job_environment
+from llm_lite.scripts.run_plan import GpuAllocation, GpuPool, _job_environment, run_plan
 
 
 def test_gpu_pool_allocates_non_overlapping_devices() -> None:
@@ -125,10 +124,10 @@ def test_pipeline_writes_resolved_run_and_semantic_manifest(tmp_path: Path) -> N
         encoding="utf-8",
     )
 
-    exit_code = run_pipeline(
-        configuration_path=configuration_path,
-        dry_run=False,
-        force_stages=(),
+    exit_code = run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
         to_stage=StageName.RAW_DATASET,
     )
 
@@ -196,7 +195,7 @@ def test_run_plan_writes_raw_dataset_to_artifact_store(tmp_path: Path) -> None:
     assert artifact_manifest["status"] == "complete"
 
 
-def test_run_plan_accepts_parallel_sweep_configs(tmp_path: Path) -> None:
+def test_run_plan_accepts_parallel_configurations(tmp_path: Path) -> None:
     first_run_directory = tmp_path / "runs" / "first"
     second_run_directory = tmp_path / "runs" / "second"
     first_configuration_path = tmp_path / "first.yaml"

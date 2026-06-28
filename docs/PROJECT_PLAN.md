@@ -41,7 +41,7 @@ deduplicated artifact store managed by a local plan executor.
 
 ### Dense-Versus-MoE Comparison
 
-The planned TinyPython sweep is documented in
+The TinyPython sweep is documented in
 [PYTHON_MODEL_SWEEP.md](PYTHON_MODEL_SWEEP.md). It creates dense GPT baselines
 against small MoE variants and one dense model with an active parameter count
 near the existing TinyPython MoE result.

@@ -1,10 +1,10 @@
-# Orchestration Plan
+# Orchestration
 
-This document sketches a future replacement for the current sequential
-`run_pipeline` implementation. It is a design target, not implemented behavior.
+This document describes the local artifact-store executor used by `run_plan`
+and its per-stage subprocess entry point, `run_job`.
 
 The goal is a practical local orchestration layer for rented one-node compute
-runs with two to four GPUs. It should improve artifact reuse, sweeps, live
+runs with two to four GPUs. It improves artifact reuse, multi-config runs, live
 TensorBoard inspection, and asynchronous evaluation without reimplementing a
 cluster scheduler such as Slurm, Kubernetes, or Ray.
 
@@ -13,7 +13,7 @@ cluster scheduler such as Slurm, Kubernetes, or Ray.
 - Keep YAML experiment configs as the primary user interface.
 - Treat every pipeline stage as a job with dependencies, resources, and a
   content fingerprint.
-- Deduplicate artifacts across runs and parameter sweeps.
+- Deduplicate artifacts across runs.
 - Keep `runs/<experiment>/tensorboard` as the main inspection surface.
 - Support live TensorBoard inspection while long jobs are still running.
 - Support asynchronous evaluation jobs triggered by checkpoints.
@@ -28,8 +28,7 @@ cluster scheduler such as Slurm, Kubernetes, or Ray.
 - No worker registration, REST API, web dashboard, or service database.
 - No multi-node training requirement in the first version.
 - No Kubernetes, Slurm, Ray, or external scheduling dependency.
-- No backward compatibility requirement for the current `run_pipeline`
-  internals.
+- No backward compatibility with the removed `run_pipeline` entry point.
 - No complex workflow language for arbitrary Python pipeline programs.
 - No hard resource isolation. CPU and GPU requests are a scheduling contract,
   not a sandbox.
@@ -289,11 +288,11 @@ python -m llm_lite.scripts.run_plan \
   --gpus 0,1
 ```
 
-For a sweep:
+For a multi-config run:
 
 ```bash
 python -m llm_lite.scripts.run_plan \
-  --config configs/generated/small_models/*.yaml \
+  --config configs/experiment_a.yaml configs/experiment_b.yaml \
   --max-parallel-jobs 2 \
   --gpus 0,1,2,3
 ```
@@ -518,57 +517,13 @@ pretraining/base
 
 `evaluation/base` can run while `post_training/dpo` is already running.
 
-## Parameter Sweeps
-
-Sweeps should generate ordinary config files. They do not need a special runtime
-format.
-
-Example workflow:
-
-```bash
-python -m llm_lite.scripts.generate_sweep_configs \
-  --base-config configs/python_moe_full.yaml \
-  --sweep configs/sweeps/small_models.yaml \
-  --output-dir configs/generated/small_models
-
-python -m llm_lite.scripts.run_plan \
-  --config configs/generated/small_models/*.yaml \
-  --max-parallel-jobs 2 \
-  --gpus 0,1,2,3
-```
-
-A sweep definition can stay simple:
-
-```yaml
-name_template: "python_small_d{model.dimension}_l{model.layers}"
-grid:
-  model.dimension: [128, 192]
-  model.layers: [6, 8]
-  model.expert_feed_forward_dimension: [512, 768]
-```
-
-The generated configs should be normal experiment configs with unique
-`experiment.name` and `experiment.output_dir` values. Artifact deduplication
-comes from fingerprints, not from sweep-specific logic.
-
 ## Migration Plan
 
 The intended migration is a clean rewrite of orchestration, not strict backward
 compatibility with the old runner internals.
 
-Suggested phases:
-
-1. Add this design document and keep the existing runner unchanged.
-2. Add artifact-store path resolution and run-view types.
-3. Add dual TensorBoard writer support.
-4. Implement resolved-run writing and make `run_job` consume
-   `resolved_config.json`.
-5. Implement `run_plan` as a local executor with dependency scheduling.
-6. Move cheap stages to artifact-store-first execution.
-7. Move pretraining and evaluation to job execution.
-8. Add async checkpoint evaluation.
-9. Add sweep config generation.
-10. Replace `run_pipeline` with `run_plan` for normal usage.
+The old `run_pipeline` entry point has been removed. `run_plan` is the normal
+executor, and `run_job` is the narrow per-stage subprocess entry point.
 
 The final command for the common rented-node case should remain simple:
 
@@ -577,5 +532,5 @@ python -m llm_lite.scripts.run_plan --config configs/python_moe_small.yaml
 ```
 
 This command plans the run, executes local subprocess jobs, materializes
-run-centric TensorBoard logs, and exits when the submitted run or sweep is
+run-centric TensorBoard logs, and exits when the submitted run or config set is
 complete.

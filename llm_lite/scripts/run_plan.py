@@ -35,6 +35,7 @@ from llm_lite.pipeline.logging import (
     PipelineEventType,
 )
 from llm_lite.pipeline.progress import console_log
+from llm_lite.pipeline.registry import ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES, ORDERED_STAGE_NAMES
 from llm_lite.training.checkpoint import latest_checkpoint
@@ -226,7 +227,16 @@ def _execute_resolved_run(
     write_resolved_configuration(resolved_run=resolved_run)
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
     event_logger = PipelineEventLogger(run_directory=resolved_run.run_directory)
-    completed_stage_names: list[StageName] = []
+    completed_stage_names = list(
+        _complete_stage_names_from_artifact_store(
+            resolved_run=resolved_run,
+            registry=registry,
+        ),
+    )
+    write_run_manifest(
+        resolved_run=resolved_run,
+        completed_stage_names=tuple(completed_stage_names),
+    )
     for planned_artifact in resolved_run.artifacts:
         if planned_artifact.stage_name not in selected_stage_names:
             continue
@@ -239,7 +249,10 @@ def _execute_resolved_run(
                 stage_name=planned_artifact.stage_name,
                 message="compatible artifact found",
             )
-            completed_stage_names.append(planned_artifact.stage_name)
+            _append_missing_stage_name(
+                completed_stage_names=completed_stage_names,
+                stage_name=planned_artifact.stage_name,
+            )
             copy_stage_tensorboard_to_run_view(
                 resolved_run=resolved_run,
                 stage_name=planned_artifact.stage_name,
@@ -256,7 +269,10 @@ def _execute_resolved_run(
             event_logger=event_logger,
             max_parallel_jobs=max_parallel_jobs,
         )
-        completed_stage_names.append(planned_artifact.stage_name)
+        _append_missing_stage_name(
+            completed_stage_names=completed_stage_names,
+            stage_name=planned_artifact.stage_name,
+        )
         copy_stage_tensorboard_to_run_view(
             resolved_run=resolved_run,
             stage_name=planned_artifact.stage_name,
@@ -265,6 +281,26 @@ def _execute_resolved_run(
             resolved_run=resolved_run,
             completed_stage_names=tuple(completed_stage_names),
         )
+
+
+def _complete_stage_names_from_artifact_store(
+    resolved_run: ResolvedRun,
+    registry: ArtifactRegistry,
+) -> tuple[StageName, ...]:
+    completed_stage_names: list[StageName] = []
+    for planned_artifact in resolved_run.artifacts:
+        manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
+        if complete_manifest_matches(manifest=manifest, planned_artifact=planned_artifact):
+            completed_stage_names.append(planned_artifact.stage_name)
+    return tuple(completed_stage_names)
+
+
+def _append_missing_stage_name(
+    completed_stage_names: list[StageName],
+    stage_name: StageName,
+) -> None:
+    if stage_name not in completed_stage_names:
+        completed_stage_names.append(stage_name)
 
 
 def _run_missing_artifact(

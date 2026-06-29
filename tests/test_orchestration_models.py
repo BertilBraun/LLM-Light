@@ -12,6 +12,11 @@ from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_event_is_supported_for_evaluation,
 )
 from llm_lite.orchestration.models import ArtifactStorePaths, ResolvedRun, resolve_run
+from llm_lite.orchestration.runtime import (
+    artifact_registry_for_resolved_run,
+    parent_fingerprints,
+    write_run_manifest,
+)
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.scripts.run_plan import (
@@ -19,6 +24,7 @@ from llm_lite.scripts.run_plan import (
     GpuAllocation,
     GpuPool,
     _checkpoint_evaluation_submissions,
+    _complete_stage_names_from_artifact_store,
     _job_environment,
     _run_checkpoint_evaluation_job,
     run_plan,
@@ -256,6 +262,62 @@ def test_run_plan_accepts_parallel_configurations(tmp_path: Path) -> None:
 
     assert completed_process.returncode == 0
     assert first_manifest["artifacts"]["raw_dataset"] == second_manifest["artifacts"]["raw_dataset"]
+
+
+def test_run_manifest_preserves_complete_artifacts_for_partial_stage_run(
+    tmp_path: Path,
+) -> None:
+    base_experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    experiment_configuration = base_experiment_configuration.model_copy(
+        update={
+            "experiment": base_experiment_configuration.experiment.model_copy(
+                update={"output_dir": tmp_path / "run"},
+            ),
+        },
+    )
+    resolved_run = resolve_run(
+        experiment_configuration=experiment_configuration,
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+    registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
+    for stage_name in (StageName.PRETRAINING, StageName.EVALUATION):
+        planned_artifact = resolved_run.artifact_for_stage(stage_name=stage_name)
+        registry.write_complete_manifest(
+            artifact_type=stage_name.value,
+            fingerprint=planned_artifact.fingerprint.value,
+            configuration_hash=planned_artifact.configuration_hash,
+            parent_hashes=parent_fingerprints(planned_artifact=planned_artifact),
+            contract_version=planned_artifact.contract_version,
+            files={},
+            metrics={},
+        )
+    resolved_run.run_directory.mkdir(parents=True, exist_ok=True)
+    resolved_run.run_manifest_path.write_text(
+        json.dumps({"experiment": "verify_one_sentence", "artifacts": {"export": "stale"}}),
+        encoding="utf-8",
+    )
+
+    completed_stage_names = _complete_stage_names_from_artifact_store(
+        resolved_run=resolved_run,
+        registry=registry,
+    )
+    write_run_manifest(
+        resolved_run=resolved_run,
+        completed_stage_names=completed_stage_names,
+    )
+
+    run_manifest = json.loads(resolved_run.run_manifest_path.read_text(encoding="utf-8"))
+
+    assert run_manifest["artifacts"] == {
+        "pretraining": resolved_run.artifact_for_stage(
+            stage_name=StageName.PRETRAINING,
+        ).fingerprint.value,
+        "evaluation": resolved_run.artifact_for_stage(
+            stage_name=StageName.EVALUATION,
+        ).fingerprint.value,
+    }
 
 
 def test_checkpoint_evaluation_artifact_uses_checkpoint_step_fingerprint(

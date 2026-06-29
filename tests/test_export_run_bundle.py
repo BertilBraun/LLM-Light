@@ -122,6 +122,74 @@ def test_collect_bundle_entries_prefers_latest_post_training_checkpoint(
     assert "artifacts/pretraining/checkpoints/latest.pt" not in archive_paths
 
 
+def test_collect_bundle_entries_includes_related_checkpoint_evaluation_artifacts(
+    tmp_path: Path,
+) -> None:
+    run_directory = tmp_path / "run"
+    artifact_store_directory = tmp_path / "artifact_store"
+    pretraining_fingerprint = "sha256:pretraining"
+    tokenizer_fingerprint = "sha256:tokenizer"
+    final_evaluation_fingerprint = "sha256:final"
+    checkpoint_evaluation_fingerprint = "sha256:checkpoint_eval"
+    checkpoint_evaluation_directory = (
+        artifact_store_directory
+        / "evaluation"
+        / checkpoint_evaluation_fingerprint.replace(":", "_")
+    )
+    final_evaluation_directory = (
+        artifact_store_directory / "evaluation" / final_evaluation_fingerprint.replace(":", "_")
+    )
+    _write(
+        run_directory / "run_manifest.json",
+        json.dumps(
+            {
+                "experiment": "run",
+                "artifacts": {
+                    "pretraining": pretraining_fingerprint,
+                    "tokenizer": tokenizer_fingerprint,
+                    "evaluation": final_evaluation_fingerprint,
+                },
+            },
+        ),
+    )
+    _write(
+        checkpoint_evaluation_directory / "manifest.json",
+        json.dumps(
+            {
+                "stage_name": "evaluation",
+                "fingerprint": checkpoint_evaluation_fingerprint,
+                "artifact_version": 1,
+                "status": "complete",
+                "created_at": "2026-06-29T00:00:00Z",
+                "completed_at": "2026-06-29T00:00:01Z",
+                "configuration_hash": "sha256:configuration",
+                "contract_version": 1,
+                "parents": {
+                    "pretraining": pretraining_fingerprint,
+                    "tokenizer": tokenizer_fingerprint,
+                },
+                "files": {"report": "report.json", "tensorboard": "tensorboard"},
+                "metrics": {"checkpoint_step": 500},
+            },
+        ),
+    )
+    _write(checkpoint_evaluation_directory / "report.json", "{}")
+    _write(checkpoint_evaluation_directory / "tensorboard" / "events.out.tfevents.test", "event")
+    _write(final_evaluation_directory / "manifest.json", "{}")
+    _write(final_evaluation_directory / "report.json", "{}")
+
+    entries = collect_bundle_entries(run_directory=run_directory, include_tensorboard=True)
+    archive_paths = {entry.archive_path.as_posix() for entry in entries}
+
+    assert "artifacts/evaluation/sha256_checkpoint_eval/manifest.json" in archive_paths
+    assert "artifacts/evaluation/sha256_checkpoint_eval/report.json" in archive_paths
+    assert (
+        "artifacts/evaluation/sha256_checkpoint_eval/tensorboard/events.out.tfevents.test"
+        in archive_paths
+    )
+    assert "artifacts/evaluation/sha256_final/report.json" not in archive_paths
+
+
 def test_export_stage_writes_cacheable_artifact_and_configured_bundle(tmp_path: Path) -> None:
     run_directory = tmp_path / "runs" / "verify_one_sentence"
     base_experiment_configuration = load_experiment_configuration(

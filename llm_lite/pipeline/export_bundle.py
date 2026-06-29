@@ -8,13 +8,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from llm_lite.orchestration.models import (
     ArtifactFingerprint,
     ArtifactStorePaths,
     RunManifest,
 )
+from llm_lite.pipeline.artifact import ArtifactManifest, ArtifactStatus
 from llm_lite.pipeline.stage import StageName
 
 
@@ -103,6 +104,12 @@ def collect_bundle_entries(
         artifact_store_paths=artifact_store_paths,
         stage_name=StageName.EVALUATION,
         relative_path=Path("report.json"),
+    )
+    _add_related_evaluation_artifacts(
+        entries=entries,
+        run_manifest=run_manifest,
+        artifact_store_paths=artifact_store_paths,
+        include_tensorboard=include_tensorboard,
     )
     _add_stage_file(
         entries=entries,
@@ -393,6 +400,143 @@ def _add_artifact_file(
             / stage_name.value
             / path.relative_to(artifact_directory),
             artifact_stage=stage_name.value,
+            artifact_fingerprint=artifact_fingerprint,
+        ),
+    )
+
+
+def _add_related_evaluation_artifacts(
+    entries: list[BundleEntry],
+    run_manifest: RunManifest,
+    artifact_store_paths: ArtifactStorePaths,
+    include_tensorboard: bool,
+) -> None:
+    evaluation_store_directory = artifact_store_paths.root_directory / StageName.EVALUATION.value
+    if not evaluation_store_directory.exists():
+        return
+    final_evaluation_fingerprint = run_manifest.artifacts.get(StageName.EVALUATION.value)
+    for manifest_path in sorted(evaluation_store_directory.glob("*/manifest.json")):
+        try:
+            manifest = ArtifactManifest.model_validate_json(
+                manifest_path.read_text(encoding="utf-8"),
+            )
+        except ValidationError:
+            continue
+        if not _evaluation_artifact_belongs_to_run(
+            manifest=manifest,
+            run_manifest=run_manifest,
+            final_evaluation_fingerprint=final_evaluation_fingerprint,
+        ):
+            continue
+        artifact_directory = manifest_path.parent
+        fingerprint_directory = Path(manifest.fingerprint.replace(":", "_"))
+        _add_related_evaluation_file(
+            entries=entries,
+            artifact_directory=artifact_directory,
+            fingerprint_directory=fingerprint_directory,
+            relative_path=Path("manifest.json"),
+            artifact_fingerprint=manifest.fingerprint,
+        )
+        _add_related_evaluation_file(
+            entries=entries,
+            artifact_directory=artifact_directory,
+            fingerprint_directory=fingerprint_directory,
+            relative_path=Path("job.log"),
+            artifact_fingerprint=manifest.fingerprint,
+        )
+        _add_related_evaluation_file(
+            entries=entries,
+            artifact_directory=artifact_directory,
+            fingerprint_directory=fingerprint_directory,
+            relative_path=Path("report.json"),
+            artifact_fingerprint=manifest.fingerprint,
+        )
+        if include_tensorboard:
+            _add_related_evaluation_tree(
+                entries=entries,
+                artifact_directory=artifact_directory,
+                fingerprint_directory=fingerprint_directory,
+                relative_directory=Path("tensorboard"),
+                artifact_fingerprint=manifest.fingerprint,
+            )
+
+
+def _evaluation_artifact_belongs_to_run(
+    manifest: ArtifactManifest,
+    run_manifest: RunManifest,
+    final_evaluation_fingerprint: str | None,
+) -> bool:
+    if manifest.stage_name != StageName.EVALUATION.value:
+        return False
+    if manifest.status is not ArtifactStatus.COMPLETE:
+        return False
+    if manifest.fingerprint == final_evaluation_fingerprint:
+        return False
+    pretraining_fingerprint = run_manifest.artifacts.get(StageName.PRETRAINING.value)
+    post_training_fingerprint = run_manifest.artifacts.get(StageName.POST_TRAINING.value)
+    return (
+        pretraining_fingerprint is not None and pretraining_fingerprint in manifest.parents.values()
+    ) or (
+        post_training_fingerprint is not None
+        and post_training_fingerprint in manifest.parents.values()
+    )
+
+
+def _add_related_evaluation_tree(
+    entries: list[BundleEntry],
+    artifact_directory: Path,
+    fingerprint_directory: Path,
+    relative_directory: Path,
+    artifact_fingerprint: str,
+) -> None:
+    directory = artifact_directory / relative_directory
+    if not directory.exists() or not directory.is_dir():
+        return
+    for path in directory.rglob("*"):
+        if path.is_file():
+            _add_related_evaluation_path(
+                entries=entries,
+                artifact_directory=artifact_directory,
+                fingerprint_directory=fingerprint_directory,
+                path=path,
+                artifact_fingerprint=artifact_fingerprint,
+            )
+
+
+def _add_related_evaluation_file(
+    entries: list[BundleEntry],
+    artifact_directory: Path,
+    fingerprint_directory: Path,
+    relative_path: Path,
+    artifact_fingerprint: str,
+) -> None:
+    path = artifact_directory / relative_path
+    if not path.exists() or not path.is_file():
+        return
+    _add_related_evaluation_path(
+        entries=entries,
+        artifact_directory=artifact_directory,
+        fingerprint_directory=fingerprint_directory,
+        path=path,
+        artifact_fingerprint=artifact_fingerprint,
+    )
+
+
+def _add_related_evaluation_path(
+    entries: list[BundleEntry],
+    artifact_directory: Path,
+    fingerprint_directory: Path,
+    path: Path,
+    artifact_fingerprint: str,
+) -> None:
+    entries.append(
+        BundleEntry(
+            source_path=path.resolve(),
+            archive_path=Path("artifacts")
+            / StageName.EVALUATION.value
+            / fingerprint_directory
+            / path.relative_to(artifact_directory),
+            artifact_stage=StageName.EVALUATION.value,
             artifact_fingerprint=artifact_fingerprint,
         ),
     )

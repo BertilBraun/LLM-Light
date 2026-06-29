@@ -361,6 +361,7 @@ class RotarySelfAttention(nn.Module):
         self.attention_heads = model_configuration.attention_heads
         self.head_dimension = model_configuration.dimension // model_configuration.attention_heads
         self.dropout = model_configuration.dropout
+        self.query_key_normalization = model_configuration.query_key_normalization
         self.query_key_value_projection = nn.Linear(
             model_configuration.dimension,
             3 * model_configuration.dimension,
@@ -380,6 +381,10 @@ class RotarySelfAttention(nn.Module):
         query_states, key_states, value_states = self._project_states(hidden_states=hidden_states)
         query_states = self.rotary_embedding(states=query_states, positions=positions)
         key_states = self.rotary_embedding(states=key_states, positions=positions)
+        query_states, key_states = self._normalize_query_key_states(
+            query_states=query_states,
+            key_states=key_states,
+        )
         attention_mask = _causal_attention_mask(
             sequence_length=hidden_states.shape[1],
             device=hidden_states.device,
@@ -403,6 +408,10 @@ class RotarySelfAttention(nn.Module):
         query_states, key_states, value_states = self._project_states(hidden_states=hidden_states)
         query_states = self.rotary_embedding(states=query_states, positions=positions)
         key_states = self.rotary_embedding(states=key_states, positions=positions)
+        query_states, key_states = self._normalize_query_key_states(
+            query_states=query_states,
+            key_states=key_states,
+        )
         cached_key_states = torch.cat((inference_cache.key_states, key_states), dim=2)
         cached_value_states = torch.cat((inference_cache.value_states, value_states), dim=2)
         attention_mask = _causal_cache_mask(
@@ -448,6 +457,18 @@ class RotarySelfAttention(nn.Module):
             _split_heads(states=query_states, attention_heads=self.attention_heads),
             _split_heads(states=key_states, attention_heads=self.attention_heads),
             _split_heads(states=value_states, attention_heads=self.attention_heads),
+        )
+
+    def _normalize_query_key_states(
+        self,
+        query_states: torch.Tensor,
+        key_states: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self.query_key_normalization:
+            return query_states, key_states
+        return (
+            torch_functional.normalize(query_states, dim=-1),
+            torch_functional.normalize(key_states, dim=-1),
         )
 
 

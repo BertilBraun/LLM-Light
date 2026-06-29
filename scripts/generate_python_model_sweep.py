@@ -28,9 +28,9 @@ from llm_lite.model.parameters import ModelParameterSummary, model_parameter_sum
 
 DEFAULT_BASE_CONFIGURATION_PATH = Path("configs/python_moe_full.yaml")
 DEFAULT_OUTPUT_DIRECTORY = Path("configs/generated/python_model_sweep")
-SMALL_MAXIMUM_STEPS = 1500
-LARGE_MAXIMUM_STEPS = 3750
-BATCH_SIZE_SEQUENCES = 512
+SMALL_MAXIMUM_STEPS = 15000
+LARGE_MAXIMUM_STEPS = 15000  # 5000 for 512 batch size
+BATCH_SIZE_SEQUENCES = 256  # Note 512 on 4090 possible
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.1
 MAX_CHECKPOINTS = 2

@@ -69,6 +69,19 @@ def test_modern_dense_parameter_summary_reports_all_parameters_active() -> None:
     assert parameter_summary.trainable_parameters == parameter_summary.trainable_active_parameters
 
 
+def test_modern_dense_qk_normalization_forward_output_shape() -> None:
+    torch.manual_seed(102)
+    model = build_model(
+        model_configuration=_modern_dense_configuration(query_key_normalization=True),
+        vocabulary_size=19,
+    )
+    token_ids = torch.tensor([[1, 2, 3, 4], [4, 3, 2, 1]], dtype=torch.long)
+
+    model_output = model(token_ids)
+
+    assert model_output.logits.shape == (2, 4, 19)
+
+
 def test_modern_dense_cached_forward_matches_full_sequence_forward() -> None:
     torch.manual_seed(103)
     tokenizer = train_character_tokenizer(
@@ -79,6 +92,23 @@ def test_modern_dense_cached_forward_matches_full_sequence_forward() -> None:
     )
     model = ModernDenseGpt(
         model_configuration=_modern_dense_configuration(),
+        vocabulary_size=tokenizer.vocabulary_size,
+    )
+    model.eval()
+
+    _assert_cached_forward_matches_full_forward(model=model, tokenizer_text="hello world")
+
+
+def test_modern_dense_qk_normalization_cached_forward_matches_full_sequence_forward() -> None:
+    torch.manual_seed(104)
+    tokenizer = train_character_tokenizer(
+        texts=["hello world"],
+        add_bos_token=True,
+        add_eos_token=True,
+        add_pad_token=True,
+    )
+    model = ModernDenseGpt(
+        model_configuration=_modern_dense_configuration(query_key_normalization=True),
         vocabulary_size=tokenizer.vocabulary_size,
     )
     model.eval()
@@ -170,13 +200,16 @@ def _assert_cached_forward_matches_full_forward(
     )
 
 
-def _modern_dense_configuration() -> ModernDenseGptConfiguration:
+def _modern_dense_configuration(
+    query_key_normalization: bool = False,
+) -> ModernDenseGptConfiguration:
     return ModernDenseGptConfiguration(
         type=ModelType.MODERN_DENSE_GPT,
         dimension=16,
         layers=2,
         attention_heads=4,
         feed_forward_dimension=32,
+        query_key_normalization=query_key_normalization,
         dropout=0.0,
         tie_embeddings=False,
     )

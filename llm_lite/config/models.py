@@ -360,6 +360,7 @@ class ModernDenseGptConfiguration(Configuration):
     feed_forward_dimension: int = Field(gt=0)
     rope_base: float = Field(default=10000.0, gt=0.0)
     normalization_epsilon: float = Field(default=1e-5, gt=0.0)
+    query_key_normalization: bool = False
     dropout: float = Field(default=0.0, ge=0.0, le=1.0)
     tie_embeddings: bool = True
 
@@ -374,6 +375,7 @@ class ModernMoeGptConfiguration(Configuration):
     router_top_k: int = Field(ge=1)
     rope_base: float = Field(default=10000.0, gt=0.0)
     normalization_epsilon: float = Field(default=1e-5, gt=0.0)
+    query_key_normalization: bool = False
     dropout: float = Field(default=0.0, ge=0.0, le=1.0)
     tie_embeddings: bool = True
 

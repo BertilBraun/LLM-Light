@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img">
+<style>
+.title { font: 700 18px Arial, sans-serif; fill: #171a20; }
+.axis-label { font: 12px Arial, sans-serif; fill: #333843; }
+.tick { font: 11px Arial, sans-serif; fill: #586070; }
+.legend { font: 12px Arial, sans-serif; fill: #232832; }
+.point-label { font: 10px Arial, sans-serif; fill: #20242c; }
+.x-label { font: 10px Arial, sans-serif; fill: #20242c; }
+</style>
+<rect x="0" y="0" width="980" height="560" fill="#ffffff" />
+<text x="490.0" y="30" text-anchor="middle" class="title">Active Parameters vs Final Pass Rate</text>
+<rect x="76" y="54" width="868" height="436" fill="#fbfbfd" stroke="#d5d9e2" />
+<text x="510.0" y="542" text-anchor="middle" class="axis-label">Active parameters (log10)</text>
+<text x="20" y="272.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 272.0)">Final pass rate (%)</text>
+<line x1="76" y1="490.0" x2="944" y2="490.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="494.0" text-anchor="end" class="tick">0.0</text>
+<line x1="76" y1="402.8" x2="944" y2="402.8" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="406.8" text-anchor="end" class="tick">18.3</text>
+<line x1="76" y1="315.6" x2="944" y2="315.6" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="319.6" text-anchor="end" class="tick">36.7</text>
+<line x1="76" y1="228.4" x2="944" y2="228.4" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="232.4" text-anchor="end" class="tick">55.0</text>
+<line x1="76" y1="141.2" x2="944" y2="141.2" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="145.2" text-anchor="end" class="tick">73.4</text>
+<line x1="76" y1="54.0" x2="944" y2="54.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="58.0" text-anchor="end" class="tick">91.7</text>
+<line x1="76.0" y1="54" x2="76.0" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="76.0" y="510" text-anchor="middle" class="tick">6</text>
+<line x1="249.6" y1="54" x2="249.6" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="249.6" y="510" text-anchor="middle" class="tick">6</text>
+<line x1="423.2" y1="54" x2="423.2" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="423.2" y="510" text-anchor="middle" class="tick">6</text>
+<line x1="596.8" y1="54" x2="596.8" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="596.8" y="510" text-anchor="middle" class="tick">7</text>
+<line x1="770.4" y1="54" x2="770.4" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="770.4" y="510" text-anchor="middle" class="tick">7</text>
+<line x1="944.0" y1="54" x2="944.0" y2="490" stroke="#eef0f4" stroke-width="1" />
+<text x="944.0" y="510" text-anchor="middle" class="tick">7</text>
+<circle cx="905.2" cy="92.0" r="8.3" fill="#2f6fbb" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="905.2" y="78.7" class="point-label" text-anchor="middle">dense-active-9m6</text>
+<circle cx="139.4" cy="429.9" r="4.4" fill="#d98634" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.4" y="420.5" class="point-label" text-anchor="middle">dense-deep</text>
+<circle cx="138.9" cy="475.4" r="4.4" fill="#3a8f5c" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="138.9" y="466.0" class="point-label" text-anchor="middle">dense-wide</text>
+<circle cx="114.8" cy="226.9" r="4.3" fill="#9b59b6" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="114.8" y="217.6" class="point-label" text-anchor="middle">modern-moe-deep</text>
+<circle cx="139.9" cy="435.5" r="4.4" fill="#c44e52" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.9" y="426.1" class="point-label" text-anchor="middle">moe-deep-cosine</text>
+<circle cx="139.9" cy="419.1" r="4.4" fill="#5f7f8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.9" y="409.7" class="point-label" text-anchor="middle">moe-deep-fim</text>
+<circle cx="139.9" cy="452.9" r="4.4" fill="#b39c2f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.9" y="443.5" class="point-label" text-anchor="middle">moe-deep-linear</text>
+<circle cx="139.9" cy="381.0" r="4.4" fill="#2a9d8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.9" y="371.6" class="point-label" text-anchor="middle">moe-deep</text>
+<circle cx="139.2" cy="462.3" r="4.4" fill="#7f6d5f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="139.2" y="452.9" class="point-label" text-anchor="middle">moe-wide</text>
+</svg>

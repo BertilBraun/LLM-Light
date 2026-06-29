@@ -11,6 +11,7 @@ from llm_lite.config.models import (
     EvaluationConfiguration,
     InferenceConfiguration,
     InferenceEngine,
+    ModernDenseGptConfiguration,
     PostTrainingType,
     Precision,
     PythonGeneratedDirectPreferenceOptimizationConfiguration,
@@ -168,6 +169,45 @@ def test_load_python_moe_full_configuration() -> None:
     assert experiment_configuration.tokenizer.vocabulary_size == 6000
     assert experiment_configuration.packing.context_length == 256
     assert experiment_configuration.packing.pack_documents is True
+
+
+def test_load_modern_dense_qk_normalization_configuration(tmp_path: Path) -> None:
+    configuration_path = tmp_path / "modern_dense_qknorm.yaml"
+    configuration_path.write_text(
+        "\n".join(
+            (
+                "experiment:",
+                "  name: modern_dense_qknorm",
+                "  output_dir: runs/modern_dense_qknorm",
+                "dataset:",
+                "  type: inline_text",
+                "  documents: ['hello world']",
+                "tokenizer:",
+                "  type: character",
+                "packing:",
+                "  context_length: 8",
+                "model:",
+                "  type: modern_dense_gpt",
+                "  dimension: 16",
+                "  layers: 1",
+                "  attention_heads: 4",
+                "  feed_forward_dimension: 32",
+                "  query_key_normalization: true",
+                "training:",
+                "  maximum_steps: 1",
+                "  batch_size_sequences: 1",
+            ),
+        ),
+        encoding="utf-8",
+    )
+
+    experiment_configuration = load_experiment_configuration(configuration_path=configuration_path)
+
+    match experiment_configuration.model:
+        case ModernDenseGptConfiguration(query_key_normalization=query_key_normalization):
+            assert query_key_normalization
+        case _:
+            raise AssertionError("Expected modern dense GPT configuration.")
 
 
 def test_evaluation_configuration_allows_no_configured_evaluator() -> None:

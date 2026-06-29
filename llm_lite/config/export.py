@@ -86,6 +86,7 @@ def modern_dense_model(
     dropout: float,
     rope_base: float = 10000.0,
     normalization_epsilon: float = 1e-5,
+    query_key_normalization: bool = False,
     tie_embeddings: bool = True,
 ) -> ModernDenseGptConfiguration:
     return ModernDenseGptConfiguration(
@@ -96,6 +97,7 @@ def modern_dense_model(
         feed_forward_dimension=feed_forward_dimension,
         rope_base=rope_base,
         normalization_epsilon=normalization_epsilon,
+        query_key_normalization=query_key_normalization,
         dropout=dropout,
         tie_embeddings=tie_embeddings,
     )
@@ -111,6 +113,7 @@ def modern_moe_model(
     dropout: float,
     rope_base: float = 10000.0,
     normalization_epsilon: float = 1e-5,
+    query_key_normalization: bool = False,
     tie_embeddings: bool = True,
 ) -> ModernMoeGptConfiguration:
     return ModernMoeGptConfiguration(
@@ -123,6 +126,7 @@ def modern_moe_model(
         router_top_k=router_top_k,
         rope_base=rope_base,
         normalization_epsilon=normalization_epsilon,
+        query_key_normalization=query_key_normalization,
         dropout=dropout,
         tie_embeddings=tie_embeddings,
     )

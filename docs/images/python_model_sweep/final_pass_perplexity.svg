@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="620" viewBox="0 0 1160 620" role="img">
+<style>
+.title { font: 700 18px Arial, sans-serif; fill: #171a20; }
+.axis-label { font: 12px Arial, sans-serif; fill: #333843; }
+.tick { font: 11px Arial, sans-serif; fill: #586070; }
+.legend { font: 12px Arial, sans-serif; fill: #232832; }
+.point-label { font: 10px Arial, sans-serif; fill: #20242c; }
+.x-label { font: 10px Arial, sans-serif; fill: #20242c; }
+</style>
+<rect x="0" y="0" width="1160" height="620" fill="#ffffff" />
+<text x="580.0" y="30" text-anchor="middle" class="title">Final Pass Rate and Perplexity</text>
+<rect x="72" y="58" width="1012" height="416" fill="#fbfbfd" stroke="#d5d9e2" />
+<text x="578.0" y="602" text-anchor="middle" class="axis-label">Experiment</text>
+<text x="20" y="266.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 266.0)">Pass rate (%) / perplexity</text>
+<line x1="72" y1="474.0" x2="1084" y2="474.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="478.0" text-anchor="end" class="tick">0.0</text>
+<line x1="72" y1="390.8" x2="1084" y2="390.8" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="394.8" text-anchor="end" class="tick">18.0</text>
+<line x1="72" y1="307.6" x2="1084" y2="307.6" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="311.6" text-anchor="end" class="tick">36.0</text>
+<line x1="72" y1="224.4" x2="1084" y2="224.4" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="228.4" text-anchor="end" class="tick">54.0</text>
+<line x1="72" y1="141.2" x2="1084" y2="141.2" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="145.2" text-anchor="end" class="tick">72.0</text>
+<line x1="72" y1="58.0" x2="1084" y2="58.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="62" y="62.0" text-anchor="end" class="tick">90.0</text>
+<line x1="72" y1="474" x2="1084" y2="474" stroke="#ccd2dc" stroke-width="1" />
+<rect x="92.2" y="87.1" width="34.0" height="386.9" fill="#2f6fbb" />
+<rect x="130.2" y="411.4" width="34.0" height="62.6" fill="#d98634" />
+<text x="128.2" y="584" class="x-label" text-anchor="end" transform="rotate(-38 128.2 584)">dense-active-9m6</text>
+<rect x="204.7" y="218.2" width="34.0" height="255.8" fill="#2f6fbb" />
+<rect x="242.7" y="374.8" width="34.0" height="99.2" fill="#d98634" />
+<text x="240.7" y="584" class="x-label" text-anchor="end" transform="rotate(-38 240.7 584)">modern-moe-deep</text>
+<rect x="317.1" y="368.0" width="34.0" height="106.0" fill="#2f6fbb" />
+<rect x="355.1" y="292.5" width="34.0" height="181.5" fill="#d98634" />
+<text x="353.1" y="584" class="x-label" text-anchor="end" transform="rotate(-38 353.1 584)">moe-deep</text>
+<rect x="429.6" y="405.0" width="34.0" height="69.0" fill="#2f6fbb" />
+<rect x="467.6" y="275.4" width="34.0" height="198.6" fill="#d98634" />
+<text x="465.6" y="584" class="x-label" text-anchor="end" transform="rotate(-38 465.6 584)">moe-deep-fim</text>
+<rect x="542.0" y="415.5" width="34.0" height="58.5" fill="#2f6fbb" />
+<rect x="580.0" y="228.8" width="34.0" height="245.2" fill="#d98634" />
+<text x="578.0" y="584" class="x-label" text-anchor="end" transform="rotate(-38 578.0 584)">dense-deep</text>
+<rect x="654.4" y="421.0" width="34.0" height="53.0" fill="#2f6fbb" />
+<rect x="692.4" y="242.5" width="34.0" height="231.5" fill="#d98634" />
+<text x="690.4" y="584" class="x-label" text-anchor="end" transform="rotate(-38 690.4 584)">moe-deep-cosine</text>
+<rect x="766.9" y="437.9" width="34.0" height="36.1" fill="#2f6fbb" />
+<rect x="804.9" y="239.2" width="34.0" height="234.8" fill="#d98634" />
+<text x="802.9" y="584" class="x-label" text-anchor="end" transform="rotate(-38 802.9 584)">moe-deep-linear</text>
+<rect x="879.3" y="447.1" width="34.0" height="26.9" fill="#2f6fbb" />
+<rect x="917.3" y="132.1" width="34.0" height="341.9" fill="#d98634" />
+<text x="915.3" y="584" class="x-label" text-anchor="end" transform="rotate(-38 915.3 584)">moe-wide</text>
+<rect x="991.8" y="459.8" width="34.0" height="14.2" fill="#2f6fbb" />
+<rect x="1029.8" y="102.6" width="34.0" height="371.4" fill="#d98634" />
+<text x="1027.8" y="584" class="x-label" text-anchor="end" transform="rotate(-38 1027.8 584)">dense-wide</text>
+<rect x="884" y="72" width="16" height="12" fill="#2f6fbb" />
+<text x="908" y="83" class="legend">Pass rate (%)</text>
+<rect x="884" y="94" width="16" height="12" fill="#d98634" />
+<text x="908" y="105" class="legend">Perplexity (scaled)</text>
+</svg>

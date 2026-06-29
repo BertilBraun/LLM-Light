@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="560" viewBox="0 0 1120 560" role="img">
+<style>
+.title { font: 700 18px Arial, sans-serif; fill: #171a20; }
+.axis-label { font: 12px Arial, sans-serif; fill: #333843; }
+.tick { font: 11px Arial, sans-serif; fill: #586070; }
+.legend { font: 12px Arial, sans-serif; fill: #232832; }
+.point-label { font: 10px Arial, sans-serif; fill: #20242c; }
+.x-label { font: 10px Arial, sans-serif; fill: #20242c; }
+</style>
+<rect x="0" y="0" width="1120" height="560" fill="#ffffff" />
+<text x="560.0" y="30" text-anchor="middle" class="title">Checkpoint AST Parse Rate</text>
+<rect x="76" y="54" width="794" height="442" fill="#fbfbfd" stroke="#d5d9e2" />
+<text x="473.0" y="542" text-anchor="middle" class="axis-label">Training step</text>
+<text x="20" y="275.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 275.0)">AST parse rate (%)</text>
+<line x1="76" y1="496.0" x2="870" y2="496.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="500.0" text-anchor="end" class="tick">0.0</text>
+<line x1="76" y1="407.6" x2="870" y2="407.6" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="411.6" text-anchor="end" class="tick">21.6</text>
+<line x1="76" y1="319.2" x2="870" y2="319.2" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="323.2" text-anchor="end" class="tick">43.2</text>
+<line x1="76" y1="230.8" x2="870" y2="230.8" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="234.8" text-anchor="end" class="tick">64.8</text>
+<line x1="76" y1="142.4" x2="870" y2="142.4" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="146.4" text-anchor="end" class="tick">86.4</text>
+<line x1="76" y1="54.0" x2="870" y2="54.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="66" y="58.0" text-anchor="end" class="tick">108.0</text>
+<line x1="76.0" y1="54" x2="76.0" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="76.0" y="516" text-anchor="middle" class="tick">1500</text>
+<line x1="234.8" y1="54" x2="234.8" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="234.8" y="516" text-anchor="middle" class="tick">4200</text>
+<line x1="393.6" y1="54" x2="393.6" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="393.6" y="516" text-anchor="middle" class="tick">6900</text>
+<line x1="552.4" y1="54" x2="552.4" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="552.4" y="516" text-anchor="middle" class="tick">9600</text>
+<line x1="711.2" y1="54" x2="711.2" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="711.2" y="516" text-anchor="middle" class="tick">12300</text>
+<line x1="870.0" y1="54" x2="870.0" y2="496" stroke="#eef0f4" stroke-width="1" />
+<text x="870.0" y="516" text-anchor="middle" class="tick">15000</text>
+<polyline points="76.0,105.6 164.2,93.8 252.4,89.1 340.7,93.8 428.9,86.7 517.1,86.7 605.3,86.7 693.6,86.7 781.8,89.1 870.0,86.7" fill="none" stroke="#2f6fbb" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="86.7" r="3.5" fill="#2f6fbb" />
+<line x1="902" y1="66" x2="920" y2="66" stroke="#2f6fbb" stroke-width="3" />
+<text x="928" y="70" class="legend">dense-active-9m6</text>
+<polyline points="76.0,251.4 164.2,216.1 252.4,180.8 340.7,157.3 428.9,162.0 517.1,171.4 605.3,162.0 693.6,173.8 781.8,169.1 870.0,164.4" fill="none" stroke="#d98634" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="164.4" r="3.5" fill="#d98634" />
+<line x1="902" y1="88" x2="920" y2="88" stroke="#d98634" stroke-width="3" />
+<text x="928" y="92" class="legend">dense-deep</text>
+<polyline points="76.0,439.6 164.2,354.9 252.4,310.2 340.7,317.2 428.9,310.2 517.1,303.1 605.3,289.0 693.6,312.5 781.8,296.1 870.0,296.1" fill="none" stroke="#3a8f5c" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="296.1" r="3.5" fill="#3a8f5c" />
+<line x1="902" y1="110" x2="920" y2="110" stroke="#3a8f5c" stroke-width="3" />
+<text x="928" y="114" class="legend">dense-wide</text>
+<polyline points="76.0,110.3 164.2,93.8 252.4,98.5 340.7,100.9 428.9,91.4 517.1,96.1 605.3,93.8 693.6,96.1 781.8,91.4 870.0,91.4" fill="none" stroke="#9b59b6" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="91.4" r="3.5" fill="#9b59b6" />
+<line x1="902" y1="132" x2="920" y2="132" stroke="#9b59b6" stroke-width="3" />
+<text x="928" y="136" class="legend">modern-moe-deep</text>
+<polyline points="76.0,282.0 164.2,206.7 252.4,152.6 340.7,157.3 428.9,150.2 517.1,162.0 605.3,157.3 693.6,173.8 781.8,169.1 870.0,178.5" fill="none" stroke="#c44e52" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="178.5" r="3.5" fill="#c44e52" />
+<line x1="902" y1="154" x2="920" y2="154" stroke="#c44e52" stroke-width="3" />
+<text x="928" y="158" class="legend">moe-deep-cosine</text>
+<polyline points="76.0,263.1 164.2,202.0 252.4,173.8 340.7,178.5 428.9,159.7 517.1,140.8 605.3,166.7 693.6,155.0 781.8,138.5 870.0,145.5" fill="none" stroke="#5f7f8f" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="145.5" r="3.5" fill="#5f7f8f" />
+<line x1="902" y1="176" x2="920" y2="176" stroke="#5f7f8f" stroke-width="3" />
+<text x="928" y="180" class="legend">moe-deep-fim</text>
+<polyline points="76.0,336.1 164.2,220.8 252.4,180.8 340.7,192.6 428.9,166.7 517.1,209.0 605.3,176.1 693.6,206.7 781.8,204.3 870.0,197.3" fill="none" stroke="#b39c2f" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="197.3" r="3.5" fill="#b39c2f" />
+<line x1="902" y1="198" x2="920" y2="198" stroke="#b39c2f" stroke-width="3" />
+<text x="928" y="202" class="legend">moe-deep-linear</text>
+<polyline points="76.0,326.7 164.2,223.2 252.4,178.5 340.7,169.1 428.9,155.0 517.1,166.7 605.3,169.1 693.6,159.7 781.8,162.0 870.0,150.2" fill="none" stroke="#2a9d8f" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="150.2" r="3.5" fill="#2a9d8f" />
+<line x1="902" y1="220" x2="920" y2="220" stroke="#2a9d8f" stroke-width="3" />
+<text x="928" y="224" class="legend">moe-deep</text>
+<polyline points="76.0,416.0 164.2,329.0 252.4,319.6 340.7,324.3 428.9,298.4 517.1,303.1 605.3,270.2 693.6,263.1 781.8,274.9 870.0,270.2" fill="none" stroke="#7f6d5f" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round" />
+<circle cx="870.0" cy="270.2" r="3.5" fill="#7f6d5f" />
+<line x1="902" y1="242" x2="920" y2="242" stroke="#7f6d5f" stroke-width="3" />
+<text x="928" y="246" class="legend">moe-wide</text>
+</svg>

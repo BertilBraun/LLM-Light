@@ -38,7 +38,8 @@ def test_generate_python_model_sweep_pilot_writes_four_small_configs(
         experiment_configuration = load_experiment_configuration(
             configuration_path=generated_configuration.path,
         )
-        assert experiment_configuration.training.batch_size_sequences == 512
+        assert experiment_configuration.training.batch_size_sequences == 256
+        assert experiment_configuration.training.maximum_steps == 15000
         assert experiment_configuration.training.max_checkpoints == 2
         assert experiment_configuration.export.bundle_path == Path("export/bundle.zip")
         assert generated_configuration.parameter_summary.active_parameters < 1_000_000

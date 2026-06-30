@@ -3,6 +3,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from llm_lite.config.loading import load_experiment_configuration
 from llm_lite.config.models import TrainingEvaluationConfiguration
 from llm_lite.orchestration.checkpoint_evaluation import (
@@ -17,6 +19,7 @@ from llm_lite.orchestration.runtime import (
     parent_fingerprints,
     write_run_manifest,
 )
+from llm_lite.pipeline.logging import PipelineEventLogger, PipelineEventType
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.scripts.run_plan import (
@@ -24,9 +27,11 @@ from llm_lite.scripts.run_plan import (
     GpuAllocation,
     GpuPool,
     _checkpoint_evaluation_submissions,
+    _clear_incomplete_artifact_payload,
     _complete_stage_names_from_artifact_store,
     _job_environment,
     _run_checkpoint_evaluation_job,
+    _run_missing_artifact,
     run_plan,
 )
 
@@ -262,6 +267,83 @@ def test_run_plan_accepts_parallel_configurations(tmp_path: Path) -> None:
 
     assert completed_process.returncode == 0
     assert first_manifest["artifacts"]["raw_dataset"] == second_manifest["artifacts"]["raw_dataset"]
+
+
+def test_clear_incomplete_artifact_payload_archives_existing_job_log(tmp_path: Path) -> None:
+    artifact_store_root = tmp_path / "artifact_store"
+    artifact_directory = artifact_store_root / "raw_dataset" / "fingerprint"
+    artifact_directory.mkdir(parents=True)
+    log_path = artifact_directory / "job.log"
+    payload_path = artifact_directory / "payload.txt"
+    log_path.write_text("failed job output\n", encoding="utf-8")
+    payload_path.write_text("partial payload\n", encoding="utf-8")
+
+    _clear_incomplete_artifact_payload(
+        artifact_directory=artifact_directory,
+        artifact_store_root=artifact_store_root,
+    )
+
+    archived_log_paths = tuple((artifact_directory / ".job_logs").glob("job_*.log"))
+    assert len(archived_log_paths) == 1
+    assert archived_log_paths[0].read_text(encoding="utf-8") == "failed job output\n"
+    assert not log_path.exists()
+    assert not payload_path.exists()
+
+
+def test_run_missing_artifact_logs_stage_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run_directory = tmp_path / "runs" / "failed"
+    configuration_path = tmp_path / "failed.yaml"
+    configuration_path.write_text(
+        Path("configs/verify_one_sentence.yaml")
+        .read_text(encoding="utf-8")
+        .replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+    resolved_run = resolve_run(
+        experiment_configuration=load_experiment_configuration(
+            configuration_path=configuration_path,
+        ),
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+    planned_artifact = resolved_run.artifact_for_stage(stage_name=StageName.RAW_DATASET)
+    event_logger = PipelineEventLogger(run_directory=resolved_run.run_directory)
+
+    def fail_subprocess_job(
+        command: list[str],
+        artifact_directory: Path,
+        environment: dict[str, str],
+    ) -> None:
+        raise subprocess.CalledProcessError(returncode=42, cmd=command)
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._run_subprocess_job",
+        fail_subprocess_job,
+    )
+
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_missing_artifact(
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+            gpu_pool=GpuPool.from_argument(gpus=None),
+            event_logger=event_logger,
+            max_parallel_jobs=1,
+        )
+
+    event_records = tuple(
+        json.loads(line)
+        for line in (run_directory / "pipeline.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+
+    assert event_records[-1]["event_type"] == PipelineEventType.STAGE_FAILURE.value
+    assert event_records[-1]["stage_name"] == StageName.RAW_DATASET.value
+    assert "CalledProcessError" in event_records[-1]["message"]
+    assert "job.log" in event_records[-1]["message"]
 
 
 def test_run_manifest_preserves_complete_artifacts_for_partial_stage_run(

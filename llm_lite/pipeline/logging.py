@@ -11,6 +11,7 @@ class PipelineEventType(str, Enum):
     STAGE_START = "stage_start"
     STAGE_SKIP = "stage_skip"
     STAGE_COMPLETE = "stage_complete"
+    STAGE_FAILURE = "stage_failure"
 
 
 class PipelineEventRecord(BaseModel):

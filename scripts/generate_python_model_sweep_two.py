@@ -40,6 +40,7 @@ class ExperimentSpecification:
     name: str
     model: ModelConfiguration
     vocabulary_size: int
+    batch_size_sequences: int = BATCH_SIZE_SEQUENCES
     auxiliary_loss_weight: float = 0.0
     learning_rate: float = DEFAULT_LEARNING_RATE
     learning_rate_schedule: CosineWarmupDecayLearningRateScheduleConfiguration | None = None
@@ -243,6 +244,7 @@ def modern_dense_ffn_large() -> ExperimentSpecification:
     return ffn_sweep_experiment(
         name="python_modern_dense_ffn_large",
         feed_forward_dimension=512,
+        batch_size_sequences=128,
     )
 
 
@@ -323,6 +325,7 @@ def head_sweep_experiment(name: str, attention_heads: int) -> ExperimentSpecific
 def ffn_sweep_experiment(
     name: str,
     feed_forward_dimension: int,
+    batch_size_sequences: int = BATCH_SIZE_SEQUENCES,
 ) -> ExperimentSpecification:
     return ExperimentSpecification(
         name=name,
@@ -334,6 +337,7 @@ def ffn_sweep_experiment(
             dropout=0.05,
         ),
         vocabulary_size=VOCABULARY_SIZE_4000,
+        batch_size_sequences=batch_size_sequences,
     )
 
 
@@ -347,7 +351,7 @@ def overrides_for_experiment(
         training=training(
             base_training=base_configuration.training,
             maximum_steps=MAXIMUM_STEPS,
-            batch_size_sequences=BATCH_SIZE_SEQUENCES,
+            batch_size_sequences=experiment_specification.batch_size_sequences,
             learning_rate=experiment_specification.learning_rate,
             weight_decay=WEIGHT_DECAY,
             auxiliary_loss_weight=experiment_specification.auxiliary_loss_weight,

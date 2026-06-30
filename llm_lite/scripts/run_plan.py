@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from threading import Condition, Thread
 from typing import TextIO
@@ -42,6 +43,8 @@ from llm_lite.training.checkpoint import latest_checkpoint
 
 LOCK_WAIT_SECONDS = 5.0
 CHECKPOINT_EVENT_POLL_SECONDS = 1.0
+JOB_LOG_NAME = "job.log"
+ARCHIVED_JOB_LOG_DIRECTORY_NAME = ".job_logs"
 
 
 @dataclass(frozen=True)
@@ -345,45 +348,61 @@ def _run_missing_artifact(
             message="stage job started",
         )
         console_log(f"[start] {planned_artifact.stage_name.value}")
-        resource_request = _resource_request(
-            resolved_run=resolved_run,
-            planned_artifact=planned_artifact,
-        )
-        gpu_allocation = gpu_pool.acquire(gpu_count=resource_request.gpu_count)
-        environment = _job_environment(
-            gpu_allocation=gpu_allocation,
-        )
         try:
-            if _supports_async_checkpoint_evaluation(
+            resource_request = _resource_request(
                 resolved_run=resolved_run,
                 planned_artifact=planned_artifact,
-                max_parallel_jobs=max_parallel_jobs,
-            ):
-                _run_training_job_with_async_evaluations(
+            )
+            gpu_allocation = gpu_pool.acquire(gpu_count=resource_request.gpu_count)
+            environment = _job_environment(
+                gpu_allocation=gpu_allocation,
+            )
+            try:
+                if _supports_async_checkpoint_evaluation(
                     resolved_run=resolved_run,
                     planned_artifact=planned_artifact,
-                    command=command,
-                    artifact_directory=artifact_directory,
-                    environment=environment,
-                    gpu_allocation=gpu_allocation,
                     max_parallel_jobs=max_parallel_jobs,
-                )
-            else:
-                _run_subprocess_job(
-                    command=command,
-                    artifact_directory=artifact_directory,
-                    environment=environment,
-                )
-        finally:
-            gpu_pool.release(gpu_allocation=gpu_allocation)
-        completed_manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
-        if not complete_manifest_matches(
-            manifest=completed_manifest,
-            planned_artifact=planned_artifact,
-        ):
-            raise ValueError(
-                f"Stage {planned_artifact.stage_name.value} exited without a complete manifest.",
+                ):
+                    _run_training_job_with_async_evaluations(
+                        resolved_run=resolved_run,
+                        planned_artifact=planned_artifact,
+                        command=command,
+                        artifact_directory=artifact_directory,
+                        environment=environment,
+                        gpu_allocation=gpu_allocation,
+                        max_parallel_jobs=max_parallel_jobs,
+                    )
+                else:
+                    _run_subprocess_job(
+                        command=command,
+                        artifact_directory=artifact_directory,
+                        environment=environment,
+                    )
+            finally:
+                gpu_pool.release(gpu_allocation=gpu_allocation)
+            completed_manifest = registry.read_manifest(
+                artifact_type=planned_artifact.stage_name.value,
             )
+            if not complete_manifest_matches(
+                manifest=completed_manifest,
+                planned_artifact=planned_artifact,
+            ):
+                raise ValueError(
+                    f"Stage {planned_artifact.stage_name.value} exited without a complete "
+                    "manifest.",
+                )
+        except Exception as error:
+            _log_stage_event(
+                event_logger=event_logger,
+                event_type=PipelineEventType.STAGE_FAILURE,
+                stage_name=planned_artifact.stage_name,
+                message=_failure_message(error=error, artifact_directory=artifact_directory),
+            )
+            console_log(
+                f"[fail]  {planned_artifact.stage_name.value}; see "
+                f"{artifact_directory / JOB_LOG_NAME}",
+            )
+            raise
         _log_stage_event(
             event_logger=event_logger,
             event_type=PipelineEventType.STAGE_COMPLETE,
@@ -462,7 +481,7 @@ def _run_subprocess_job(
     artifact_directory: Path,
     environment: dict[str, str],
 ) -> None:
-    log_path = artifact_directory / "job.log"
+    log_path = artifact_directory / JOB_LOG_NAME
     with log_path.open("a", encoding="utf-8") as log_file:
         process = subprocess.Popen(
             command,
@@ -504,7 +523,7 @@ def _run_training_job_with_async_evaluations(
 ) -> None:
     seen_event_paths: set[Path] = set()
     evaluation_futures: list[concurrent.futures.Future[None]] = []
-    log_path = artifact_directory / "job.log"
+    log_path = artifact_directory / JOB_LOG_NAME
     with (
         log_path.open("a", encoding="utf-8") as log_file,
         concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs - 1) as executor,
@@ -758,18 +777,45 @@ def _wait_for_async_evaluations(
         future.result()
 
 
+def _failure_message(error: Exception, artifact_directory: Path) -> str:
+    log_path = artifact_directory / JOB_LOG_NAME
+    return f"{error.__class__.__name__}: {error}; log={log_path}"
+
+
 def _clear_incomplete_artifact_payload(artifact_directory: Path, artifact_store_root: Path) -> None:
     resolved_artifact_directory = artifact_directory.resolve()
     resolved_store_root = artifact_store_root.resolve()
     if resolved_store_root not in resolved_artifact_directory.parents:
         raise ValueError(f"Refusing to clear artifact outside store: {artifact_directory}")
+    _archive_existing_job_log(artifact_directory=artifact_directory)
     for child_path in artifact_directory.iterdir():
-        if child_path.name == ".lock":
+        if child_path.name in (".lock", ARCHIVED_JOB_LOG_DIRECTORY_NAME):
             continue
         if child_path.is_dir():
             shutil.rmtree(child_path)
         else:
             child_path.unlink()
+
+
+def _archive_existing_job_log(artifact_directory: Path) -> Path | None:
+    log_path = artifact_directory / JOB_LOG_NAME
+    if not log_path.exists():
+        return None
+    archive_directory = artifact_directory / ARCHIVED_JOB_LOG_DIRECTORY_NAME
+    archive_directory.mkdir(parents=True, exist_ok=True)
+    archive_path = _available_archived_job_log_path(archive_directory=archive_directory)
+    shutil.copy2(log_path, archive_path)
+    return archive_path
+
+
+def _available_archived_job_log_path(archive_directory: Path) -> Path:
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    archive_path = archive_directory / f"job_{timestamp}.log"
+    duplicate_index = 1
+    while archive_path.exists():
+        archive_path = archive_directory / f"job_{timestamp}_{duplicate_index}.log"
+        duplicate_index += 1
+    return archive_path
 
 
 def _can_reuse_incomplete_payload(

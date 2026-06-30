@@ -35,6 +35,9 @@ QK_NORMALIZATION_EXPERIMENT_NAMES = {
     "python_modern_dense_cosine_lr2e3_qknorm",
     "python_modern_dense_deep_qknorm",
 }
+EXPECTED_TRAINING_BATCH_SIZE_SEQUENCES = {
+    "python_modern_dense_ffn_large": 128,
+}
 
 
 def test_generate_python_model_sweep_two_writes_expected_configs(
@@ -87,7 +90,12 @@ def test_generate_python_model_sweep_two_writes_expected_configs(
         assert experiment_configuration.experiment.name in EXPECTED_EXPERIMENT_NAMES
         assert not experiment_configuration.experiment.name.startswith("python2_")
         assert not experiment_configuration.packing.fill_in_middle.enabled
-        assert experiment_configuration.training.batch_size_sequences == 256
+        assert experiment_configuration.training.batch_size_sequences == (
+            EXPECTED_TRAINING_BATCH_SIZE_SEQUENCES.get(
+                experiment_configuration.experiment.name,
+                256,
+            )
+        )
         assert experiment_configuration.training.maximum_steps == 15000
         assert experiment_configuration.training.max_checkpoints == 2
         assert experiment_configuration.training.optimizer.weight_decay == 0.1

@@ -5,6 +5,7 @@ __pycache__/
 .venv/
 venv/
 runs/
+/configs/generated/
 /data/
 .cache/
 .huggingface/

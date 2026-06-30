@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="720" viewBox="0 0 1500 720" role="img">
+<style>
+.title { font: 700 18px Arial, sans-serif; fill: #171a20; }
+.axis-label { font: 12px Arial, sans-serif; fill: #333843; }
+.tick { font: 11px Arial, sans-serif; fill: #586070; }
+.legend { font: 12px Arial, sans-serif; fill: #232832; }
+.point-label { font: 10px Arial, sans-serif; fill: #20242c; }
+.x-label { font: 10px Arial, sans-serif; fill: #20242c; }
+</style>
+<rect x="0" y="0" width="1500" height="720" fill="#ffffff" />
+<text x="750.0" y="30" text-anchor="middle" class="title">Mean Final Pass Rate</text>
+<rect x="78" y="58" width="1376" height="442" fill="#fbfbfd" stroke="#d5d9e2" />
+<text x="766.0" y="702" text-anchor="middle" class="axis-label">Experiment</text>
+<text x="20" y="279.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 279.0)">Final pass rate (%)</text>
+<line x1="78" y1="500.0" x2="1454" y2="500.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="504.0" text-anchor="end" class="tick">0.0</text>
+<line x1="78" y1="411.6" x2="1454" y2="411.6" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="415.6" text-anchor="end" class="tick">18.7</text>
+<line x1="78" y1="323.2" x2="1454" y2="323.2" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="327.2" text-anchor="end" class="tick">37.5</text>
+<line x1="78" y1="234.8" x2="1454" y2="234.8" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="238.8" text-anchor="end" class="tick">56.2</text>
+<line x1="78" y1="146.4" x2="1454" y2="146.4" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="150.4" text-anchor="end" class="tick">75.0</text>
+<line x1="78" y1="58.0" x2="1454" y2="58.0" stroke="#e6e9ef" stroke-width="1" />
+<text x="68" y="62.0" text-anchor="end" class="tick">93.7</text>
+<line x1="78" y1="500" x2="1454" y2="500" stroke="#ccd2dc" stroke-width="1" />
+<rect x="90.9" y="105.4" width="34.0" height="394.6" fill="#2f6fbb" />
+<text x="107.9" y="678" class="x-label" text-anchor="end" transform="rotate(-42 107.9 678)">dense-active-9m6</text>
+<rect x="150.7" y="209.5" width="34.0" height="290.5" fill="#d98634" />
+<line x1="167.7" y1="208.8" x2="167.7" y2="210.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="162.7" y1="208.8" x2="172.7" y2="208.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="162.7" y1="210.2" x2="172.7" y2="210.2" stroke="#20242c" stroke-width="1.4" />
+<text x="167.7" y="678" class="x-label" text-anchor="end" transform="rotate(-42 167.7 678)">modern-moe-vocab4000-aux010</text>
+<rect x="210.6" y="239.1" width="34.0" height="260.9" fill="#3a8f5c" />
+<text x="227.6" y="678" class="x-label" text-anchor="end" transform="rotate(-42 227.6 678)">modern-moe-deep</text>
+<rect x="270.4" y="266.3" width="34.0" height="233.7" fill="#9b59b6" />
+<line x1="287.4" y1="264.2" x2="287.4" y2="268.4" stroke="#20242c" stroke-width="1.4" />
+<line x1="282.4" y1="264.2" x2="292.4" y2="264.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="282.4" y1="268.4" x2="292.4" y2="268.4" stroke="#20242c" stroke-width="1.4" />
+<text x="287.4" y="678" class="x-label" text-anchor="end" transform="rotate(-42 287.4 678)">modern-dense-vocab2000-param-match</text>
+<rect x="330.2" y="307.3" width="34.0" height="192.7" fill="#c44e52" />
+<line x1="347.2" y1="296.9" x2="347.2" y2="317.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="342.2" y1="296.9" x2="352.2" y2="296.9" stroke="#20242c" stroke-width="1.4" />
+<line x1="342.2" y1="317.8" x2="352.2" y2="317.8" stroke="#20242c" stroke-width="1.4" />
+<text x="347.2" y="678" class="x-label" text-anchor="end" transform="rotate(-42 347.2 678)">modern-dense-ffn-large</text>
+<rect x="390.0" y="319.9" width="34.0" height="180.1" fill="#5f7f8f" />
+<line x1="407.0" y1="317.8" x2="407.0" y2="322.0" stroke="#20242c" stroke-width="1.4" />
+<line x1="402.0" y1="317.8" x2="412.0" y2="317.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="402.0" y1="322.0" x2="412.0" y2="322.0" stroke="#20242c" stroke-width="1.4" />
+<text x="407.0" y="678" class="x-label" text-anchor="end" transform="rotate(-42 407.0 678)">modern-dense-ffn</text>
+<rect x="449.9" y="323.6" width="34.0" height="176.4" fill="#b39c2f" />
+<line x1="466.9" y1="317.8" x2="466.9" y2="329.5" stroke="#20242c" stroke-width="1.4" />
+<line x1="461.9" y1="317.8" x2="471.9" y2="317.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="461.9" y1="329.5" x2="471.9" y2="329.5" stroke="#20242c" stroke-width="1.4" />
+<text x="466.9" y="678" class="x-label" text-anchor="end" transform="rotate(-42 466.9 678)">modern-dense-ffn-medium</text>
+<rect x="509.7" y="323.6" width="34.0" height="176.4" fill="#2a9d8f" />
+<line x1="526.7" y1="317.8" x2="526.7" y2="329.5" stroke="#20242c" stroke-width="1.4" />
+<line x1="521.7" y1="317.8" x2="531.7" y2="317.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="521.7" y1="329.5" x2="531.7" y2="329.5" stroke="#20242c" stroke-width="1.4" />
+<text x="526.7" y="678" class="x-label" text-anchor="end" transform="rotate(-42 526.7 678)">modern-dense-vocab4000-baseline</text>
+<rect x="569.5" y="365.1" width="34.0" height="134.9" fill="#7f6d5f" />
+<line x1="586.5" y1="360.2" x2="586.5" y2="370.0" stroke="#20242c" stroke-width="1.4" />
+<line x1="581.5" y1="360.2" x2="591.5" y2="360.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="581.5" y1="370.0" x2="591.5" y2="370.0" stroke="#20242c" stroke-width="1.4" />
+<text x="586.5" y="678" class="x-label" text-anchor="end" transform="rotate(-42 586.5 678)">moe-vocab4000-aux010</text>
+<rect x="629.3" y="391.9" width="34.0" height="108.1" fill="#2f6fbb" />
+<text x="646.3" y="678" class="x-label" text-anchor="end" transform="rotate(-42 646.3 678)">moe-deep</text>
+<rect x="689.2" y="429.6" width="34.0" height="70.4" fill="#d98634" />
+<text x="706.2" y="678" class="x-label" text-anchor="end" transform="rotate(-42 706.2 678)">moe-deep-fim</text>
+<rect x="749.0" y="440.4" width="34.0" height="59.6" fill="#3a8f5c" />
+<text x="766.0" y="678" class="x-label" text-anchor="end" transform="rotate(-42 766.0 678)">dense-deep</text>
+<rect x="808.8" y="442.7" width="34.0" height="57.3" fill="#9b59b6" />
+<text x="825.8" y="678" class="x-label" text-anchor="end" transform="rotate(-42 825.8 678)">modern-dense-deep-qknorm</text>
+<rect x="868.7" y="446.0" width="34.0" height="54.0" fill="#c44e52" />
+<text x="885.7" y="678" class="x-label" text-anchor="end" transform="rotate(-42 885.7 678)">moe-deep-cosine</text>
+<rect x="928.5" y="451.3" width="34.0" height="48.7" fill="#5f7f8f" />
+<line x1="945.5" y1="451.1" x2="945.5" y2="451.5" stroke="#20242c" stroke-width="1.4" />
+<line x1="940.5" y1="451.1" x2="950.5" y2="451.1" stroke="#20242c" stroke-width="1.4" />
+<line x1="940.5" y1="451.5" x2="950.5" y2="451.5" stroke="#20242c" stroke-width="1.4" />
+<text x="945.5" y="678" class="x-label" text-anchor="end" transform="rotate(-42 945.5 678)">modern-dense-heads12</text>
+<rect x="988.3" y="463.2" width="34.0" height="36.8" fill="#b39c2f" />
+<line x1="1005.3" y1="455.3" x2="1005.3" y2="471.1" stroke="#20242c" stroke-width="1.4" />
+<line x1="1000.3" y1="455.3" x2="1010.3" y2="455.3" stroke="#20242c" stroke-width="1.4" />
+<line x1="1000.3" y1="471.1" x2="1010.3" y2="471.1" stroke="#20242c" stroke-width="1.4" />
+<text x="1005.3" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1005.3 678)">modern-dense-heads8</text>
+<rect x="1048.1" y="463.2" width="34.0" height="36.8" fill="#2a9d8f" />
+<text x="1065.1" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1065.1 678)">moe-deep-linear</text>
+<rect x="1108.0" y="464.6" width="34.0" height="35.4" fill="#7f6d5f" />
+<line x1="1125.0" y1="457.6" x2="1125.0" y2="471.6" stroke="#20242c" stroke-width="1.4" />
+<line x1="1120.0" y1="457.6" x2="1130.0" y2="457.6" stroke="#20242c" stroke-width="1.4" />
+<line x1="1120.0" y1="471.6" x2="1130.0" y2="471.6" stroke="#20242c" stroke-width="1.4" />
+<text x="1125.0" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1125.0 678)">modern-dense-heads4</text>
+<rect x="1167.8" y="469.7" width="34.0" height="30.3" fill="#2f6fbb" />
+<line x1="1184.8" y1="469.2" x2="1184.8" y2="470.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="1179.8" y1="469.2" x2="1189.8" y2="469.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="1179.8" y1="470.2" x2="1189.8" y2="470.2" stroke="#20242c" stroke-width="1.4" />
+<text x="1184.8" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1184.8 678)">modern-dense-qknorm-lr2e3</text>
+<rect x="1227.6" y="472.5" width="34.0" height="27.5" fill="#d98634" />
+<text x="1244.6" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1244.6 678)">moe-wide</text>
+<rect x="1287.4" y="481.1" width="34.0" height="18.9" fill="#3a8f5c" />
+<line x1="1304.4" y1="480.4" x2="1304.4" y2="481.8" stroke="#20242c" stroke-width="1.4" />
+<line x1="1299.4" y1="480.4" x2="1309.4" y2="480.4" stroke="#20242c" stroke-width="1.4" />
+<line x1="1299.4" y1="481.8" x2="1309.4" y2="481.8" stroke="#20242c" stroke-width="1.4" />
+<text x="1304.4" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1304.4 678)">modern-dense-qknorm-vocab4000</text>
+<rect x="1347.3" y="483.5" width="34.0" height="16.5" fill="#9b59b6" />
+<line x1="1364.3" y1="476.7" x2="1364.3" y2="490.2" stroke="#20242c" stroke-width="1.4" />
+<line x1="1359.3" y1="476.7" x2="1369.3" y2="476.7" stroke="#20242c" stroke-width="1.4" />
+<line x1="1359.3" y1="490.2" x2="1369.3" y2="490.2" stroke="#20242c" stroke-width="1.4" />
+<text x="1364.3" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1364.3 678)">modern-dense-cosine-lr2e3-qknorm</text>
+<rect x="1407.1" y="485.6" width="34.0" height="14.4" fill="#c44e52" />
+<text x="1424.1" y="678" class="x-label" text-anchor="end" transform="rotate(-42 1424.1 678)">dense-wide</text>
+</svg>

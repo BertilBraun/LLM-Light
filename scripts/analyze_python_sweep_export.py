@@ -10,6 +10,7 @@ import tempfile
 import zipfile
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import TypeVar
 
@@ -229,8 +230,29 @@ def test_nested_bundle(outer_archive: zipfile.ZipFile, outer_bundle_path: str) -
 
 
 def select_candidates(candidates: Sequence[BundleCandidate]) -> tuple[BundleCandidate, ...]:
+    expected_experiments = tuple(
+        experiment
+        for experiment in EXPECTED_EXPERIMENTS
+        if any(candidate.experiment == experiment for candidate in candidates)
+    )
+    if expected_experiments:
+        return select_candidates_for_experiments(
+            candidates=candidates,
+            experiments=expected_experiments,
+        )
+    discovered_experiments = tuple(sorted({candidate.experiment for candidate in candidates}))
+    return select_candidates_for_experiments(
+        candidates=candidates,
+        experiments=discovered_experiments,
+    )
+
+
+def select_candidates_for_experiments(
+    candidates: Sequence[BundleCandidate],
+    experiments: Sequence[str],
+) -> tuple[BundleCandidate, ...]:
     selected: list[BundleCandidate] = []
-    for experiment in EXPECTED_EXPERIMENTS:
+    for experiment in experiments:
         experiment_candidates = tuple(
             candidate for candidate in candidates if candidate.experiment == experiment
         )
@@ -257,10 +279,8 @@ def write_clean_export(
     output_path: Path,
     selected_candidates: Sequence[BundleCandidate],
 ) -> None:
-    if len(selected_candidates) != len(EXPECTED_EXPERIMENTS):
-        selected_names = {candidate.experiment for candidate in selected_candidates}
-        missing_names = sorted(set(EXPECTED_EXPERIMENTS) - selected_names)
-        raise ValueError(f"Cannot write clean export; missing experiments: {missing_names}.")
+    if not selected_candidates:
+        raise ValueError("Cannot write clean export; no experiment bundles were selected.")
 
     selected_prefixes = tuple(
         f"{candidate.outer_bundle_path.rsplit('/', maxsplit=1)[0]}/"
@@ -653,103 +673,130 @@ def write_plots(
     plots_directory: Path,
 ) -> tuple[PlotRecord, ...]:
     plots_directory.mkdir(parents=True, exist_ok=True)
-    plot_records = (
-        PlotRecord(
-            title="Checkpoint Python Completion Pass Rate",
-            path=plots_directory / "checkpoint_pass_rate.svg",
-            caption=(
-                "Percentage of unit-test checks passed during checkpoint evaluation. "
-                "Dense 9.6M and modern MoE separate clearly from the small baseline runs."
-            ),
-        ),
-        PlotRecord(
-            title="Checkpoint AST Parse Rate",
-            path=plots_directory / "checkpoint_parse_rate.svg",
-            caption=(
-                "Percentage of completion tasks that produced parseable Python ASTs. "
-                "This isolates syntax validity from semantic correctness."
-            ),
-        ),
-        PlotRecord(
-            title="Checkpoint Passed Checks",
-            path=plots_directory / "checkpoint_passed_checks.svg",
-            caption=(
-                "Raw number of passed unit-test checks over training. The total check count is "
-                "1,012 for these checkpoint evaluations."
-            ),
-        ),
-        PlotRecord(
-            title="Active Parameters vs Final Pass Rate",
-            path=plots_directory / "size_vs_pass_rate.svg",
-            caption=(
-                "Final full-evaluation pass rate against active parameter count. The x-axis is "
-                "log-scaled so the 1M-class and 9.6M dense runs are visible together."
-            ),
-        ),
-        PlotRecord(
-            title="Depth vs Final Pass Rate",
-            path=plots_directory / "depth_vs_pass_rate.svg",
-            caption=(
-                "Final full-evaluation pass rate by layer count. Point radius scales with active "
-                "parameter count."
-            ),
-        ),
-        PlotRecord(
-            title="Final Pass Rate and Perplexity",
-            path=plots_directory / "final_pass_perplexity.svg",
-            caption=(
-                "Final full-evaluation pass rate and validation perplexity. Lower perplexity "
-                "generally tracks better completion performance here."
-            ),
-        ),
-    )
-    line_series = checkpoint_line_series(
+    plot_records: list[PlotRecord] = []
+    pass_rate_series = checkpoint_line_series(
         summaries=summaries,
         metric_name="pass_rate",
         scale=100.0,
     )
-    write_line_plot(
-        path=plot_records[0].path,
-        title=plot_records[0].title,
-        y_label="Pass rate (%)",
-        series=line_series,
+    ast_parse_series = parse_rate_series(summaries=summaries)
+    passed_checks_series = checkpoint_line_series(
+        summaries=summaries,
+        metric_name="passed_checks",
+        scale=1.0,
     )
-    write_line_plot(
-        path=plot_records[1].path,
-        title=plot_records[1].title,
-        y_label="AST parse rate (%)",
-        series=parse_rate_series(summaries=summaries),
-    )
-    write_line_plot(
-        path=plot_records[2].path,
-        title=plot_records[2].title,
-        y_label="Passed checks",
-        series=checkpoint_line_series(
-            summaries=summaries,
-            metric_name="passed_checks",
-            scale=1.0,
+    checkpoint_plot_records = (
+        (
+            pass_rate_series,
+            PlotRecord(
+                title="Checkpoint Python Completion Pass Rate",
+                path=plots_directory / "checkpoint_pass_rate.svg",
+                caption=("Percentage of unit-test checks passed during checkpoint evaluation."),
+            ),
+            "Pass rate (%)",
+        ),
+        (
+            ast_parse_series,
+            PlotRecord(
+                title="Checkpoint AST Parse Rate",
+                path=plots_directory / "checkpoint_parse_rate.svg",
+                caption=(
+                    "Percentage of completion tasks that produced parseable Python ASTs. "
+                    "This isolates syntax validity from semantic correctness."
+                ),
+            ),
+            "AST parse rate (%)",
+        ),
+        (
+            passed_checks_series,
+            PlotRecord(
+                title="Checkpoint Passed Checks",
+                path=plots_directory / "checkpoint_passed_checks.svg",
+                caption="Raw number of passed unit-test checks over training.",
+            ),
+            "Passed checks",
         ),
     )
-    write_scatter_plot(
-        path=plot_records[3].path,
-        title=plot_records[3].title,
-        x_label="Active parameters (log10)",
-        y_label="Final pass rate (%)",
-        points=parameter_pass_points(summaries=summaries),
+    for series, plot_record, y_label in checkpoint_plot_records:
+        if not line_series_has_points(series=series):
+            continue
+        write_line_plot(
+            path=plot_record.path,
+            title=plot_record.title,
+            y_label=y_label,
+            series=series,
+        )
+        plot_records.append(plot_record)
+
+    final_plot_records = (
+        (
+            PlotRecord(
+                title="Active Parameters vs Final Pass Rate",
+                path=plots_directory / "size_vs_pass_rate.svg",
+                caption=(
+                    "Final full-evaluation pass rate against active parameter count. The x-axis is "
+                    "log-scaled so small and larger models are visible together."
+                ),
+            ),
+            "parameter_pass",
+        ),
+        (
+            PlotRecord(
+                title="Depth vs Final Pass Rate",
+                path=plots_directory / "depth_vs_pass_rate.svg",
+                caption=(
+                    "Final full-evaluation pass rate by layer count. Point radius scales with "
+                    "active parameter count."
+                ),
+            ),
+            "depth_pass",
+        ),
+        (
+            PlotRecord(
+                title="Final Pass Rate and Perplexity",
+                path=plots_directory / "final_pass_perplexity.svg",
+                caption=(
+                    "Final full-evaluation pass rate and validation perplexity. Lower perplexity "
+                    "generally tracks better completion performance here."
+                ),
+            ),
+            "final_pass_perplexity",
+        ),
     )
-    write_scatter_plot(
-        path=plot_records[4].path,
-        title=plot_records[4].title,
-        x_label="Layers",
-        y_label="Final pass rate (%)",
-        points=depth_pass_points(summaries=summaries),
-    )
-    write_dual_bar_plot(
-        path=plot_records[5].path,
-        title=plot_records[5].title,
-        summaries=summaries,
-    )
-    return plot_records
+    for plot_record, plot_kind in final_plot_records:
+        match plot_kind:
+            case "parameter_pass":
+                write_scatter_plot(
+                    path=plot_record.path,
+                    title=plot_record.title,
+                    x_label="Active parameters (log10)",
+                    y_label="Final pass rate (%)",
+                    points=parameter_pass_points(summaries=summaries),
+                )
+            case "depth_pass":
+                write_scatter_plot(
+                    path=plot_record.path,
+                    title=plot_record.title,
+                    x_label="Layers",
+                    y_label="Final pass rate (%)",
+                    points=depth_pass_points(summaries=summaries),
+                )
+            case "final_pass_perplexity":
+                write_dual_bar_plot(
+                    path=plot_record.path,
+                    title=plot_record.title,
+                    summaries=summaries,
+                )
+            case _:
+                raise ValueError(f"Unsupported plot kind: {plot_kind}.")
+        plot_records.append(plot_record)
+    return tuple(plot_records)
+
+
+def line_series_has_points(
+    series: Sequence[tuple[str, Sequence[tuple[float, float]]]],
+) -> bool:
+    return any(points for _name, points in series)
 
 
 def checkpoint_line_series(
@@ -1258,8 +1305,9 @@ def render_markdown(
         "## Overview",
         "",
         (
-            f"Analyzed `{outer_zip_path}` on 2026-06-29. ZIP integrity checks passed for the "
-            f"outer export and all selected nested bundles. The cleaned export contains "
+            f"Analyzed `{outer_zip_path}` on {date.today().isoformat()}. "
+            f"{integrity_sentence(outer_bad_file=outer_bad_file, summaries=summaries)} "
+            f"The selected export view contains "
             f"{selected_count} current experiment bundles"
             f"{f'; {stale_count} stale duplicate bundles were removed' if stale_count else ''}."
         ),
@@ -1267,8 +1315,8 @@ def render_markdown(
         (
             "Bundle selection is deterministic: for each experiment, choose the candidate with "
             "the most files, checkpoint-evaluation reports, TensorBoard event files, checkpoint "
-            "files, and then compressed size. All selected bundles have 65 files, 10 checkpoint "
-            "evaluation reports, TensorBoard event files, tokenizer files, and a latest checkpoint."
+            "files, compressed size, and creation time. "
+            f"{selected_bundle_profile(summaries=summaries)}"
         ),
         "",
         (
@@ -1280,12 +1328,7 @@ def render_markdown(
             "checkpoint-evaluation reports and absent from the final full evaluation reports."
         ),
         "",
-        (
-            "Hardware/run notes: the export records `distributed_world_size=2`, "
-            "`distributed_strategy=data_parallel`, and `precision=bf16` for the analyzed "
-            "training logs. The exact GPU model, host CPU, and wall-clock environment are "
-            "not present in the export."
-        ),
+        hardware_notes(summaries=summaries),
         "",
     ]
     lines.extend(render_key_findings(summaries=summaries))
@@ -1296,6 +1339,62 @@ def render_markdown(
     lines.extend(render_anomalies(summaries=summaries))
     lines.extend(render_recommendations())
     return "\n".join(lines) + "\n"
+
+
+def integrity_sentence(
+    outer_bad_file: str | None,
+    summaries: Sequence[ExperimentSummary],
+) -> str:
+    nested_bad_files = tuple(
+        summary.candidate.nested_test_bad_file
+        for summary in summaries
+        if summary.candidate.nested_test_bad_file is not None
+    )
+    if outer_bad_file is None and not nested_bad_files:
+        return "ZIP integrity checks passed for the outer export and all selected nested bundles."
+    if outer_bad_file is not None:
+        return f"Outer ZIP integrity failed at `{outer_bad_file}`."
+    return f"Nested ZIP integrity failed for {len(nested_bad_files)} selected bundle(s)."
+
+
+def selected_bundle_profile(summaries: Sequence[ExperimentSummary]) -> str:
+    file_counts = tuple(summary.candidate.file_count for summary in summaries)
+    report_counts = tuple(summary.candidate.report_count for summary in summaries)
+    event_counts = tuple(summary.candidate.event_count for summary in summaries)
+    checkpoint_counts = tuple(summary.candidate.checkpoint_count for summary in summaries)
+    return (
+        f"Selected bundle ranges: {format_int_range(file_counts)} files, "
+        f"{format_int_range(report_counts)} reports, {format_int_range(event_counts)} "
+        "TensorBoard event files, and "
+        f"{format_int_range(checkpoint_counts)} {pluralize('checkpoint file', checkpoint_counts)}."
+    )
+
+
+def hardware_notes(summaries: Sequence[ExperimentSummary]) -> str:
+    world_sizes = sorted(
+        {
+            summary.training_summary.world_size
+            for summary in summaries
+            if summary.training_summary.world_size is not None
+        }
+    )
+    strategies = sorted(
+        {
+            summary.training_summary.strategy
+            for summary in summaries
+            if summary.training_summary.strategy is not None
+        }
+    )
+    precisions = sorted(
+        {str(summary.configuration.training.precision.value) for summary in summaries}
+    )
+    return (
+        "Hardware/run notes: the export records "
+        f"`distributed_world_size={format_joined_values(world_sizes)}`, "
+        f"`distributed_strategy={format_joined_values(strategies)}`, and "
+        f"`precision={format_joined_values(precisions)}` for the analyzed training logs. "
+        "The exact GPU model, host CPU, and wall-clock environment are not present in the export."
+    )
 
 
 def render_key_findings(summaries: Sequence[ExperimentSummary]) -> list[str]:
@@ -1316,7 +1415,31 @@ def render_key_findings(summaries: Sequence[ExperimentSummary]) -> list[str]:
         summaries,
         key=lambda summary: summary.training_summary.mean_last_100_tokens_per_second,
     )
-    return [
+    lowest_perplexity = min_optional(
+        values=summaries,
+        metric=lambda summary: summary.final_evaluation.perplexity,
+    )
+    router_dominant = tuple(
+        summary
+        for summary in summaries
+        if summary.tensorboard_summary.router_final_worst_dominance is not None
+        and summary.tensorboard_summary.router_final_worst_dominance >= 0.90
+    )
+    checkpoint_regressions = tuple(
+        summary
+        for summary in summaries
+        if pass_delta(
+            summary.checkpoint_summary.final_checkpoint,
+            summary.checkpoint_summary.best_pass_rate,
+        )
+        is not None
+        and pass_delta(
+            summary.checkpoint_summary.final_checkpoint,
+            summary.checkpoint_summary.best_pass_rate,
+        )
+        < -0.01
+    )
+    findings = [
         "## Key Findings",
         "",
         (
@@ -1334,17 +1457,24 @@ def render_key_findings(summaries: Sequence[ExperimentSummary]) -> list[str]:
             "tokens/s over the last 100 training log points, but its final pass rate is only "
             f"{format_percent(fastest.final_evaluation.pass_rate)}."
         ),
-        (
-            "- Classic MoE router dominance is a real concern: several runs route nearly all "
-            "tokens through one expert in the worst layer by the end of training."
-        ),
-        (
-            "- The warmup/decay LR runs likely under-trained relative to fixed LR: their learning "
-            "rate peaks at the fixed baseline and then decays, while final pass rates lag the "
-            "fixed-LR MoE baseline."
-        ),
-        "",
     ]
+    if lowest_perplexity is not None:
+        findings.append(
+            f"- `{lowest_perplexity.name}` has the lowest final validation perplexity "
+            f"({format_optional_float(lowest_perplexity.final_evaluation.perplexity)})."
+        )
+    if router_dominant:
+        findings.append(
+            f"- {len(router_dominant)} MoE run(s) show severe final expert dominance "
+            "(worst-layer dominance >= 0.90)."
+        )
+    if checkpoint_regressions:
+        findings.append(
+            f"- {len(checkpoint_regressions)} run(s) ended more than 1 percentage point below "
+            "their best checkpoint pass rate."
+        )
+    findings.append("")
+    return findings
 
 
 def render_plots_section(
@@ -1355,9 +1485,8 @@ def render_plots_section(
         "## Plots",
         "",
         (
-            "These are generated SVGs checked into `docs/images/python_model_sweep/`. They are "
-            "static Markdown images; for interactive drill-down, use the TensorBoard event files "
-            "inside the export bundles."
+            "These are generated SVGs linked below as static Markdown images. For interactive "
+            "drill-down, use the TensorBoard event files inside the export bundles."
         ),
         "",
     ]
@@ -1989,6 +2118,28 @@ def count_contains(paths: Sequence[str], needle: str) -> int:
 
 def format_int(value: int) -> str:
     return f"{value:,}"
+
+
+def format_int_range(values: Sequence[int]) -> str:
+    if not values:
+        return "missing"
+    minimum_value = min(values)
+    maximum_value = max(values)
+    if minimum_value == maximum_value:
+        return format_int(minimum_value)
+    return f"{format_int(minimum_value)}-{format_int(maximum_value)}"
+
+
+def format_joined_values(values: Sequence[int | str]) -> str:
+    if not values:
+        return "missing"
+    return ", ".join(str(value) for value in values)
+
+
+def pluralize(singular_label: str, values: Sequence[int]) -> str:
+    if values and all(value == 1 for value in values):
+        return singular_label
+    return f"{singular_label}s"
 
 
 def format_optional_int(value: int | None) -> str:

@@ -8,10 +8,10 @@
 .x-label { font: 10px Arial, sans-serif; fill: #20242c; }
 </style>
 <rect x="0" y="0" width="980" height="560" fill="#ffffff" />
-<text x="490.0" y="30" text-anchor="middle" class="title">Active Parameters vs Final Pass Rate</text>
+<text x="490.0" y="30" text-anchor="middle" class="title">Active Parameters vs Mean Final Pass Rate</text>
 <rect x="76" y="54" width="868" height="436" fill="#fbfbfd" stroke="#d5d9e2" />
 <text x="510.0" y="542" text-anchor="middle" class="axis-label">Active parameters (log10)</text>
-<text x="20" y="272.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 272.0)">Final pass rate (%)</text>
+<text x="20" y="272.0" text-anchor="middle" class="axis-label" transform="rotate(-90 20 272.0)">Mean final pass rate (%)</text>
 <line x1="76" y1="490.0" x2="944" y2="490.0" stroke="#e6e9ef" stroke-width="1" />
 <text x="66" y="494.0" text-anchor="end" class="tick">0.0</text>
 <line x1="76" y1="402.8" x2="944" y2="402.8" stroke="#e6e9ef" stroke-width="1" />
@@ -42,16 +42,44 @@
 <text x="139.4" y="420.5" class="point-label" text-anchor="middle">dense-deep</text>
 <circle cx="138.9" cy="475.4" r="4.4" fill="#3a8f5c" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="138.9" y="466.0" class="point-label" text-anchor="middle">dense-wide</text>
-<circle cx="114.8" cy="226.9" r="4.3" fill="#9b59b6" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="119.9" cy="473.3" r="4.3" fill="#9b59b6" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="119.9" y="464.0" class="point-label" text-anchor="middle">modern-dense-cosine-lr2e3-qknorm</text>
+<circle cx="157.7" cy="432.2" r="4.5" fill="#c44e52" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="157.7" y="422.7" class="point-label" text-anchor="middle">modern-dense-deep-qknorm</text>
+<circle cx="153.5" cy="295.7" r="4.5" fill="#5f7f8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="153.5" y="286.3" class="point-label" text-anchor="middle">modern-dense-ffn-large</text>
+<circle cx="119.9" cy="312.2" r="4.3" fill="#b39c2f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="119.9" y="302.9" class="point-label" text-anchor="middle">modern-dense-ffn-medium</text>
+<circle cx="128.9" cy="308.4" r="4.3" fill="#2a9d8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="128.9" y="299.1" class="point-label" text-anchor="middle">modern-dense-ffn</text>
+<circle cx="137.8" cy="440.9" r="4.4" fill="#7f6d5f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="137.8" y="431.5" class="point-label" text-anchor="middle">modern-dense-heads12</text>
+<circle cx="137.8" cy="454.3" r="4.4" fill="#2f6fbb" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="137.8" y="444.9" class="point-label" text-anchor="middle">modern-dense-heads4</text>
+<circle cx="137.8" cy="452.9" r="4.4" fill="#d98634" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="137.8" y="443.5" class="point-label" text-anchor="middle">modern-dense-heads8</text>
+<circle cx="119.9" cy="459.5" r="4.3" fill="#3a8f5c" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="119.9" y="450.2" class="point-label" text-anchor="middle">modern-dense-qknorm-lr2e3</text>
+<circle cx="119.9" cy="471.0" r="4.3" fill="#9b59b6" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="119.9" y="461.7" class="point-label" text-anchor="middle">modern-dense-qknorm-vocab4000</text>
+<circle cx="133.6" cy="254.4" r="4.4" fill="#c44e52" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="133.6" y="245.0" class="point-label" text-anchor="middle">modern-dense-vocab2000-param-match</text>
+<circle cx="119.9" cy="312.2" r="4.3" fill="#5f7f8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="119.9" y="302.9" class="point-label" text-anchor="middle">modern-dense-vocab4000-baseline</text>
+<circle cx="114.8" cy="226.9" r="4.3" fill="#b39c2f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="114.8" y="217.6" class="point-label" text-anchor="middle">modern-moe-deep</text>
-<circle cx="139.9" cy="435.5" r="4.4" fill="#c44e52" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="133.2" cy="197.0" r="4.4" fill="#2a9d8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="133.2" y="187.7" class="point-label" text-anchor="middle">modern-moe-vocab4000-aux010</text>
+<circle cx="139.9" cy="435.5" r="4.4" fill="#7f6d5f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="139.9" y="426.1" class="point-label" text-anchor="middle">moe-deep-cosine</text>
-<circle cx="139.9" cy="419.1" r="4.4" fill="#5f7f8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="139.9" cy="419.1" r="4.4" fill="#2f6fbb" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="139.9" y="409.7" class="point-label" text-anchor="middle">moe-deep-fim</text>
-<circle cx="139.9" cy="452.9" r="4.4" fill="#b39c2f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="139.9" cy="452.9" r="4.4" fill="#d98634" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="139.9" y="443.5" class="point-label" text-anchor="middle">moe-deep-linear</text>
-<circle cx="139.9" cy="381.0" r="4.4" fill="#2a9d8f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="139.9" cy="381.0" r="4.4" fill="#3a8f5c" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="139.9" y="371.6" class="point-label" text-anchor="middle">moe-deep</text>
-<circle cx="139.2" cy="462.3" r="4.4" fill="#7f6d5f" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<circle cx="139.2" cy="462.3" r="4.4" fill="#9b59b6" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
 <text x="139.2" y="452.9" class="point-label" text-anchor="middle">moe-wide</text>
+<circle cx="117.3" cy="354.0" r="4.3" fill="#c44e52" fill-opacity="0.82" stroke="#20242c" stroke-width="1" />
+<text x="117.3" y="344.7" class="point-label" text-anchor="middle">moe-vocab4000-aux010</text>
 </svg>

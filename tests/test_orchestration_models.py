@@ -2,6 +2,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
@@ -20,12 +21,14 @@ from llm_lite.orchestration.runtime import (
     write_run_manifest,
 )
 from llm_lite.pipeline.logging import PipelineEventLogger, PipelineEventType
+from llm_lite.pipeline.registry import ArtifactDirectory, ArtifactRegistry
 from llm_lite.pipeline.stage import StageName
 from llm_lite.pipeline.stages import ORDERED_PIPELINE_STAGES
 from llm_lite.scripts.run_plan import (
     AsyncEvaluationSubmission,
     GpuAllocation,
     GpuPool,
+    RunPlanCancelled,
     _checkpoint_evaluation_submissions,
     _clear_incomplete_artifact_payload,
     _complete_stage_names_from_artifact_store,
@@ -68,6 +71,30 @@ def test_gpu_pool_rejects_requests_larger_than_configured_pool() -> None:
         assert "only 2 device(s)" in str(error)
     else:
         raise AssertionError("Expected oversized GPU request to fail.")
+
+
+def test_gpu_pool_waiting_acquire_stops_after_cancellation() -> None:
+    gpu_pool = GpuPool.from_argument(gpus="0,1")
+    first_allocation = gpu_pool.acquire(gpu_count=2)
+    cancellation_event = Event()
+    errors: list[Exception] = []
+
+    def acquire_after_cancellation() -> None:
+        try:
+            gpu_pool.acquire(gpu_count=2, cancellation_event=cancellation_event)
+        except Exception as error:
+            errors.append(error)
+
+    waiting_thread = Thread(target=acquire_after_cancellation)
+    waiting_thread.start()
+    cancellation_event.set()
+    gpu_pool.notify_waiters()
+    waiting_thread.join(timeout=5.0)
+    gpu_pool.release(gpu_allocation=first_allocation)
+
+    assert not waiting_thread.is_alive()
+    assert len(errors) == 1
+    assert isinstance(errors[0], RunPlanCancelled)
 
 
 def test_checkpoint_evaluation_uses_first_training_gpu() -> None:
@@ -269,6 +296,28 @@ def test_run_plan_accepts_parallel_configurations(tmp_path: Path) -> None:
     assert first_manifest["artifacts"]["raw_dataset"] == second_manifest["artifacts"]["raw_dataset"]
 
 
+def test_artifact_manifest_temporary_write_path_is_process_unique(tmp_path: Path) -> None:
+    artifact_directory = tmp_path / "artifact"
+    registry = ArtifactRegistry(
+        run_directory=tmp_path / "run",
+        artifact_directories=(
+            ArtifactDirectory(artifact_type="raw_dataset", directory=artifact_directory),
+        ),
+    )
+
+    registry.write_running_manifest(
+        artifact_type="raw_dataset",
+        fingerprint="sha256:example",
+        configuration_hash="configuration",
+        parent_hashes={},
+        contract_version=1,
+    )
+
+    assert registry.manifest_path(artifact_type="raw_dataset").exists()
+    assert not (artifact_directory / "manifest.json.pending").exists()
+    assert tuple(artifact_directory.glob("*.pending")) == ()
+
+
 def test_clear_incomplete_artifact_payload_archives_existing_job_log(tmp_path: Path) -> None:
     artifact_store_root = tmp_path / "artifact_store"
     artifact_directory = artifact_store_root / "raw_dataset" / "fingerprint"
@@ -333,6 +382,7 @@ def test_run_missing_artifact_logs_stage_failure(
             gpu_pool=GpuPool.from_argument(gpus=None),
             event_logger=event_logger,
             max_parallel_jobs=1,
+            cancellation_event=Event(),
         )
 
     event_records = tuple(

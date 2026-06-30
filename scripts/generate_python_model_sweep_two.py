@@ -237,6 +237,7 @@ def modern_dense_ffn_medium() -> ExperimentSpecification:
     return ffn_sweep_experiment(
         name="python_modern_dense_ffn_medium",
         feed_forward_dimension=384,
+        batch_size_sequences=128,
     )
 
 
@@ -260,6 +261,7 @@ def modern_dense_deep_qknorm() -> ExperimentSpecification:
             query_key_normalization=True,
         ),
         vocabulary_size=VOCABULARY_SIZE_4000,
+        batch_size_sequences=128,
     )
 
 

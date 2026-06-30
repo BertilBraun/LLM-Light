@@ -36,7 +36,9 @@ QK_NORMALIZATION_EXPERIMENT_NAMES = {
     "python_modern_dense_deep_qknorm",
 }
 EXPECTED_TRAINING_BATCH_SIZE_SEQUENCES = {
+    "python_modern_dense_ffn_medium": 128,
     "python_modern_dense_ffn_large": 128,
+    "python_modern_dense_deep_qknorm": 128,
 }
 
 

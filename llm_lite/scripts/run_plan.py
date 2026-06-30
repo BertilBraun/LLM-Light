@@ -9,7 +9,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from threading import Condition, Thread
+from threading import Condition, Event, Thread
 from typing import TextIO
 
 from llm_lite.config.loading import load_experiment_configuration
@@ -47,6 +47,10 @@ JOB_LOG_NAME = "job.log"
 ARCHIVED_JOB_LOG_DIRECTORY_NAME = ".job_logs"
 
 
+class RunPlanCancelled(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class GpuAllocation:
     visible_devices: tuple[str, ...]
@@ -74,7 +78,13 @@ class GpuPool:
             return cls(visible_devices=())
         return cls(visible_devices=tuple(gpu.strip() for gpu in gpus.split(",") if gpu.strip()))
 
-    def acquire(self, gpu_count: int) -> GpuAllocation:
+    def acquire(
+        self,
+        gpu_count: int,
+        cancellation_event: Event | None = None,
+    ) -> GpuAllocation:
+        if cancellation_event is not None and cancellation_event.is_set():
+            raise RunPlanCancelled("Run plan cancelled after another job failed.")
         if gpu_count == 0:
             return GpuAllocation(visible_devices=())
         if not self.visible_devices:
@@ -86,7 +96,11 @@ class GpuPool:
             )
         with self._condition:
             while len(self._available_devices) < gpu_count:
-                self._condition.wait()
+                if cancellation_event is not None and cancellation_event.is_set():
+                    raise RunPlanCancelled("Run plan cancelled after another job failed.")
+                self._condition.wait(timeout=1.0)
+            if cancellation_event is not None and cancellation_event.is_set():
+                raise RunPlanCancelled("Run plan cancelled after another job failed.")
             allocated_devices = tuple(self._available_devices[:gpu_count])
             del self._available_devices[:gpu_count]
             return GpuAllocation(visible_devices=allocated_devices)
@@ -100,6 +114,10 @@ class GpuPool:
                 assert visible_device not in self._available_devices
             self._available_devices.extend(gpu_allocation.visible_devices)
             self._available_devices.sort(key=self.visible_devices.index)
+            self._condition.notify_all()
+
+    def notify_waiters(self) -> None:
+        with self._condition:
             self._condition.notify_all()
 
 
@@ -171,27 +189,49 @@ def run_plan(
         to_stage=to_stage,
     )
     if max_parallel_jobs == 1 or len(resolved_runs) == 1:
+        cancellation_event = Event()
         for resolved_run in resolved_runs:
             _execute_resolved_run(
                 resolved_run=resolved_run,
                 gpu_pool=gpu_pool,
                 selected_stage_names=selected_stage_names,
                 max_parallel_jobs=max_parallel_jobs,
+                cancellation_event=cancellation_event,
             )
         return 0
+    cancellation_event = Event()
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
         futures = tuple(
             executor.submit(
-                _execute_resolved_run,
+                _execute_resolved_run_with_cancellation,
                 resolved_run,
                 gpu_pool,
                 selected_stage_names,
                 max_parallel_jobs,
+                cancellation_event,
             )
             for resolved_run in resolved_runs
         )
+        cancelled_without_error: RunPlanCancelled | None = None
+        first_error: Exception | None = None
         for future in concurrent.futures.as_completed(futures):
-            future.result()
+            try:
+                future.result()
+            except RunPlanCancelled as error:
+                if cancelled_without_error is None:
+                    cancelled_without_error = error
+            except Exception as error:
+                if first_error is None:
+                    first_error = error
+                    cancellation_event.set()
+                    gpu_pool.notify_waiters()
+                    for pending_future in futures:
+                        if not pending_future.done():
+                            pending_future.cancel()
+        if first_error is not None:
+            raise first_error
+        if cancelled_without_error is not None:
+            raise cancelled_without_error
     return 0
 
 
@@ -226,6 +266,7 @@ def _execute_resolved_run(
     gpu_pool: GpuPool,
     selected_stage_names: tuple[StageName, ...],
     max_parallel_jobs: int,
+    cancellation_event: Event,
 ) -> None:
     write_resolved_configuration(resolved_run=resolved_run)
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
@@ -241,6 +282,8 @@ def _execute_resolved_run(
         completed_stage_names=tuple(completed_stage_names),
     )
     for planned_artifact in resolved_run.artifacts:
+        if cancellation_event.is_set():
+            raise RunPlanCancelled("Run plan cancelled after another job failed.")
         if planned_artifact.stage_name not in selected_stage_names:
             continue
         manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
@@ -271,6 +314,7 @@ def _execute_resolved_run(
             gpu_pool=gpu_pool,
             event_logger=event_logger,
             max_parallel_jobs=max_parallel_jobs,
+            cancellation_event=cancellation_event,
         )
         _append_missing_stage_name(
             completed_stage_names=completed_stage_names,
@@ -284,6 +328,27 @@ def _execute_resolved_run(
             resolved_run=resolved_run,
             completed_stage_names=tuple(completed_stage_names),
         )
+
+
+def _execute_resolved_run_with_cancellation(
+    resolved_run: ResolvedRun,
+    gpu_pool: GpuPool,
+    selected_stage_names: tuple[StageName, ...],
+    max_parallel_jobs: int,
+    cancellation_event: Event,
+) -> None:
+    try:
+        _execute_resolved_run(
+            resolved_run=resolved_run,
+            gpu_pool=gpu_pool,
+            selected_stage_names=selected_stage_names,
+            max_parallel_jobs=max_parallel_jobs,
+            cancellation_event=cancellation_event,
+        )
+    except Exception:
+        cancellation_event.set()
+        gpu_pool.notify_waiters()
+        raise
 
 
 def _complete_stage_names_from_artifact_store(
@@ -312,6 +377,7 @@ def _run_missing_artifact(
     gpu_pool: GpuPool,
     event_logger: PipelineEventLogger,
     max_parallel_jobs: int,
+    cancellation_event: Event,
 ) -> None:
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
     artifact_directory = registry.artifact_directory(
@@ -326,38 +392,48 @@ def _run_missing_artifact(
         fingerprint=planned_artifact.fingerprint.value,
         command=" ".join(command),
     ):
+        if cancellation_event.is_set():
+            raise RunPlanCancelled("Run plan cancelled after another job failed.")
         time.sleep(LOCK_WAIT_SECONDS)
         manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
         if complete_manifest_matches(manifest=manifest, planned_artifact=planned_artifact):
             return
     try:
+        stage_label = _stage_label(
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+        )
         manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
-        if not _can_reuse_incomplete_payload(
+        can_reuse_incomplete_payload = _can_reuse_incomplete_payload(
             artifact_directory=artifact_directory,
             manifest=manifest,
             planned_artifact=planned_artifact,
-        ):
-            _clear_incomplete_artifact_payload(
-                artifact_directory=artifact_directory,
-                artifact_store_root=resolved_run.artifact_store_paths.root_directory,
-            )
-        _log_stage_event(
-            event_logger=event_logger,
-            event_type=PipelineEventType.STAGE_START,
-            stage_name=planned_artifact.stage_name,
-            message="stage job started",
         )
-        console_log(f"[start] {planned_artifact.stage_name.value}")
         try:
             resource_request = _resource_request(
                 resolved_run=resolved_run,
                 planned_artifact=planned_artifact,
             )
-            gpu_allocation = gpu_pool.acquire(gpu_count=resource_request.gpu_count)
+            gpu_allocation = gpu_pool.acquire(
+                gpu_count=resource_request.gpu_count,
+                cancellation_event=cancellation_event,
+            )
             environment = _job_environment(
                 gpu_allocation=gpu_allocation,
             )
             try:
+                if not can_reuse_incomplete_payload:
+                    _clear_incomplete_artifact_payload(
+                        artifact_directory=artifact_directory,
+                        artifact_store_root=resolved_run.artifact_store_paths.root_directory,
+                    )
+                _log_stage_event(
+                    event_logger=event_logger,
+                    event_type=PipelineEventType.STAGE_START,
+                    stage_name=planned_artifact.stage_name,
+                    message="stage job started",
+                )
+                console_log(f"[start] {stage_label}")
                 if _supports_async_checkpoint_evaluation(
                     resolved_run=resolved_run,
                     planned_artifact=planned_artifact,
@@ -391,6 +467,9 @@ def _run_missing_artifact(
                     f"Stage {planned_artifact.stage_name.value} exited without a complete "
                     "manifest.",
                 )
+        except RunPlanCancelled:
+            console_log(f"[cancel] {stage_label}")
+            raise
         except Exception as error:
             _log_stage_event(
                 event_logger=event_logger,
@@ -399,8 +478,7 @@ def _run_missing_artifact(
                 message=_failure_message(error=error, artifact_directory=artifact_directory),
             )
             console_log(
-                f"[fail]  {planned_artifact.stage_name.value}; see "
-                f"{artifact_directory / JOB_LOG_NAME}",
+                f"[fail]  {stage_label}; see {artifact_directory / JOB_LOG_NAME}",
             )
             raise
         _log_stage_event(
@@ -409,7 +487,7 @@ def _run_missing_artifact(
             stage_name=planned_artifact.stage_name,
             message="stage job completed",
         )
-        console_log(f"[done]  {planned_artifact.stage_name.value}")
+        console_log(f"[done]  {stage_label}")
     finally:
         release_artifact_lock(artifact_directory=artifact_directory)
 
@@ -443,6 +521,13 @@ def _job_command(resolved_run: ResolvedRun, planned_artifact: PlannedArtifact) -
         "--fingerprint",
         planned_artifact.fingerprint.value,
     ]
+
+
+def _stage_label(resolved_run: ResolvedRun, planned_artifact: PlannedArtifact) -> str:
+    return (
+        f"{resolved_run.experiment_configuration.experiment.name}/"
+        f"{planned_artifact.stage_name.value}"
+    )
 
 
 def _job_environment(gpu_allocation: GpuAllocation) -> dict[str, str]:

@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import get_ident
 
 from pydantic import ValidationError
 
@@ -166,8 +167,8 @@ class ArtifactRegistry:
 
     def _write_manifest_atomically(self, artifact_type: str, manifest: ArtifactManifest) -> None:
         artifact_directory = self.artifact_directory(artifact_type=artifact_type)
-        temporary_path = artifact_directory / "manifest.json.pending"
         final_path = artifact_directory / "manifest.json"
+        temporary_path = _temporary_manifest_path(final_path=final_path)
         temporary_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
         os.replace(temporary_path, final_path)
 
@@ -180,3 +181,7 @@ class ArtifactRegistry:
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _temporary_manifest_path(final_path: Path) -> Path:
+    return final_path.with_name(f"{final_path.name}.{os.getpid()}.{get_ident()}.pending")

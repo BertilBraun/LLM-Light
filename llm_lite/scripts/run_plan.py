@@ -18,6 +18,12 @@ from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_evaluation_target_from_event,
     checkpoint_event_is_supported_for_evaluation,
 )
+from llm_lite.orchestration.logging import (
+    OrchestrationEventLogger,
+    OrchestrationEventRecord,
+    OrchestrationEventType,
+    utc_timestamp,
+)
 from llm_lite.orchestration.models import PlannedArtifact, ResolvedRun, resolve_run
 from llm_lite.orchestration.runtime import (
     acquire_artifact_lock,
@@ -45,10 +51,26 @@ LOCK_WAIT_SECONDS = 5.0
 CHECKPOINT_EVENT_POLL_SECONDS = 1.0
 JOB_LOG_NAME = "job.log"
 ARCHIVED_JOB_LOG_DIRECTORY_NAME = ".job_logs"
+ORCHESTRATION_LOG_NAME = "orchestration.jsonl"
 
 
 class RunPlanCancelled(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class RunFailure:
+    run_name: str
+    error: Exception
+
+
+class RunPlanFailed(RuntimeError):
+    def __init__(self, failures: tuple[RunFailure, ...]) -> None:
+        self.failures = failures
+        failed_run_names = ", ".join(failure.run_name for failure in failures)
+        super().__init__(
+            f"Run plan completed with {len(failures)} failed run(s): {failed_run_names}"
+        )
 
 
 @dataclass(frozen=True)
@@ -135,10 +157,18 @@ class AsyncEvaluationSubmission:
     checkpoint_manifest_path: Path
 
 
+@dataclass(frozen=True)
+class OrchestrationStageContext:
+    resolved_run: ResolvedRun
+    planned_artifact: PlannedArtifact
+    event_logger: OrchestrationEventLogger
+
+
 def build_argument_parser() -> argparse.ArgumentParser:
     argument_parser = argparse.ArgumentParser()
     argument_parser.add_argument("--config", required=True, nargs="+")
     argument_parser.add_argument("--max-parallel-jobs", type=int, default=1)
+    argument_parser.add_argument("--fail-fast", action="store_true")
     argument_parser.add_argument("--gpus")
     argument_parser.add_argument(
         "--from",
@@ -162,6 +192,7 @@ def main() -> int:
         gpus=arguments.gpus,
         from_stage=None if arguments.from_stage is None else StageName(arguments.from_stage),
         to_stage=None if arguments.to_stage is None else StageName(arguments.to_stage),
+        fail_fast=arguments.fail_fast,
     )
 
 
@@ -171,6 +202,7 @@ def run_plan(
     gpus: str | None,
     from_stage: StageName | None = None,
     to_stage: StageName | None = None,
+    fail_fast: bool = False,
 ) -> int:
     if max_parallel_jobs < 1:
         raise ValueError("--max-parallel-jobs must be at least 1.")
@@ -183,56 +215,158 @@ def run_plan(
         )
         for configuration_path in configuration_paths
     )
+    orchestration_logger = OrchestrationEventLogger(
+        events_path=_orchestration_log_path(resolved_runs=resolved_runs),
+    )
+    console_log(f"[orchestration] writing {orchestration_logger.events_path}")
+    for resolved_run in resolved_runs:
+        _log_run_event(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.RUN_QUEUED,
+            resolved_run=resolved_run,
+            message="run queued for execution",
+        )
     gpu_pool = GpuPool.from_argument(gpus=gpus)
     selected_stage_names = _selected_stage_names(
         from_stage=from_stage,
         to_stage=to_stage,
     )
-    if max_parallel_jobs == 1 or len(resolved_runs) == 1:
+    completed_run_count = 0
+    failures: list[RunFailure] = []
+    cancelled_run_count = 0
+    try:
+        if max_parallel_jobs == 1 or len(resolved_runs) == 1:
+            cancellation_event = Event()
+            for resolved_run in resolved_runs:
+                try:
+                    _execute_resolved_run(
+                        resolved_run=resolved_run,
+                        gpu_pool=gpu_pool,
+                        selected_stage_names=selected_stage_names,
+                        max_parallel_jobs=max_parallel_jobs,
+                        cancellation_event=cancellation_event,
+                        orchestration_logger=orchestration_logger,
+                    )
+                    completed_run_count += 1
+                except RunPlanCancelled as error:
+                    cancelled_run_count += 1
+                    _log_run_event(
+                        event_logger=orchestration_logger,
+                        event_type=OrchestrationEventType.RUN_CANCELLED,
+                        resolved_run=resolved_run,
+                        message=str(error),
+                    )
+                    raise
+                except Exception as error:
+                    failures.append(_run_failure(resolved_run=resolved_run, error=error))
+                    _log_run_failure(
+                        event_logger=orchestration_logger,
+                        resolved_run=resolved_run,
+                        error=error,
+                    )
+                    if fail_fast:
+                        cancellation_event.set()
+                        gpu_pool.notify_waiters()
+                        raise
+            if failures:
+                raise RunPlanFailed(failures=tuple(failures))
+            _log_plan_summary(
+                event_logger=orchestration_logger,
+                event_type=OrchestrationEventType.PLAN_COMPLETED,
+                resolved_runs=resolved_runs,
+                message="run plan completed",
+                completed_run_count=completed_run_count,
+                failed_run_count=len(failures),
+                cancelled_run_count=cancelled_run_count,
+            )
+            return 0
         cancellation_event = Event()
-        for resolved_run in resolved_runs:
-            _execute_resolved_run(
-                resolved_run=resolved_run,
-                gpu_pool=gpu_pool,
-                selected_stage_names=selected_stage_names,
-                max_parallel_jobs=max_parallel_jobs,
-                cancellation_event=cancellation_event,
-            )
-        return 0
-    cancellation_event = Event()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
-        futures = tuple(
-            executor.submit(
-                _execute_resolved_run_with_cancellation,
-                resolved_run,
-                gpu_pool,
-                selected_stage_names,
-                max_parallel_jobs,
-                cancellation_event,
-            )
-            for resolved_run in resolved_runs
-        )
-        cancelled_without_error: RunPlanCancelled | None = None
-        first_error: Exception | None = None
-        for future in concurrent.futures.as_completed(futures):
-            try:
-                future.result()
-            except RunPlanCancelled as error:
-                if cancelled_without_error is None:
-                    cancelled_without_error = error
-            except Exception as error:
-                if first_error is None:
-                    first_error = error
-                    cancellation_event.set()
-                    gpu_pool.notify_waiters()
-                    for pending_future in futures:
-                        if not pending_future.done():
-                            pending_future.cancel()
-        if first_error is not None:
-            raise first_error
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs) as executor:
+            future_runs = {
+                executor.submit(
+                    _execute_resolved_run,
+                    resolved_run=resolved_run,
+                    gpu_pool=gpu_pool,
+                    selected_stage_names=selected_stage_names,
+                    max_parallel_jobs=max_parallel_jobs,
+                    cancellation_event=cancellation_event,
+                    orchestration_logger=orchestration_logger,
+                ): resolved_run
+                for resolved_run in resolved_runs
+            }
+            cancelled_without_error: RunPlanCancelled | None = None
+            for future in concurrent.futures.as_completed(tuple(future_runs)):
+                resolved_run = future_runs[future]
+                try:
+                    future.result()
+                    completed_run_count += 1
+                except concurrent.futures.CancelledError:
+                    cancelled_run_count += 1
+                    _log_run_event(
+                        event_logger=orchestration_logger,
+                        event_type=OrchestrationEventType.RUN_CANCELLED,
+                        resolved_run=resolved_run,
+                        message="run future cancelled before execution",
+                    )
+                except RunPlanCancelled as error:
+                    cancelled_run_count += 1
+                    _log_run_event(
+                        event_logger=orchestration_logger,
+                        event_type=OrchestrationEventType.RUN_CANCELLED,
+                        resolved_run=resolved_run,
+                        message=str(error),
+                    )
+                    if cancelled_without_error is None:
+                        cancelled_without_error = error
+                except Exception as error:
+                    failures.append(_run_failure(resolved_run=resolved_run, error=error))
+                    _log_run_failure(
+                        event_logger=orchestration_logger,
+                        resolved_run=resolved_run,
+                        error=error,
+                    )
+                    if fail_fast:
+                        cancellation_event.set()
+                        gpu_pool.notify_waiters()
+                        for pending_future in future_runs:
+                            if not pending_future.done():
+                                pending_future.cancel()
+        if failures:
+            if fail_fast:
+                raise failures[0].error
+            raise RunPlanFailed(failures=tuple(failures))
         if cancelled_without_error is not None:
             raise cancelled_without_error
-    return 0
+        _log_plan_summary(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.PLAN_COMPLETED,
+            resolved_runs=resolved_runs,
+            message="run plan completed",
+            completed_run_count=completed_run_count,
+            failed_run_count=len(failures),
+            cancelled_run_count=cancelled_run_count,
+        )
+        return 0
+    except Exception as error:
+        _log_plan_summary(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.PLAN_FAILED,
+            resolved_runs=resolved_runs,
+            message=f"{error.__class__.__name__}: {error}",
+            completed_run_count=completed_run_count,
+            failed_run_count=len(failures),
+            cancelled_run_count=cancelled_run_count,
+        )
+        raise
+
+
+def _run_failure(resolved_run: ResolvedRun, error: Exception) -> RunFailure:
+    run_name = resolved_run.experiment_configuration.experiment.name
+    console_log(f"[failed] {run_name}: {error.__class__.__name__}: {error}")
+    return RunFailure(
+        run_name=run_name,
+        error=error,
+    )
 
 
 def _expand_configuration_paths(configurations: tuple[str, ...]) -> tuple[Path, ...]:
@@ -267,10 +401,11 @@ def _execute_resolved_run(
     selected_stage_names: tuple[StageName, ...],
     max_parallel_jobs: int,
     cancellation_event: Event,
+    orchestration_logger: OrchestrationEventLogger,
 ) -> None:
     write_resolved_configuration(resolved_run=resolved_run)
     registry = artifact_registry_for_resolved_run(resolved_run=resolved_run)
-    event_logger = PipelineEventLogger(run_directory=resolved_run.run_directory)
+    pipeline_event_logger = PipelineEventLogger(run_directory=resolved_run.run_directory)
     completed_stage_names = list(
         _complete_stage_names_from_artifact_store(
             resolved_run=resolved_run,
@@ -290,9 +425,16 @@ def _execute_resolved_run(
         if complete_manifest_matches(manifest=manifest, planned_artifact=planned_artifact):
             console_log(f"[cache] {planned_artifact.stage_name.value}: compatible artifact found")
             _log_stage_event(
-                event_logger=event_logger,
+                event_logger=pipeline_event_logger,
                 event_type=PipelineEventType.STAGE_SKIP,
                 stage_name=planned_artifact.stage_name,
+                message="compatible artifact found",
+            )
+            _log_orchestration_stage_event(
+                event_logger=orchestration_logger,
+                event_type=OrchestrationEventType.STAGE_CACHE_HIT,
+                resolved_run=resolved_run,
+                planned_artifact=planned_artifact,
                 message="compatible artifact found",
             )
             _append_missing_stage_name(
@@ -312,7 +454,8 @@ def _execute_resolved_run(
             resolved_run=resolved_run,
             planned_artifact=planned_artifact,
             gpu_pool=gpu_pool,
-            event_logger=event_logger,
+            pipeline_event_logger=pipeline_event_logger,
+            orchestration_logger=orchestration_logger,
             max_parallel_jobs=max_parallel_jobs,
             cancellation_event=cancellation_event,
         )
@@ -328,27 +471,12 @@ def _execute_resolved_run(
             resolved_run=resolved_run,
             completed_stage_names=tuple(completed_stage_names),
         )
-
-
-def _execute_resolved_run_with_cancellation(
-    resolved_run: ResolvedRun,
-    gpu_pool: GpuPool,
-    selected_stage_names: tuple[StageName, ...],
-    max_parallel_jobs: int,
-    cancellation_event: Event,
-) -> None:
-    try:
-        _execute_resolved_run(
-            resolved_run=resolved_run,
-            gpu_pool=gpu_pool,
-            selected_stage_names=selected_stage_names,
-            max_parallel_jobs=max_parallel_jobs,
-            cancellation_event=cancellation_event,
-        )
-    except Exception:
-        cancellation_event.set()
-        gpu_pool.notify_waiters()
-        raise
+    _log_run_event(
+        event_logger=orchestration_logger,
+        event_type=OrchestrationEventType.RUN_COMPLETED,
+        resolved_run=resolved_run,
+        message="run completed",
+    )
 
 
 def _complete_stage_names_from_artifact_store(
@@ -375,7 +503,8 @@ def _run_missing_artifact(
     resolved_run: ResolvedRun,
     planned_artifact: PlannedArtifact,
     gpu_pool: GpuPool,
-    event_logger: PipelineEventLogger,
+    pipeline_event_logger: PipelineEventLogger,
+    orchestration_logger: OrchestrationEventLogger,
     max_parallel_jobs: int,
     cancellation_event: Event,
 ) -> None:
@@ -392,11 +521,25 @@ def _run_missing_artifact(
         fingerprint=planned_artifact.fingerprint.value,
         command=" ".join(command),
     ):
+        _log_orchestration_stage_event(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.STAGE_WAITING_FOR_ARTIFACT_LOCK,
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+            message=f"waiting for artifact lock at {artifact_directory / '.lock'}",
+        )
         if cancellation_event.is_set():
             raise RunPlanCancelled("Run plan cancelled after another job failed.")
         time.sleep(LOCK_WAIT_SECONDS)
         manifest = registry.read_manifest(artifact_type=planned_artifact.stage_name.value)
         if complete_manifest_matches(manifest=manifest, planned_artifact=planned_artifact):
+            _log_orchestration_stage_event(
+                event_logger=orchestration_logger,
+                event_type=OrchestrationEventType.STAGE_CACHE_HIT,
+                resolved_run=resolved_run,
+                planned_artifact=planned_artifact,
+                message="compatible artifact found after waiting for artifact lock",
+            )
             return
     try:
         stage_label = _stage_label(
@@ -414,6 +557,14 @@ def _run_missing_artifact(
                 resolved_run=resolved_run,
                 planned_artifact=planned_artifact,
             )
+            if resource_request.gpu_count > 0:
+                _log_orchestration_stage_event(
+                    event_logger=orchestration_logger,
+                    event_type=OrchestrationEventType.STAGE_WAITING_FOR_GPU_ALLOCATION,
+                    resolved_run=resolved_run,
+                    planned_artifact=planned_artifact,
+                    message=f"waiting for {resource_request.gpu_count} GPU allocation",
+                )
             gpu_allocation = gpu_pool.acquire(
                 gpu_count=resource_request.gpu_count,
                 cancellation_event=cancellation_event,
@@ -428,9 +579,16 @@ def _run_missing_artifact(
                         artifact_store_root=resolved_run.artifact_store_paths.root_directory,
                     )
                 _log_stage_event(
-                    event_logger=event_logger,
+                    event_logger=pipeline_event_logger,
                     event_type=PipelineEventType.STAGE_START,
                     stage_name=planned_artifact.stage_name,
+                    message="stage job started",
+                )
+                _log_orchestration_stage_event(
+                    event_logger=orchestration_logger,
+                    event_type=OrchestrationEventType.STAGE_STARTED,
+                    resolved_run=resolved_run,
+                    planned_artifact=planned_artifact,
                     message="stage job started",
                 )
                 console_log(f"[start] {stage_label}")
@@ -446,13 +604,21 @@ def _run_missing_artifact(
                         artifact_directory=artifact_directory,
                         environment=environment,
                         gpu_allocation=gpu_allocation,
+                        orchestration_logger=orchestration_logger,
                         max_parallel_jobs=max_parallel_jobs,
+                        cancellation_event=cancellation_event,
                     )
                 else:
                     _run_subprocess_job(
                         command=command,
                         artifact_directory=artifact_directory,
                         environment=environment,
+                        cancellation_event=cancellation_event,
+                        stage_context=OrchestrationStageContext(
+                            resolved_run=resolved_run,
+                            planned_artifact=planned_artifact,
+                            event_logger=orchestration_logger,
+                        ),
                     )
             finally:
                 gpu_pool.release(gpu_allocation=gpu_allocation)
@@ -472,9 +638,16 @@ def _run_missing_artifact(
             raise
         except Exception as error:
             _log_stage_event(
-                event_logger=event_logger,
+                event_logger=pipeline_event_logger,
                 event_type=PipelineEventType.STAGE_FAILURE,
                 stage_name=planned_artifact.stage_name,
+                message=_failure_message(error=error, artifact_directory=artifact_directory),
+            )
+            _log_orchestration_stage_event(
+                event_logger=orchestration_logger,
+                event_type=OrchestrationEventType.STAGE_FAILED,
+                resolved_run=resolved_run,
+                planned_artifact=planned_artifact,
                 message=_failure_message(error=error, artifact_directory=artifact_directory),
             )
             console_log(
@@ -482,9 +655,16 @@ def _run_missing_artifact(
             )
             raise
         _log_stage_event(
-            event_logger=event_logger,
+            event_logger=pipeline_event_logger,
             event_type=PipelineEventType.STAGE_COMPLETE,
             stage_name=planned_artifact.stage_name,
+            message="stage job completed",
+        )
+        _log_orchestration_stage_event(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.STAGE_COMPLETED,
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
             message="stage job completed",
         )
         console_log(f"[done]  {stage_label}")
@@ -565,9 +745,19 @@ def _run_subprocess_job(
     command: list[str],
     artifact_directory: Path,
     environment: dict[str, str],
+    cancellation_event: Event,
+    stage_context: OrchestrationStageContext,
 ) -> None:
     log_path = artifact_directory / JOB_LOG_NAME
     with log_path.open("a", encoding="utf-8") as log_file:
+        _log_orchestration_stage_event(
+            event_logger=stage_context.event_logger,
+            event_type=OrchestrationEventType.SUBPROCESS_COMMAND_STARTED,
+            resolved_run=stage_context.resolved_run,
+            planned_artifact=stage_context.planned_artifact,
+            message="subprocess command started",
+            command=tuple(command),
+        )
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -577,9 +767,19 @@ def _run_subprocess_job(
         )
         if process.stdout is None:
             raise ValueError("Subprocess stdout was not captured.")
-        for line in process.stdout:
-            print(line, end="")
-            log_file.write(line)
+        output_thread = Thread(
+            target=_stream_process_output,
+            kwargs={"process": process, "log_file": log_file},
+            daemon=True,
+        )
+        output_thread.start()
+        while process.poll() is None:
+            if cancellation_event.is_set():
+                _terminate_process(process=process)
+                output_thread.join()
+                raise RunPlanCancelled("Run plan cancelled after another job failed.")
+            time.sleep(CHECKPOINT_EVENT_POLL_SECONDS)
+        output_thread.join()
         exit_code = process.wait()
     if exit_code != 0:
         raise subprocess.CalledProcessError(returncode=exit_code, cmd=command)
@@ -604,7 +804,9 @@ def _run_training_job_with_async_evaluations(
     artifact_directory: Path,
     environment: dict[str, str],
     gpu_allocation: GpuAllocation,
+    orchestration_logger: OrchestrationEventLogger,
     max_parallel_jobs: int,
+    cancellation_event: Event,
 ) -> None:
     seen_event_paths: set[Path] = set()
     evaluation_futures: list[concurrent.futures.Future[None]] = []
@@ -613,6 +815,14 @@ def _run_training_job_with_async_evaluations(
         log_path.open("a", encoding="utf-8") as log_file,
         concurrent.futures.ThreadPoolExecutor(max_workers=max_parallel_jobs - 1) as executor,
     ):
+        _log_orchestration_stage_event(
+            event_logger=orchestration_logger,
+            event_type=OrchestrationEventType.SUBPROCESS_COMMAND_STARTED,
+            resolved_run=resolved_run,
+            planned_artifact=planned_artifact,
+            message="subprocess command started",
+            command=tuple(command),
+        )
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -630,6 +840,11 @@ def _run_training_job_with_async_evaluations(
             )
             output_thread.start()
             while process.poll() is None:
+                if cancellation_event.is_set():
+                    _terminate_process(process=process)
+                    output_thread.join()
+                    _cancel_evaluation_futures(evaluation_futures=evaluation_futures)
+                    raise RunPlanCancelled("Run plan cancelled after another job failed.")
                 _submit_ready_checkpoint_evaluations(
                     resolved_run=resolved_run,
                     training_artifact_directory=artifact_directory,
@@ -637,10 +852,15 @@ def _run_training_job_with_async_evaluations(
                     evaluation_futures=evaluation_futures,
                     executor=executor,
                     gpu_allocation=gpu_allocation,
+                    orchestration_logger=orchestration_logger,
+                    cancellation_event=cancellation_event,
                 )
                 _raise_completed_evaluation_failures(evaluation_futures=evaluation_futures)
                 time.sleep(CHECKPOINT_EVENT_POLL_SECONDS)
             output_thread.join()
+            if cancellation_event.is_set():
+                _cancel_evaluation_futures(evaluation_futures=evaluation_futures)
+                raise RunPlanCancelled("Run plan cancelled after another job failed.")
             _submit_ready_checkpoint_evaluations(
                 resolved_run=resolved_run,
                 training_artifact_directory=artifact_directory,
@@ -648,11 +868,14 @@ def _run_training_job_with_async_evaluations(
                 evaluation_futures=evaluation_futures,
                 executor=executor,
                 gpu_allocation=gpu_allocation,
+                orchestration_logger=orchestration_logger,
+                cancellation_event=cancellation_event,
             )
             exit_code = process.wait()
             _wait_for_async_evaluations(evaluation_futures=evaluation_futures)
         except Exception:
             _terminate_process(process=process)
+            output_thread.join()
             raise
     if exit_code != 0:
         raise subprocess.CalledProcessError(returncode=exit_code, cmd=command)
@@ -684,7 +907,11 @@ def _submit_ready_checkpoint_evaluations(
     evaluation_futures: list[concurrent.futures.Future[None]],
     executor: concurrent.futures.ThreadPoolExecutor,
     gpu_allocation: GpuAllocation,
+    orchestration_logger: OrchestrationEventLogger,
+    cancellation_event: Event,
 ) -> None:
+    if cancellation_event.is_set():
+        return
     for submission in _checkpoint_evaluation_submissions(
         resolved_run=resolved_run,
         training_artifact_directory=training_artifact_directory,
@@ -697,6 +924,8 @@ def _submit_ready_checkpoint_evaluations(
                 resolved_run,
                 submission,
                 gpu_allocation.first_device(),
+                orchestration_logger,
+                cancellation_event,
             ),
         )
 
@@ -747,7 +976,11 @@ def _run_checkpoint_evaluation_job(
     resolved_run: ResolvedRun,
     submission: AsyncEvaluationSubmission,
     gpu_allocation: GpuAllocation,
+    orchestration_logger: OrchestrationEventLogger,
+    cancellation_event: Event,
 ) -> None:
+    if cancellation_event.is_set():
+        raise RunPlanCancelled("Run plan cancelled after another job failed.")
     registry = artifact_registry_for_resolved_run(
         resolved_run=resolved_run,
         override_artifact=submission.planned_artifact,
@@ -771,6 +1004,8 @@ def _run_checkpoint_evaluation_job(
         fingerprint=submission.planned_artifact.fingerprint.value,
         command=" ".join(command),
     ):
+        if cancellation_event.is_set():
+            raise RunPlanCancelled("Run plan cancelled after another job failed.")
         time.sleep(LOCK_WAIT_SECONDS)
         manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
         if complete_manifest_matches(
@@ -796,6 +1031,12 @@ def _run_checkpoint_evaluation_job(
             command=command,
             artifact_directory=artifact_directory,
             environment=_job_environment(gpu_allocation=gpu_allocation),
+            cancellation_event=cancellation_event,
+            stage_context=OrchestrationStageContext(
+                resolved_run=resolved_run,
+                planned_artifact=submission.planned_artifact,
+                event_logger=orchestration_logger,
+            ),
         )
         completed_manifest = registry.read_manifest(artifact_type=StageName.EVALUATION.value)
         if not complete_manifest_matches(
@@ -860,6 +1101,13 @@ def _wait_for_async_evaluations(
 ) -> None:
     for future in concurrent.futures.as_completed(tuple(evaluation_futures)):
         future.result()
+
+
+def _cancel_evaluation_futures(
+    evaluation_futures: list[concurrent.futures.Future[None]],
+) -> None:
+    for future in evaluation_futures:
+        future.cancel()
 
 
 def _failure_message(error: Exception, artifact_directory: Path) -> str:
@@ -936,6 +1184,96 @@ def _log_stage_event(
             event_type=event_type,
             stage_name=stage_name,
             message=message,
+        ),
+    )
+
+
+def _orchestration_log_path(resolved_runs: tuple[ResolvedRun, ...]) -> Path:
+    if not resolved_runs:
+        raise ValueError("At least one resolved run is required.")
+    run_parent_directories = tuple(
+        resolved_run.run_directory.parent for resolved_run in resolved_runs
+    )
+    common_directory = Path(
+        os.path.commonpath(tuple(str(directory) for directory in run_parent_directories)),
+    )
+    return common_directory / ORCHESTRATION_LOG_NAME
+
+
+def _log_orchestration_stage_event(
+    event_logger: OrchestrationEventLogger,
+    event_type: OrchestrationEventType,
+    resolved_run: ResolvedRun,
+    planned_artifact: PlannedArtifact,
+    message: str,
+    command: tuple[str, ...] | None = None,
+) -> None:
+    event_logger.write(
+        event_record=OrchestrationEventRecord(
+            timestamp_utc=utc_timestamp(),
+            event_type=event_type,
+            experiment_name=resolved_run.experiment_configuration.experiment.name,
+            run_directory=resolved_run.run_directory,
+            stage_name=planned_artifact.stage_name,
+            artifact_fingerprint=planned_artifact.fingerprint.value,
+            resolved_config_path=resolved_run.resolved_configuration_path,
+            message=message,
+            command=command,
+        ),
+    )
+
+
+def _log_run_event(
+    event_logger: OrchestrationEventLogger,
+    event_type: OrchestrationEventType,
+    resolved_run: ResolvedRun,
+    message: str,
+) -> None:
+    event_logger.write(
+        event_record=OrchestrationEventRecord(
+            timestamp_utc=utc_timestamp(),
+            event_type=event_type,
+            experiment_name=resolved_run.experiment_configuration.experiment.name,
+            run_directory=resolved_run.run_directory,
+            resolved_config_path=resolved_run.resolved_configuration_path,
+            message=message,
+        ),
+    )
+
+
+def _log_run_failure(
+    event_logger: OrchestrationEventLogger,
+    resolved_run: ResolvedRun,
+    error: Exception,
+) -> None:
+    _log_run_event(
+        event_logger=event_logger,
+        event_type=OrchestrationEventType.RUN_FAILED,
+        resolved_run=resolved_run,
+        message=f"{error.__class__.__name__}: {error}",
+    )
+
+
+def _log_plan_summary(
+    event_logger: OrchestrationEventLogger,
+    event_type: OrchestrationEventType,
+    resolved_runs: tuple[ResolvedRun, ...],
+    message: str,
+    completed_run_count: int,
+    failed_run_count: int,
+    cancelled_run_count: int,
+) -> None:
+    event_logger.write(
+        event_record=OrchestrationEventRecord(
+            timestamp_utc=utc_timestamp(),
+            event_type=event_type,
+            experiment_name="run_plan",
+            run_directory=_orchestration_log_path(resolved_runs=resolved_runs).parent,
+            message=message,
+            planned_run_count=len(resolved_runs),
+            completed_run_count=completed_run_count,
+            failed_run_count=failed_run_count,
+            cancelled_run_count=cancelled_run_count,
         ),
     )
 

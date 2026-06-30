@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,12 @@ from llm_lite.orchestration.checkpoint_evaluation import (
     checkpoint_evaluation_target_from_manifest,
     checkpoint_event_is_supported_for_evaluation,
 )
+from llm_lite.orchestration.logging import (
+    OrchestrationEventLogger,
+    OrchestrationEventRecord,
+    OrchestrationEventType,
+    utc_timestamp,
+)
 from llm_lite.orchestration.models import ArtifactStorePaths, ResolvedRun, resolve_run
 from llm_lite.orchestration.runtime import (
     artifact_registry_for_resolved_run,
@@ -28,13 +35,17 @@ from llm_lite.scripts.run_plan import (
     AsyncEvaluationSubmission,
     GpuAllocation,
     GpuPool,
+    OrchestrationStageContext,
     RunPlanCancelled,
+    RunPlanFailed,
     _checkpoint_evaluation_submissions,
     _clear_incomplete_artifact_payload,
     _complete_stage_names_from_artifact_store,
     _job_environment,
+    _orchestration_log_path,
     _run_checkpoint_evaluation_job,
     _run_missing_artifact,
+    _run_subprocess_job,
     run_plan,
 )
 
@@ -296,6 +307,268 @@ def test_run_plan_accepts_parallel_configurations(tmp_path: Path) -> None:
     assert first_manifest["artifacts"]["raw_dataset"] == second_manifest["artifacts"]["raw_dataset"]
 
 
+def test_run_plan_continues_after_run_failure_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_configuration_path, second_configuration_path = _write_two_run_configurations(
+        tmp_path=tmp_path,
+    )
+    executed_run_names: list[str] = []
+
+    def execute_resolved_run(
+        resolved_run: ResolvedRun,
+        gpu_pool: GpuPool,
+        selected_stage_names: tuple[StageName, ...],
+        max_parallel_jobs: int,
+        cancellation_event: Event,
+        orchestration_logger: OrchestrationEventLogger,
+    ) -> None:
+        run_name = resolved_run.experiment_configuration.experiment.name
+        executed_run_names.append(run_name)
+        if run_name == "first":
+            raise ValueError("planned failure")
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._execute_resolved_run",
+        execute_resolved_run,
+    )
+
+    with pytest.raises(RunPlanFailed) as error_info:
+        run_plan(
+            configuration_paths=(first_configuration_path, second_configuration_path),
+            max_parallel_jobs=1,
+            gpus=None,
+        )
+
+    assert executed_run_names == ["first", "second"]
+    assert tuple(failure.run_name for failure in error_info.value.failures) == ("first",)
+
+
+def test_run_plan_fail_fast_stops_after_first_run_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_configuration_path, second_configuration_path = _write_two_run_configurations(
+        tmp_path=tmp_path,
+    )
+    executed_run_names: list[str] = []
+
+    def execute_resolved_run(
+        resolved_run: ResolvedRun,
+        gpu_pool: GpuPool,
+        selected_stage_names: tuple[StageName, ...],
+        max_parallel_jobs: int,
+        cancellation_event: Event,
+        orchestration_logger: OrchestrationEventLogger,
+    ) -> None:
+        run_name = resolved_run.experiment_configuration.experiment.name
+        executed_run_names.append(run_name)
+        if run_name == "first":
+            raise ValueError("planned failure")
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._execute_resolved_run",
+        execute_resolved_run,
+    )
+
+    with pytest.raises(ValueError, match="planned failure"):
+        run_plan(
+            configuration_paths=(first_configuration_path, second_configuration_path),
+            max_parallel_jobs=1,
+            gpus=None,
+            fail_fast=True,
+        )
+
+    assert executed_run_names == ["first"]
+
+
+def test_run_plan_writes_queued_orchestration_events_for_all_configs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_configuration_path, second_configuration_path = _write_two_run_configurations(
+        tmp_path=tmp_path,
+    )
+
+    def execute_resolved_run(
+        resolved_run: ResolvedRun,
+        gpu_pool: GpuPool,
+        selected_stage_names: tuple[StageName, ...],
+        max_parallel_jobs: int,
+        cancellation_event: Event,
+        orchestration_logger: OrchestrationEventLogger,
+    ) -> None:
+        return
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._execute_resolved_run",
+        execute_resolved_run,
+    )
+
+    exit_code = run_plan(
+        configuration_paths=(first_configuration_path, second_configuration_path),
+        max_parallel_jobs=1,
+        gpus=None,
+    )
+
+    event_records = _read_jsonl(path=tmp_path / "runs" / "orchestration.jsonl")
+    queued_events = tuple(
+        event_record
+        for event_record in event_records
+        if event_record.event_type is OrchestrationEventType.RUN_QUEUED
+    )
+
+    assert exit_code == 0
+    assert {event_record.experiment_name for event_record in queued_events} == {
+        "first",
+        "second",
+    }
+
+
+def test_run_plan_orchestration_cache_hit_includes_run_and_stage(tmp_path: Path) -> None:
+    run_directory = tmp_path / "runs" / "cached"
+    configuration_path = tmp_path / "cached.yaml"
+    configuration_path.write_text(
+        Path("configs/verify_one_sentence.yaml")
+        .read_text(encoding="utf-8")
+        .replace("name: verify_one_sentence", "name: cached")
+        .replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+
+    run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
+        to_stage=StageName.RAW_DATASET,
+    )
+    run_plan(
+        configuration_paths=(configuration_path,),
+        max_parallel_jobs=1,
+        gpus=None,
+        to_stage=StageName.RAW_DATASET,
+    )
+
+    event_records = _read_jsonl(path=tmp_path / "runs" / "orchestration.jsonl")
+    cache_hit_events = tuple(
+        event_record
+        for event_record in event_records
+        if event_record.event_type is OrchestrationEventType.STAGE_CACHE_HIT
+    )
+
+    assert len(cache_hit_events) == 1
+    assert cache_hit_events[0].experiment_name == "cached"
+    assert cache_hit_events[0].run_directory == run_directory
+    assert cache_hit_events[0].stage_name is StageName.RAW_DATASET
+    assert cache_hit_events[0].artifact_fingerprint is not None
+    assert cache_hit_events[0].artifact_fingerprint.startswith("sha256:")
+
+
+def test_run_plan_records_failed_run_and_plan_failure_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_configuration_path, second_configuration_path = _write_two_run_configurations(
+        tmp_path=tmp_path,
+    )
+
+    def execute_resolved_run(
+        resolved_run: ResolvedRun,
+        gpu_pool: GpuPool,
+        selected_stage_names: tuple[StageName, ...],
+        max_parallel_jobs: int,
+        cancellation_event: Event,
+        orchestration_logger: OrchestrationEventLogger,
+    ) -> None:
+        if resolved_run.experiment_configuration.experiment.name == "first":
+            raise ValueError("planned failure")
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._execute_resolved_run",
+        execute_resolved_run,
+    )
+
+    with pytest.raises(RunPlanFailed):
+        run_plan(
+            configuration_paths=(first_configuration_path, second_configuration_path),
+            max_parallel_jobs=1,
+            gpus=None,
+        )
+
+    event_records = _read_jsonl(path=tmp_path / "runs" / "orchestration.jsonl")
+    failed_run_events = tuple(
+        event_record
+        for event_record in event_records
+        if event_record.event_type is OrchestrationEventType.RUN_FAILED
+    )
+    plan_failed_events = tuple(
+        event_record
+        for event_record in event_records
+        if event_record.event_type is OrchestrationEventType.PLAN_FAILED
+    )
+
+    assert len(failed_run_events) == 1
+    assert failed_run_events[0].experiment_name == "first"
+    assert "planned failure" in failed_run_events[0].message
+    assert len(plan_failed_events) == 1
+    assert plan_failed_events[0].planned_run_count == 2
+    assert plan_failed_events[0].completed_run_count == 1
+    assert plan_failed_events[0].failed_run_count == 1
+
+
+def test_parallel_orchestration_logging_writes_valid_jsonl(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_configuration_path, second_configuration_path = _write_two_run_configurations(
+        tmp_path=tmp_path,
+    )
+
+    def execute_resolved_run(
+        resolved_run: ResolvedRun,
+        gpu_pool: GpuPool,
+        selected_stage_names: tuple[StageName, ...],
+        max_parallel_jobs: int,
+        cancellation_event: Event,
+        orchestration_logger: OrchestrationEventLogger,
+    ) -> None:
+        for event_index in range(50):
+            orchestration_logger.write(
+                event_record=OrchestrationEventRecord(
+                    timestamp_utc=utc_timestamp(),
+                    event_type=OrchestrationEventType.RUN_COMPLETED,
+                    experiment_name=resolved_run.experiment_configuration.experiment.name,
+                    run_directory=resolved_run.run_directory,
+                    resolved_config_path=resolved_run.resolved_configuration_path,
+                    message=f"parallel test event {event_index}",
+                ),
+            )
+
+    monkeypatch.setattr(
+        "llm_lite.scripts.run_plan._execute_resolved_run",
+        execute_resolved_run,
+    )
+
+    run_plan(
+        configuration_paths=(first_configuration_path, second_configuration_path),
+        max_parallel_jobs=2,
+        gpus=None,
+    )
+
+    event_records = _read_jsonl(path=tmp_path / "runs" / "orchestration.jsonl")
+    parallel_events = tuple(
+        event_record
+        for event_record in event_records
+        if event_record.message.startswith("parallel test event")
+    )
+
+    assert len(parallel_events) == 100
+
+
 def test_artifact_manifest_temporary_write_path_is_process_unique(tmp_path: Path) -> None:
     artifact_directory = tmp_path / "artifact"
     registry = ArtifactRegistry(
@@ -367,6 +640,8 @@ def test_run_missing_artifact_logs_stage_failure(
         command: list[str],
         artifact_directory: Path,
         environment: dict[str, str],
+        cancellation_event: Event,
+        stage_context: OrchestrationStageContext,
     ) -> None:
         raise subprocess.CalledProcessError(returncode=42, cmd=command)
 
@@ -380,7 +655,10 @@ def test_run_missing_artifact_logs_stage_failure(
             resolved_run=resolved_run,
             planned_artifact=planned_artifact,
             gpu_pool=GpuPool.from_argument(gpus=None),
-            event_logger=event_logger,
+            pipeline_event_logger=event_logger,
+            orchestration_logger=OrchestrationEventLogger(
+                events_path=_orchestration_log_path(resolved_runs=(resolved_run,)),
+            ),
             max_parallel_jobs=1,
             cancellation_event=Event(),
         )
@@ -394,6 +672,36 @@ def test_run_missing_artifact_logs_stage_failure(
     assert event_records[-1]["stage_name"] == StageName.RAW_DATASET.value
     assert "CalledProcessError" in event_records[-1]["message"]
     assert "job.log" in event_records[-1]["message"]
+
+
+def test_subprocess_job_terminates_after_cancellation(tmp_path: Path) -> None:
+    cancellation_event = Event()
+    cancellation_event.set()
+    resolved_run = _resolved_run_with_output_directory(
+        output_directory=tmp_path / "run",
+    )
+    planned_artifact = resolved_run.artifact_for_stage(stage_name=StageName.RAW_DATASET)
+
+    with pytest.raises(RunPlanCancelled):
+        _run_subprocess_job(
+            command=[
+                sys.executable,
+                "-c",
+                "import time; print('started', flush=True); time.sleep(30)",
+            ],
+            artifact_directory=tmp_path,
+            environment=dict(os.environ),
+            cancellation_event=cancellation_event,
+            stage_context=OrchestrationStageContext(
+                resolved_run=resolved_run,
+                planned_artifact=planned_artifact,
+                event_logger=OrchestrationEventLogger(
+                    events_path=_orchestration_log_path(resolved_runs=(resolved_run,)),
+                ),
+            ),
+        )
+
+    assert (tmp_path / "job.log").exists()
 
 
 def test_run_manifest_preserves_complete_artifacts_for_partial_stage_run(
@@ -629,31 +937,17 @@ def test_pruned_queued_checkpoint_evaluation_is_skipped(tmp_path: Path) -> None:
         resolved_run=resolved_run,
         submission=submission,
         gpu_allocation=GpuAllocation(visible_devices=()),
+        orchestration_logger=OrchestrationEventLogger(
+            events_path=_orchestration_log_path(resolved_runs=(resolved_run,)),
+        ),
+        cancellation_event=Event(),
     )
 
 
 def _resolved_run_with_training_evaluation(tmp_path: Path) -> tuple[ResolvedRun, Path]:
-    base_experiment_configuration = load_experiment_configuration(
-        configuration_path=Path("configs/verify_one_sentence.yaml"),
-    )
-    experiment_configuration = base_experiment_configuration.model_copy(
-        update={
-            "experiment": base_experiment_configuration.experiment.model_copy(
-                update={"output_dir": tmp_path / "run"},
-            ),
-            "training": base_experiment_configuration.training.model_copy(
-                update={
-                    "evaluation": TrainingEvaluationConfiguration(
-                        interval_steps=2,
-                        evaluators=base_experiment_configuration.evaluation,
-                    ),
-                },
-            ),
-        },
-    )
-    resolved_run = resolve_run(
-        experiment_configuration=experiment_configuration,
-        stages=ORDERED_PIPELINE_STAGES,
+    resolved_run = _resolved_run_with_output_directory(
+        output_directory=tmp_path / "run",
+        training_evaluation_interval_steps=2,
     )
     pretraining_artifact = resolved_run.artifact_for_stage(stage_name=StageName.PRETRAINING)
     pretraining_artifact_directory = resolved_run.artifact_store_paths.artifact_directory(
@@ -661,6 +955,74 @@ def _resolved_run_with_training_evaluation(tmp_path: Path) -> tuple[ResolvedRun,
         fingerprint=pretraining_artifact.fingerprint,
     )
     return resolved_run, pretraining_artifact_directory
+
+
+def _resolved_run_with_output_directory(
+    output_directory: Path,
+    training_evaluation_interval_steps: int | None = None,
+) -> ResolvedRun:
+    base_experiment_configuration = load_experiment_configuration(
+        configuration_path=Path("configs/verify_one_sentence.yaml"),
+    )
+    if training_evaluation_interval_steps is not None:
+        training_configuration = base_experiment_configuration.training.model_copy(
+            update={
+                "evaluation": TrainingEvaluationConfiguration(
+                    interval_steps=training_evaluation_interval_steps,
+                    evaluators=base_experiment_configuration.evaluation,
+                ),
+            },
+        )
+    else:
+        training_configuration = base_experiment_configuration.training
+    experiment_configuration = base_experiment_configuration.model_copy(
+        update={
+            "experiment": base_experiment_configuration.experiment.model_copy(
+                update={"output_dir": output_directory},
+            ),
+            "training": training_configuration,
+        },
+    )
+    return resolve_run(
+        experiment_configuration=experiment_configuration,
+        stages=ORDERED_PIPELINE_STAGES,
+    )
+
+
+def _write_two_run_configurations(tmp_path: Path) -> tuple[Path, Path]:
+    first_run_directory = tmp_path / "runs" / "first"
+    second_run_directory = tmp_path / "runs" / "second"
+    first_configuration_path = tmp_path / "first.yaml"
+    second_configuration_path = tmp_path / "second.yaml"
+    base_configuration_text = Path("configs/verify_one_sentence.yaml").read_text(encoding="utf-8")
+    first_configuration_path.write_text(
+        base_configuration_text.replace(
+            "name: verify_one_sentence",
+            "name: first",
+        ).replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(first_run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+    second_configuration_path.write_text(
+        base_configuration_text.replace(
+            "name: verify_one_sentence",
+            "name: second",
+        ).replace(
+            "output_dir: runs/verify_one_sentence",
+            f"output_dir: {str(second_run_directory).replace(chr(92), '/')}",
+        ),
+        encoding="utf-8",
+    )
+    return first_configuration_path, second_configuration_path
+
+
+def _read_jsonl(path: Path) -> tuple[OrchestrationEventRecord, ...]:
+    return tuple(
+        OrchestrationEventRecord.model_validate_json(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    )
 
 
 def _write_checkpoint_event(

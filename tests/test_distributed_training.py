@@ -14,6 +14,7 @@ from llm_lite.config.models import (
     DenseGptConfiguration,
     DistributedConfiguration,
     ModelType,
+    ModernMoeGptConfiguration,
     MoeGptConfiguration,
     TrainingConfiguration,
 )
@@ -23,6 +24,7 @@ from llm_lite.data.datasets import (
     write_packed_sequence_stream,
 )
 from llm_lite.model.gpt import DenseGpt
+from llm_lite.model.modern import ModernMoeGpt
 from llm_lite.model.moe import MoeGpt
 from llm_lite.training.distributed import DistributedRuntime, prepare_model_for_distributed_training
 from llm_lite.training.objectives import CausalLanguageModelingObjectiveRunner
@@ -104,9 +106,17 @@ def test_data_parallel_wrap_enables_unused_parameter_detection_for_sparse_moe(
         model=MoeGpt(model_configuration=_tiny_sparse_moe_configuration(), vocabulary_size=16),
         distributed_runtime=runtime,
     )
+    prepare_model_for_distributed_training(
+        model=ModernMoeGpt(
+            model_configuration=_tiny_sparse_modern_moe_configuration(),
+            vocabulary_size=16,
+        ),
+        distributed_runtime=runtime,
+    )
 
     assert ddp_calls[0]["find_unused_parameters"] is False
     assert ddp_calls[1]["find_unused_parameters"] is True
+    assert ddp_calls[2]["find_unused_parameters"] is True
 
 
 @pytest.mark.skipif(
@@ -175,6 +185,20 @@ def _tiny_model_configuration() -> DenseGptConfiguration:
 def _tiny_sparse_moe_configuration() -> MoeGptConfiguration:
     return MoeGptConfiguration(
         type=ModelType.MOE_GPT,
+        dimension=8,
+        layers=1,
+        attention_heads=2,
+        expert_feed_forward_dimension=16,
+        expert_count=4,
+        router_top_k=1,
+        dropout=0.0,
+        tie_embeddings=False,
+    )
+
+
+def _tiny_sparse_modern_moe_configuration() -> ModernMoeGptConfiguration:
+    return ModernMoeGptConfiguration(
+        type=ModelType.MODERN_MOE_GPT,
         dimension=8,
         layers=1,
         attention_heads=2,

@@ -11,6 +11,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel
 from torch.nn.parallel import DistributedDataParallel
 
 from llm_lite.config.models import DistributedConfiguration, DistributedStrategy
+from llm_lite.model.modern import ModernMoeGpt
 from llm_lite.model.moe import MoeGpt
 from llm_lite.training.topology import DistributedTopology, RankTopology, build_distributed_topology
 
@@ -127,7 +128,12 @@ def unwrap_distributed_model(model: nn.Module) -> nn.Module:
 
 def _needs_unused_parameter_detection(model: nn.Module) -> bool:
     match model:
-        case MoeGpt(model_configuration=model_configuration):
+        case (
+            MoeGpt(model_configuration=model_configuration)
+            | ModernMoeGpt(
+                model_configuration=model_configuration,
+            )
+        ):
             return model_configuration.router_top_k < model_configuration.expert_count
         case _:
             return False

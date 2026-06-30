@@ -14,6 +14,10 @@ EXPECTED_EXPERIMENT_NAMES = (
     "python_modern_dense_active10m_vocab2000",
 )
 EXPECTED_ACTIVE_PARAMETERS = (986608, 986608, 1001680, 1001680, 9784576, 9737280)
+LARGE_EXPERIMENT_NAMES = {
+    "python_modern_moe_deep10_vocab2000_aux020",
+    "python_modern_dense_active10m_vocab2000",
+}
 
 
 def test_generate_python_model_sweep_three_writes_expected_configs(
@@ -58,8 +62,12 @@ def test_generate_python_model_sweep_three_writes_expected_configs(
         }
         assert experiment_configuration.tokenizer.vocabulary_size == 2000
         assert not experiment_configuration.packing.fill_in_middle.enabled
-        assert experiment_configuration.training.batch_size_sequences == 256
-        assert experiment_configuration.training.maximum_steps == 15000
+        if experiment_configuration.experiment.name in LARGE_EXPERIMENT_NAMES:
+            assert experiment_configuration.training.batch_size_sequences == 128
+            assert experiment_configuration.training.maximum_steps == 30000
+        else:
+            assert experiment_configuration.training.batch_size_sequences == 256
+            assert experiment_configuration.training.maximum_steps == 15000
         assert experiment_configuration.training.max_checkpoints == 2
         assert experiment_configuration.training.optimizer.learning_rate == 0.001
         assert (

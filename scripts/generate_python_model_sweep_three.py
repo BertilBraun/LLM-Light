@@ -23,8 +23,10 @@ from llm_lite.model.parameters import ModelParameterSummary, model_parameter_sum
 
 DEFAULT_BASE_CONFIGURATION_PATH = Path("configs/python_moe_full.yaml")
 DEFAULT_OUTPUT_DIRECTORY = Path("configs/generated/python_model_sweep_three")
-MAXIMUM_STEPS = 15000
-BATCH_SIZE_SEQUENCES = 256
+SMALL_MAXIMUM_STEPS = 15000
+SMALL_BATCH_SIZE_SEQUENCES = 256
+LARGE_MAXIMUM_STEPS = 30000
+LARGE_BATCH_SIZE_SEQUENCES = 128
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 0.1
 MAX_CHECKPOINTS = 2
@@ -36,6 +38,8 @@ class ExperimentSpecification:
     name: str
     model: ModelConfiguration
     auxiliary_loss_weight: float
+    maximum_steps: int = SMALL_MAXIMUM_STEPS
+    batch_size_sequences: int = SMALL_BATCH_SIZE_SEQUENCES
 
 
 @dataclass(frozen=True)
@@ -183,6 +187,8 @@ def modern_moe_deep10_vocab2000_aux020() -> ExperimentSpecification:
             dropout=0.05,
         ),
         auxiliary_loss_weight=0.2,
+        maximum_steps=LARGE_MAXIMUM_STEPS,
+        batch_size_sequences=LARGE_BATCH_SIZE_SEQUENCES,
     )
 
 
@@ -197,6 +203,8 @@ def modern_dense_active10m_vocab2000() -> ExperimentSpecification:
             dropout=0.05,
         ),
         auxiliary_loss_weight=0.0,
+        maximum_steps=LARGE_MAXIMUM_STEPS,
+        batch_size_sequences=LARGE_BATCH_SIZE_SEQUENCES,
     )
 
 
@@ -233,8 +241,8 @@ def overrides_for_experiment(
         model=experiment_specification.model,
         training=training(
             base_training=base_configuration.training,
-            maximum_steps=MAXIMUM_STEPS,
-            batch_size_sequences=BATCH_SIZE_SEQUENCES,
+            maximum_steps=experiment_specification.maximum_steps,
+            batch_size_sequences=experiment_specification.batch_size_sequences,
             learning_rate=LEARNING_RATE,
             weight_decay=WEIGHT_DECAY,
             auxiliary_loss_weight=experiment_specification.auxiliary_loss_weight,

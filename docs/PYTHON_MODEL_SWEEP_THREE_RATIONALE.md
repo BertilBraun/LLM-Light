@@ -50,3 +50,5 @@ The small top-k=2 models are not the same architecture as the top-k=1 models. Th
 The big MoE uses 10 layers rather than 12 to test depth without making the architecture too narrow or too slow. It keeps `router_top_k=1` so the active-parameter comparison against the dense control is clean.
 
 The big dense control is included because the 10M MoE comparison would otherwise be ambiguous. Both big runs use vocab 2000 and are matched within roughly 50k active parameters.
+
+The two large runs use batch size 128 and 30,000 steps. The smaller batch is intended to fit memory for the 10M-active models, while the doubled step count preserves the approximate token budget of the 256-batch, 15,000-step small runs.

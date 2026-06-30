@@ -7,6 +7,7 @@ set -euo pipefail
 #   bash scripts/train.sh
 #   SWEEP_MODE=full bash scripts/train.sh
 #   SWEEP_MODE=pilot_then_full bash scripts/train.sh
+#   SWEEP_GENERATOR_SCRIPT=./scripts/generate_python_model_sweep_two.py SWEEP_OUTPUT_DIRECTORY=configs/generated/python_model_sweep_two bash scripts/train.sh
 #
 # Common overrides:
 #   REPO_URL=https://github.com/BertilBraun/LLM-Light.git
@@ -15,6 +16,7 @@ set -euo pipefail
 #   GPU_IDS=0,1,2,3
 #   MAX_PARALLEL_JOBS=2
 #   SWEEP_MODE=pilot
+#   SWEEP_GENERATOR_SCRIPT=./scripts/generate_python_model_sweep.py
 #   SYNC_EXTRAS=dev
 
 REPO_URL="${REPO_URL:-https://github.com/BertilBraun/LLM-Light.git}"
@@ -23,6 +25,7 @@ BRANCH="${BRANCH:-master}"
 GPU_IDS="${GPU_IDS-0,1,2,3}"
 MAX_PARALLEL_JOBS="${MAX_PARALLEL_JOBS:-2}"
 SWEEP_MODE="${SWEEP_MODE:-pilot}"
+SWEEP_GENERATOR_SCRIPT="${SWEEP_GENERATOR_SCRIPT:-./scripts/generate_python_model_sweep.py}"
 BASE_CONFIGURATION_PATH="${BASE_CONFIGURATION_PATH:-configs/python_moe_full.yaml}"
 SWEEP_OUTPUT_DIRECTORY="${SWEEP_OUTPUT_DIRECTORY:-configs/generated/python_model_sweep}"
 SYNC_EXTRAS="${SYNC_EXTRAS-dev}"
@@ -40,18 +43,21 @@ python_gpu_count_from_list() {
 
 run_sweep_mode() {
   local mode="$1"
+  local mode_arguments=()
 
-  echo "Generating Python model sweep: $mode"
-  if [ "$mode" = "pilot" ]; then
-    uv run python ./scripts/generate_python_model_sweep.py \
-      --base-configuration-path "$BASE_CONFIGURATION_PATH" \
-      --output-directory "$SWEEP_OUTPUT_DIRECTORY"
-  else
-    uv run python ./scripts/generate_python_model_sweep.py \
-      --mode full \
-      --base-configuration-path "$BASE_CONFIGURATION_PATH" \
-      --output-directory "$SWEEP_OUTPUT_DIRECTORY"
+  if uv run python "$SWEEP_GENERATOR_SCRIPT" --help 2>&1 | grep -q -- "--mode"; then
+    mode_arguments=(--mode "$mode")
+  elif [ "$SWEEP_MODE" = "pilot_then_full" ]; then
+    echo "SWEEP_GENERATOR_SCRIPT does not accept --mode; pilot_then_full would run it twice."
+    echo "Use SWEEP_MODE=pilot or SWEEP_MODE=full for this generator."
+    exit 1
   fi
+
+  echo "Generating Python model sweep: $mode with $SWEEP_GENERATOR_SCRIPT"
+  uv run python "$SWEEP_GENERATOR_SCRIPT" \
+    "${mode_arguments[@]}" \
+    --base-configuration-path "$BASE_CONFIGURATION_PATH" \
+    --output-directory "$SWEEP_OUTPUT_DIRECTORY"
 
   echo "Running Python model sweep plan: $mode"
   if [ -n "$GPU_IDS" ]; then

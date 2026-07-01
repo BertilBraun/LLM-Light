@@ -1,15 +1,15 @@
 # Python Model Sweep Results
 
-Aggregated 36 selected runs into 23 experiment groups on 2026-06-30.
+Aggregated 42 selected runs into 29 experiment groups on 2026-07-01.
 
-Source identity is intentionally ignored. The input was 3 ZIP exports with 37 candidate bundles; duplicate experiment names are grouped before reporting.
+Source identity is intentionally ignored. The input was 4 ZIP exports with 43 candidate bundles; duplicate experiment names are grouped before reporting.
 
 Numeric cells use `mean +/- population standard deviation` across runs with the same experiment name. Static configuration fields are shown once when they are identical across the group.
 
 ## Key Findings
 
-- Best mean final pass rate: `python_dense_active_9m6` at 83.70% +/- 0.00 pp.
-- Best sub-2M-active-parameter model: `python_modern_moe_vocab4000_aux010` at 61.61% +/- 0.15 pp.
+- Best mean final pass rate: `python_modern_moe_deep10_vocab2000_aux020` at 88.14% +/- 0.00 pp.
+- Best sub-2M-active-parameter model: `python_modern_moe_vocab2000_aux020` at 69.37% +/- 0.00 pp.
 - Highest mean late-training throughput: `python_modern_dense_heads4` at 3,219,395 +/- 325,484 tokens/s.
 - Largest repeated-run final-pass variation: `python_modern_dense_ffn_large` at 40.86% +/- 2.22 pp.
 
@@ -17,7 +17,13 @@ Numeric cells use `mean +/- population standard deviation` across runs with the 
 
 | Experiment | Runs | Type | Active params | Total params | Dim | Layers | Heads | FFN/expert FFN | Experts/top-k | Final pass | Best ckpt pass | Final ppl | Final eval loss | Train loss | Mean TPS last 100 |
 | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `python_modern_moe_deep10_vocab2000_aux020` | 1 | modern_moe_gpt | 9,784,576 | 29,691,136 | 256 | 10 | 8 | 864 | 4/1 | 88.14% +/- 0.00 pp | 89.53% +/- 0.00 pp | 1.3825 +/- 0.0000 | 0.3239 +/- 0.0000 | 0.3877 +/- 0.0000 | 200,526 +/- 0 |
+| `python_modern_dense_active10m_vocab2000` | 1 | modern_dense_gpt | 9,737,280 | 9,737,280 | 320 | 6 | 8 | 1,152 | n/a | 86.86% +/- 0.00 pp | 87.75% +/- 0.00 pp | 1.4028 +/- 0.0000 | 0.3385 +/- 0.0000 | 0.4268 +/- 0.0000 | 499,215 +/- 0 |
 | `python_dense_active_9m6` | 1 | dense_gpt | 9,646,080 | 9,646,080 | 320 | 6 | 8 | 1,280 | n/a | 83.70% +/- 0.00 pp | 83.70% +/- 0.00 pp | 1.4824 +/- 0.0000 | 0.3937 +/- 0.0000 | 0.5566 +/- 0.0000 | 564,026 +/- 0 |
+| `python_modern_moe_vocab2000_aux020` | 1 | modern_moe_gpt | 986,608 | 2,663,920 | 112 | 4 | 4 | 416 | 4/1 | 69.37% +/- 0.00 pp | 69.86% +/- 0.00 pp | 1.9151 +/- 0.0000 | 0.6498 +/- 0.0000 | 0.9824 +/- 0.0000 | 947,960 +/- 0 |
+| `python_modern_moe_vocab2000_topk2_aux020` | 1 | modern_moe_gpt | 1,001,680 | 1,738,960 | 80 | 4 | 4 | 384 | 4/2 | 66.11% +/- 0.00 pp | 66.11% +/- 0.00 pp | 1.9307 +/- 0.0000 | 0.6579 +/- 0.0000 | 1.0391 +/- 0.0000 | 653,003 +/- 0 |
+| `python_modern_moe_vocab2000_topk2_aux010` | 1 | modern_moe_gpt | 1,001,680 | 1,738,960 | 80 | 4 | 4 | 384 | 4/2 | 65.51% +/- 0.00 pp | 66.01% +/- 0.00 pp | 1.9413 +/- 0.0000 | 0.6634 +/- 0.0000 | 1.0586 +/- 0.0000 | 653,077 +/- 0 |
+| `python_modern_moe_vocab2000_aux010` | 1 | modern_moe_gpt | 986,608 | 2,663,920 | 112 | 4 | 4 | 416 | 4/1 | 65.02% +/- 0.00 pp | 72.13% +/- 0.00 pp | 1.8634 +/- 0.0000 | 0.6224 +/- 0.0000 | 0.9551 +/- 0.0000 | 904,105 +/- 0 |
 | `python_modern_moe_vocab4000_aux010` | 2 | modern_moe_gpt | 976,224 | 2,303,328 | 96 | 4 | 4 | 384 | 4/1 | 61.61% +/- 0.15 pp | 65.56% +/- 1.93 pp | 2.0561 +/- 0.0096 | 0.7208 +/- 0.0047 | 1.1445 +/- 0.0078 | 968,138 +/- 65,164 |
 | `python_modern_moe_small_deep_plain` | 1 | modern_moe_gpt | 924,440 | 1,735,448 | 88 | 4 | 4 | 256 | 4/1 | 55.34% +/- 0.00 pp | 56.13% +/- 0.00 pp | 2.3490 +/- 0.0000 | 0.8540 +/- 0.0000 | 1.2539 +/- 0.0000 | 1,053,603 +/- 0 |
 | `python_modern_dense_vocab2000_param_match` | 2 | modern_dense_gpt | 977,536 | 977,536 | 128 | 2 | 4 | 768 | n/a | 49.56% +/- 0.44 pp | 50.64% +/- 0.64 pp | 2.3732 +/- 0.0058 | 0.8642 +/- 0.0024 | 1.2422 +/- 0.0000 | 2,810,513 +/- 125,373 |
@@ -85,7 +91,12 @@ Mean final pass rate against active parameter count.
 
 | Experiment | Runs | Final worst-layer dominance | Final worst-layer entropy | Observation |
 | --- | ---: | ---: | ---: | --- |
+| `python_modern_moe_deep10_vocab2000_aux020` | 1 | 0.7372 +/- 0.0000 | 0.5223 +/- 0.0000 | router usage less collapsed |
 | `python_modern_moe_small_deep_plain` | 1 | 0.5504 +/- 0.0000 | 0.6003 +/- 0.0000 | router usage less collapsed |
+| `python_modern_moe_vocab2000_aux010` | 1 | 0.7963 +/- 0.0000 | 0.4188 +/- 0.0000 | router usage less collapsed |
+| `python_modern_moe_vocab2000_aux020` | 1 | 0.9626 +/- 0.0000 | 0.1391 +/- 0.0000 | severe expert dominance |
+| `python_modern_moe_vocab2000_topk2_aux010` | 1 | 0.4078 +/- 0.0000 | 0.9216 +/- 0.0000 | router usage less collapsed |
+| `python_modern_moe_vocab2000_topk2_aux020` | 1 | 0.3757 +/- 0.0000 | 0.9559 +/- 0.0000 | router usage less collapsed |
 | `python_modern_moe_vocab4000_aux010` | 2 | 0.7363 +/- 0.0051 | 0.6179 +/- 0.0041 | router usage less collapsed |
 | `python_moe_small_deep_cosine_warmup_decay` | 1 | 0.9099 +/- 0.0000 | 0.2628 +/- 0.0000 | severe expert dominance |
 | `python_moe_small_deep_fim` | 1 | 0.9869 +/- 0.0000 | 0.0606 +/- 0.0000 | severe expert dominance |
@@ -96,7 +107,7 @@ Mean final pass rate against active parameter count.
 
 ## Interpretation
 
-`python_modern_moe_vocab4000_aux010` is the best small-model direction by aggregate final pass rate. Its checkpoint curve still matters: use the checkpoint plots to pick the full-evaluation checkpoint rather than assuming the final checkpoint is optimal.
+`python_modern_moe_vocab2000_aux020` is the best small-model direction by aggregate final pass rate. Its checkpoint curve still matters: use the checkpoint plots to pick the full-evaluation checkpoint rather than assuming the final checkpoint is optimal.
 
 Classic MoE runs with high router dominance should be treated as router-collapse experiments before scaling expert count. The modern MoE result is the stronger small-model branch in these runs.
 

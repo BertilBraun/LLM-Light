@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "llm-light"
 version = "0.1.0"
-description = "Small artifact-based LLM training pipeline"
+description = "Artifact-based PyTorch LLM training system for synthetic data generation, GPT/MoE experiments, distributed training, evaluation, and reproducible exports"
 requires-python = ">=3.10"
 dependencies = [
   "datasets>=2",
